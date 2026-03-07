@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import pytest
@@ -26,7 +27,7 @@ class _Provider(LLMProvider):
         temperature=0.7,
         reasoning_effort=None,
     ) -> LLMResponse:
-        self.messages.append(messages)
+        self.messages.append(copy.deepcopy(messages))
         self.temperatures.append(float(temperature))
         return LLMResponse(content="ok")
 

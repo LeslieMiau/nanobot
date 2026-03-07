@@ -7,6 +7,7 @@ import json
 import re
 import weakref
 from contextlib import AsyncExitStack
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -31,6 +32,16 @@ from nanobot.session.manager import Session, SessionManager
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, CodingConfig, ExecToolConfig, PersonaConfig, TokenGuardConfig
     from nanobot.cron.service import CronService
+
+
+@dataclass
+class _TurnExecutionState:
+    files_read: set[str] = field(default_factory=set)
+    files_edited: set[str] = field(default_factory=set)
+    commands_run: list[str] = field(default_factory=list)
+    edit_generation: int = 0
+    verification_generation: int = 0
+    verification_prompted: bool = False
 
 
 class AgentLoop:
@@ -377,11 +388,101 @@ class AgentLoop:
         self.model = requested_model
         self.subagents.model = requested_model
 
+    def _track_path(self, raw_path: Any) -> str | None:
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            return None
+        path = Path(raw_path).expanduser()
+        if not path.is_absolute():
+            path = self.workspace / path
+        try:
+            return str(path.resolve())
+        except Exception:
+            return str(path)
+
+    def _guard_coding_tool_call(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        turn_state: _TurnExecutionState,
+        *,
+        coding_enabled: bool,
+    ) -> str | None:
+        if not coding_enabled or not self.coding_config.enforce_read_before_write:
+            return None
+        if tool_name not in {"write_file", "edit_file"}:
+            return None
+
+        tracked_path = self._track_path(arguments.get("path"))
+        if not tracked_path:
+            return None
+
+        if tool_name == "write_file":
+            try:
+                if not Path(tracked_path).exists():
+                    return None
+            except Exception:
+                return None
+
+        if tracked_path in turn_state.files_read:
+            return None
+
+        return (
+            "Error: Coding mode requires reading a file before modifying it. "
+            f"Call `read_file` for `{arguments.get('path')}` first."
+        )
+
+    def _record_tool_execution(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        result: str,
+        turn_state: _TurnExecutionState,
+    ) -> None:
+        tracked_path = self._track_path(arguments.get("path"))
+        if tool_name == "read_file" and tracked_path and not result.startswith("Error:"):
+            turn_state.files_read.add(tracked_path)
+            return
+
+        if tool_name in {"write_file", "edit_file"} and tracked_path and not result.startswith("Error:"):
+            turn_state.files_edited.add(tracked_path)
+            turn_state.edit_generation += 1
+            return
+
+        if tool_name == "exec":
+            command = str(arguments.get("command", "")).strip()
+            if command:
+                turn_state.commands_run.append(command)
+            if turn_state.edit_generation > 0:
+                turn_state.verification_generation = turn_state.edit_generation
+
+    def _needs_verification_follow_up(
+        self,
+        turn_state: _TurnExecutionState,
+        *,
+        coding_enabled: bool,
+    ) -> bool:
+        return (
+            coding_enabled
+            and self.coding_config.require_verification_after_edits
+            and turn_state.edit_generation > turn_state.verification_generation
+            and not turn_state.verification_prompted
+        )
+
+    @staticmethod
+    def _verification_follow_up_message() -> str:
+        return (
+            "[Coding mode guard] You edited files in this turn but did not attempt verification.\n"
+            "Use the `exec` tool to run the narrowest relevant test/build/check, or reply with a clear "
+            "note explaining why verification could not be run and what remains unverified."
+        )
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
         temperature_override: float | None = None,
+        *,
+        coding_enabled: bool = False,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
@@ -389,6 +490,7 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
         temperature = self.temperature if temperature_override is None else temperature_override
+        turn_state = _TurnExecutionState()
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -439,7 +541,15 @@ class AgentLoop:
                     tools_used.append(tool_call.name)
                     args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                     logger.info("Tool call: {}({})", tool_call.name, args_str[:200])
-                    result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    result = self._guard_coding_tool_call(
+                        tool_call.name,
+                        tool_call.arguments,
+                        turn_state,
+                        coding_enabled=coding_enabled,
+                    )
+                    if result is None:
+                        result = await self.tools.execute(tool_call.name, tool_call.arguments)
+                    self._record_tool_execution(tool_call.name, tool_call.arguments, result, turn_state)
                     messages = self.context.add_tool_result(
                         messages, tool_call.id, tool_call.name, result
                     )
@@ -451,6 +561,10 @@ class AgentLoop:
                     logger.error("LLM returned error: {}", (clean or "")[:200])
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
+                if self._needs_verification_follow_up(turn_state, coding_enabled=coding_enabled):
+                    turn_state.verification_prompted = True
+                    messages.append({"role": "user", "content": self._verification_follow_up_message()})
+                    continue
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
                     thinking_blocks=response.thinking_blocks,
@@ -597,7 +711,9 @@ class AgentLoop:
                 coding_mode=coding_enabled,
             )
             final_content, _, all_msgs = await self._run_agent_loop(
-                messages, temperature_override=turn_temperature,
+                messages,
+                temperature_override=turn_temperature,
+                coding_enabled=coding_enabled,
             )
             final_content = await self._apply_persona_output_controls(
                 final_content,
@@ -862,6 +978,7 @@ class AgentLoop:
             initial_messages,
             on_progress=on_progress or _bus_progress,
             temperature_override=turn_temperature,
+            coding_enabled=coding_enabled,
         )
         final_content = await self._apply_persona_output_controls(
             final_content,
