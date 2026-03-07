@@ -63,6 +63,8 @@ def _validate_schedule_for_add(schedule: CronSchedule) -> None:
 class CronService:
     """Service for managing and executing scheduled jobs."""
 
+    _WATCH_INTERVAL_S = 0.2
+
     def __init__(
         self,
         store_path: Path,
@@ -73,21 +75,25 @@ class CronService:
         self._store: CronStore | None = None
         self._last_mtime: float = 0.0
         self._timer_task: asyncio.Task | None = None
+        self._watch_task: asyncio.Task | None = None
         self._running = False
 
     def _load_store(self) -> CronStore:
         """Load jobs from disk. Reloads automatically if file was modified externally."""
+        reloaded = False
         if self._store and self.store_path.exists():
             mtime = self.store_path.stat().st_mtime
             if mtime != self._last_mtime:
                 logger.info("Cron: jobs.json modified externally, reloading")
                 self._store = None
+                reloaded = True
         if self._store:
             return self._store
 
         if self.store_path.exists():
             try:
                 data = json.loads(self.store_path.read_text(encoding="utf-8"))
+                self._last_mtime = self.store_path.stat().st_mtime
                 jobs = []
                 for j in data.get("jobs", []):
                     jobs.append(CronJob(
@@ -124,6 +130,10 @@ class CronService:
                 self._store = CronStore()
         else:
             self._store = CronStore()
+
+        if reloaded and self._running:
+            self._recompute_next_runs()
+            self._arm_timer()
 
         return self._store
 
@@ -179,6 +189,7 @@ class CronService:
         self._recompute_next_runs()
         self._save_store()
         self._arm_timer()
+        self._start_watch_loop()
         logger.info("Cron service started with {} jobs", len(self._store.jobs if self._store else []))
 
     def stop(self) -> None:
@@ -187,6 +198,9 @@ class CronService:
         if self._timer_task:
             self._timer_task.cancel()
             self._timer_task = None
+        if self._watch_task:
+            self._watch_task.cancel()
+            self._watch_task = None
 
     def _recompute_next_runs(self) -> None:
         """Recompute next run times for all enabled jobs."""
@@ -223,6 +237,24 @@ class CronService:
                 await self._on_timer()
 
         self._timer_task = asyncio.create_task(tick())
+
+    def _start_watch_loop(self) -> None:
+        """Watch for external jobs.json changes so near-term jobs are picked up without restart."""
+        if self._watch_task:
+            self._watch_task.cancel()
+
+        async def watch():
+            while self._running:
+                try:
+                    self._load_store()
+                    await asyncio.sleep(self._WATCH_INTERVAL_S)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.warning("Cron watch loop error: {}", e)
+                    await asyncio.sleep(self._WATCH_INTERVAL_S)
+
+        self._watch_task = asyncio.create_task(watch())
 
     async def _on_timer(self) -> None:
         """Handle timer tick - run due jobs."""

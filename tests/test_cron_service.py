@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import pytest
 
@@ -57,5 +58,32 @@ async def test_running_service_honors_external_disable(tmp_path) -> None:
 
         await asyncio.sleep(0.35)
         assert called == []
+    finally:
+        service.stop()
+
+
+@pytest.mark.asyncio
+async def test_running_service_picks_up_external_new_job(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    called: list[str] = []
+
+    async def on_job(job) -> None:
+        called.append(job.id)
+
+    service = CronService(store_path, on_job=on_job)
+    await service.start()
+    try:
+        await asyncio.sleep(0.05)
+        external = CronService(store_path)
+        job = external.add_job(
+            name="external-add",
+            schedule=CronSchedule(kind="at", at_ms=int(time.time() * 1000) + 200),
+            message="hello",
+            delete_after_run=True,
+        )
+
+        await asyncio.sleep(0.5)
+        assert called == [job.id]
+        assert service.list_jobs(include_disabled=True) == []
     finally:
         service.stop()
