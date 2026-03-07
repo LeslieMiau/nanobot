@@ -52,6 +52,7 @@ def test_onboard_fresh_install(mock_paths):
     assert "nanobot is ready" in result.stdout
     assert config_file.exists()
     assert (workspace_dir / "AGENTS.md").exists()
+    assert (workspace_dir / "CONTENT_FACTORY.md").exists()
     assert (workspace_dir / "memory" / "MEMORY.md").exists()
 
 
@@ -93,7 +94,9 @@ def test_onboard_existing_workspace_safe_create(mock_paths):
     assert result.exit_code == 0
     assert "Created workspace" not in result.stdout
     assert "Created AGENTS.md" in result.stdout
+    assert "Created CONTENT_FACTORY.md" in result.stdout
     assert (workspace_dir / "AGENTS.md").exists()
+    assert (workspace_dir / "CONTENT_FACTORY.md").exists()
 
 
 def test_config_matches_github_copilot_codex_with_hyphen_prefix():
