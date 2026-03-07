@@ -7,12 +7,9 @@ description: Track the latest important AI news from selected X accounts, offici
 
 Use this skill when the user asks for latest AI news, an AI morning briefing, a daily AI digest, or wants updates from specific AI creators or official labs.
 
-## Sources
+## Source List
 
-Prioritize these sources:
-- X: Andrej Karpathy, 宝玉, Sam Altman
-- Official accounts and channels: OpenAI, Anthropic, Gemini on X, YouTube, and official blogs
-- Hacker News front page / hottest discussions
+Read [references/sources.md](references/sources.md) to get the current subscription list. Treat that file as the source registry for named people, official lab channels, and community-signal feeds.
 
 ## Workflow
 
@@ -26,6 +23,7 @@ Prioritize these sources:
 5. Use Hacker News to detect what the technical community is amplifying today, but do not treat HN discussion alone as the source of truth. When HN links to a third-party article, cite the original article first and HN second.
 6. Keep only important items. Ignore repetitive engagement bait, generic opinions, reposts, screenshots of posts, and minor product chatter without substance.
 7. If a claim cannot be verified from a source you can fetch, say so explicitly instead of guessing.
+8. When the user asks to add or remove a subscription source, update `references/sources.md` instead of hardcoding the source list into this file.
 
 ## Importance Filter
 

@@ -24,3 +24,18 @@ def test_workspace_ai_news_digest_skill_loads_content() -> None:
     assert 'cron_expr="0 8 * * *"' in content
     assert "today's hot items" in content
     assert "first-hand sources over quantity" in content
+
+
+def test_workspace_ai_news_digest_skill_references_sources_file() -> None:
+    workspace = Path(__file__).resolve().parents[1]
+    skill_path = workspace / "skills" / "ai-news-digest" / "SKILL.md"
+    sources_path = workspace / "skills" / "ai-news-digest" / "references" / "sources.md"
+
+    assert sources_path.exists()
+
+    skill_content = skill_path.read_text(encoding="utf-8")
+    sources_content = sources_path.read_text(encoding="utf-8")
+
+    assert "references/sources.md" in skill_content
+    assert "OpenAI" in sources_content
+    assert "Hacker News" in sources_content
