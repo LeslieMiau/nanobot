@@ -38,3 +38,4 @@ Update this file when adding or removing subscriptions. Keep entries first-hand 
 - Add a source only if it regularly produces first-hand AI information.
 - Remove low-signal feeds instead of letting the list grow without bound.
 - For named people, read selectively: only keep their professional AI-domain posts, not general chatter.
+- Evaluate hotness inside the active digest window. For the default morning run, that means the previous day 08:00 to the current day 08:00 Asia/Shanghai.

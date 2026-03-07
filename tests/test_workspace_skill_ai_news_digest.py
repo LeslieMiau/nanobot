@@ -22,7 +22,7 @@ def test_workspace_ai_news_digest_skill_loads_content() -> None:
     assert content is not None
     assert "Andrej Karpathy" in content
     assert 'cron_expr="0 8 * * *"' in content
-    assert "today's hot items" in content
+    assert "previous day 08:00 to the current day 08:00" in content
     assert "first-hand sources over quantity" in content
     assert "include only domain-relevant statements" in content
 
@@ -41,3 +41,4 @@ def test_workspace_ai_news_digest_skill_references_sources_file() -> None:
     assert "OpenAI" in sources_content
     assert "Hacker News" in sources_content
     assert "professional AI-domain posts" in sources_content
+    assert "previous day 08:00 to the current day 08:00" in sources_content

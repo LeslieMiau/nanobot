@@ -13,9 +13,9 @@ Read [references/sources.md](references/sources.md) to get the current subscript
 
 ## Workflow
 
-1. Gather today's hot items by default. Use Asia/Shanghai as the reporting date unless the user specifies another timezone.
+1. Gather items in the reporting window, not just the calendar day. For the default morning digest at 08:00 Asia/Shanghai, the window is from the previous day 08:00 to the current day 08:00.
 2. Prefer high-quality first-hand sources over quantity. Official blogs, official X posts, official YouTube uploads, original papers, and the original article itself outrank reposts, summaries, and aggregator commentary.
-3. Prefer items published on the current calendar date. If an item was published earlier, include it only when it is clearly trending today on Hacker News or the named X accounts, and label it as `旧文今日热议`.
+3. Prefer items published within the active reporting window. If an item was published earlier, include it only when it is clearly trending inside the current reporting window on Hacker News or the named X accounts, and label it as `旧文本时段热议`.
 4. Verify with primary sources first:
 - Official blog posts
 - Official YouTube channel uploads or release videos
@@ -29,7 +29,7 @@ Read [references/sources.md](references/sources.md) to get the current subscript
 ## Importance Filter
 
 Include an item only if both conditions hold:
-- It is hot today in Asia/Shanghai date terms, or it is explicitly marked `旧文今日热议`
+- It is hot inside the current reporting window, or it is explicitly marked `旧文本时段热议`
 - It satisfies at least one of the importance conditions below
 
 Importance conditions:
@@ -52,6 +52,7 @@ Use this structure:
 ## 1. 标题
 - 来源: source name
 - 时间: absolute date/time with timezone if available
+- 统计窗口: absolute start and end time for this digest
 - 要点: 1 to 2 sentences on what happened
 - 为什么重要: 1 sentence on impact
 - 链接: direct source URL
@@ -67,6 +68,7 @@ Use this structure:
 Rules:
 - Write in Chinese unless the user asks otherwise.
 - Use absolute dates like `2026-03-07 08:00 CST`, not "today" or "yesterday".
+- For scheduled morning digests, make the reporting window explicit, for example `统计窗口: 2026-03-07 08:00 CST -> 2026-03-08 08:00 CST`.
 - Include direct source links for every item.
 - Separate facts from inference. Label inference as `判断`.
 - Do not pad the briefing with older items just to reach a quota.
@@ -87,7 +89,7 @@ If the user asks to receive this automatically every morning, schedule it with `
 ```python
 cron(
     action="add",
-    message="Use the ai-news-digest skill to compile today's hot AI articles and posts in Asia/Shanghai time from Andrej Karpathy, 宝玉, Sam Altman, official OpenAI/Anthropic/Gemini X+YouTube+blogs, and Hacker News hot topics. Prioritize high-quality first-hand sources over quantity. Prefer same-day items; include older items only if they are clearly trending today and label them 旧文今日热议. Send a concise Chinese briefing with original source links, absolute timestamps, hotness attribution, and a short final takeaway.",
+    message="Use the ai-news-digest skill to compile the hot AI articles and posts in the reporting window from the previous day 08:00 to the current day 08:00 Asia/Shanghai time from Andrej Karpathy, 宝玉, Sam Altman, official OpenAI/Anthropic/Gemini X+YouTube+blogs, and Hacker News hot topics. Prioritize high-quality first-hand sources over quantity. Prefer items published inside that window; include older items only if they are clearly trending inside the same window and label them 旧文本时段热议. Send a concise Chinese briefing with the explicit reporting window, original source links, absolute timestamps, hotness attribution, and a short final takeaway.",
     cron_expr="0 8 * * *",
     tz="Asia/Shanghai",
 )
