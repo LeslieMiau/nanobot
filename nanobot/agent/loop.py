@@ -910,7 +910,7 @@ class AgentLoop:
                     replay,
                     session_key=key,
                     on_progress=on_progress,
-                    bypass_token_guard=bypass_token_guard,
+                    bypass_token_guard=True,
                     bypass_plan_guard=True,
                 )
             return OutboundMessage(
@@ -1094,6 +1094,30 @@ class AgentLoop:
             persona_runtime_hints=persona_hints,
             coding_mode=coding_enabled,
         )
+        if self.token_guard.enabled and not bypass_token_guard:
+            estimated = self._estimate_tokens(initial_messages)
+            if estimated >= self.token_guard.threshold_tokens:
+                self._token_guard_pending[key] = msg.content
+                extra = ""
+                if (
+                    coding_enabled
+                    and not bypass_plan_guard
+                    and self.coding_config.require_plan_for_large_changes
+                    and self._looks_like_large_change_request(msg.content)
+                ):
+                    extra = "\nAfter confirmation, larger coding changes may still require a brief plan before execution."
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=(
+                        "Token Guard: this task is estimated to use "
+                        f"~{estimated} tokens (threshold {self.token_guard.threshold_tokens}).\n"
+                        f"Reply `{self.token_guard.confirm_command}` to continue, or "
+                        f"`{self.token_guard.cancel_command}` to cancel."
+                        f"{extra}"
+                    ),
+                    metadata=msg.metadata or {},
+                )
         if (
             coding_enabled
             and not bypass_plan_guard
@@ -1112,21 +1136,6 @@ class AgentLoop:
                 content=plan_content,
                 metadata=msg.metadata or {},
             )
-        if self.token_guard.enabled and not bypass_token_guard:
-            estimated = self._estimate_tokens(initial_messages)
-            if estimated >= self.token_guard.threshold_tokens:
-                self._token_guard_pending[key] = msg.content
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=(
-                        "Token Guard: this task is estimated to use "
-                        f"~{estimated} tokens (threshold {self.token_guard.threshold_tokens}).\n"
-                        f"Reply `{self.token_guard.confirm_command}` to continue, or "
-                        f"`{self.token_guard.cancel_command}` to cancel."
-                    ),
-                    metadata=msg.metadata or {},
-                )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})

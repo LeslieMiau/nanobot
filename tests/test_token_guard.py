@@ -127,3 +127,67 @@ async def test_token_guard_pending_preserves_original_request(tmp_path: Path) ->
     assert resumed is not None
     assert resumed.content == "ok"
     assert provider.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_token_guard_runs_before_large_change_plan_guard(tmp_path: Path) -> None:
+    bus = MessageBus()
+
+    class _PlanningProvider(LLMProvider):
+        def __init__(self):
+            super().__init__(api_key=None, api_base=None)
+            self.calls = 0
+
+        async def chat(
+            self,
+            messages,
+            tools=None,
+            model=None,
+            max_tokens=4096,
+            temperature=0.7,
+            reasoning_effort=None,
+        ) -> LLMResponse:
+            self.calls += 1
+            return LLMResponse(
+                content="1. Inspect files\n2. Make changes\n3. Verify",
+            ) if self.calls == 1 else LLMResponse(content="ok")
+
+        def get_default_model(self) -> str:
+            return "dummy"
+
+    provider = _PlanningProvider()
+    loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=tmp_path,
+        model="dummy",
+        max_iterations=1,
+        token_guard_config=TokenGuardConfig(
+            enabled=True,
+            threshold_tokens=10,
+            confirm_command="/confirm",
+            cancel_command="/cancel",
+        ),
+    )
+    request = "请重构整个 agent loop 并清理多文件结构 " + ("A" * 300)
+
+    blocked = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content=request)
+    )
+    assert blocked is not None
+    assert "Token Guard" in blocked.content
+    assert provider.calls == 0
+
+    planned = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/confirm")
+    )
+    assert planned is not None
+    assert "Inspect files" in planned.content
+    assert provider.calls == 1
+
+    resumed = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/confirm")
+    )
+    assert resumed is not None
+    assert resumed.content == "ok"
+    assert provider.calls == 2
