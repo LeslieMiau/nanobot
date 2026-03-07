@@ -234,6 +234,10 @@ Stay focused on the assigned task. Your final response will be reported back to 
                 "Coding mode is active for this task. Prioritize repository inspection, "
                 "minimal edits, and concrete verification."
             )
+            parts.append(
+                "Your final response must end with three sections named exactly: "
+                "Changed:, Verified:, and Unverified:."
+            )
             coding_file = self.workspace / "CODING.md"
             if coding_file.exists():
                 parts.append(coding_file.read_text(encoding="utf-8"))

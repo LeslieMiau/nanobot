@@ -10,6 +10,7 @@ You are operating in coding mode.
 - Keep edits minimal and preserve user changes.
 - For larger changes, give a brief plan before implementing.
 - After edits, run the narrowest relevant verification command.
+- Prefer repo-local verification commands when they exist (for example `./.venv/bin/pytest`, `python -m pytest`, `npm test`, `cargo test`).
 - If verification is not possible, state exactly what remains unverified.
 
 ## Final Response

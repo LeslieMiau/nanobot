@@ -100,7 +100,10 @@ async def test_coding_guard_allows_edit_after_read_and_verification(tmp_path: Pa
     )
 
     assert out is not None
-    assert out.content == "updated"
+    assert out.content.startswith("updated")
+    assert "Changed:\n- demo.py" in out.content
+    assert "Verified:\n- `printf verification`" in out.content
+    assert "Unverified:\n- None noted." in out.content
     assert target.read_text(encoding="utf-8") == "print('new')\n"
     assert provider.calls == 4
 
@@ -128,7 +131,8 @@ async def test_coding_guard_requests_verification_after_edit(tmp_path: Path) -> 
     )
 
     assert out is not None
-    assert out.content == "done; verification not run because no local test command is available"
+    assert out.content.startswith("done; verification not run because no local test command is available")
+    assert "Unverified:\n- Edits were not verified with an exec command." in out.content
     assert provider.calls == 4
     assert "[Coding mode guard]" in provider.messages[3][-1]["content"]
 
@@ -156,6 +160,7 @@ async def test_coding_guard_accepts_failed_verification_attempt(tmp_path: Path) 
     )
 
     assert out is not None
-    assert out.content == "updated; verification failed because the command was unavailable"
+    assert out.content.startswith("updated; verification failed because the command was unavailable")
+    assert "Verification command reported a problem" in out.content
     assert target.read_text(encoding="utf-8") == "print('new')\n"
     assert provider.calls == 4

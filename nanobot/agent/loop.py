@@ -39,6 +39,7 @@ class _TurnExecutionState:
     files_read: set[str] = field(default_factory=set)
     files_edited: set[str] = field(default_factory=set)
     commands_run: list[str] = field(default_factory=list)
+    verification_notes: list[str] = field(default_factory=list)
     edit_generation: int = 0
     verification_generation: int = 0
     verification_prompted: bool = False
@@ -508,6 +509,10 @@ class AgentLoop:
                 turn_state.commands_run.append(command)
             if turn_state.edit_generation > 0:
                 turn_state.verification_generation = turn_state.edit_generation
+                if result.startswith("Error:") or "\nExit code:" in result:
+                    turn_state.verification_notes.append(
+                        f"Verification command reported a problem: `{command or 'exec'}`"
+                    )
 
     def _needs_verification_follow_up(
         self,
@@ -537,8 +542,8 @@ class AgentLoop:
         temperature_override: float | None = None,
         *,
         coding_enabled: bool = False,
-    ) -> tuple[str | None, list[str], list[dict]]:
-        """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
+    ) -> tuple[str | None, list[str], list[dict], _TurnExecutionState]:
+        """Run the agent iteration loop. Returns (final_content, tools_used, messages, turn_state)."""
         messages = initial_messages
         iteration = 0
         final_content = None
@@ -633,7 +638,55 @@ class AgentLoop:
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
-        return final_content, tools_used, messages
+        return final_content, tools_used, messages, turn_state
+
+    def _display_path(self, path_str: str) -> str:
+        path = Path(path_str)
+        try:
+            return str(path.relative_to(self.workspace))
+        except ValueError:
+            return str(path)
+
+    def _apply_coding_summary(
+        self,
+        content: str | None,
+        turn_state: _TurnExecutionState,
+        *,
+        coding_enabled: bool,
+    ) -> str | None:
+        if not content or not coding_enabled:
+            return content
+        if not (turn_state.files_edited or turn_state.commands_run or turn_state.verification_notes):
+            return content
+        lowered = content.lower()
+        if all(label in lowered for label in ("changed:", "verified:", "unverified:")):
+            return content
+
+        changed = (
+            "\n".join(f"- {self._display_path(path)}" for path in sorted(turn_state.files_edited))
+            if turn_state.files_edited
+            else "- No files changed."
+        )
+        verified = (
+            "\n".join(f"- `{cmd}`" for cmd in turn_state.commands_run)
+            if turn_state.commands_run
+            else "- No verification command recorded."
+        )
+
+        unverified_items: list[str] = []
+        if turn_state.files_edited and turn_state.verification_generation < turn_state.edit_generation:
+            unverified_items.append("- Edits were not verified with an exec command.")
+        if turn_state.verification_notes:
+            unverified_items.extend(f"- {note}" for note in turn_state.verification_notes)
+        if not unverified_items:
+            unverified_items.append("- None noted.")
+
+        summary = (
+            f"\n\nChanged:\n{changed}\n\n"
+            f"Verified:\n{verified}\n\n"
+            f"Unverified:\n" + "\n".join(unverified_items)
+        )
+        return content.rstrip() + summary
 
     async def _apply_persona_output_controls(
         self,
@@ -765,7 +818,7 @@ class AgentLoop:
                 persona_runtime_hints=persona_hints,
                 coding_mode=coding_enabled,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(
+            final_content, _, all_msgs, turn_state = await self._run_agent_loop(
                 messages,
                 temperature_override=turn_temperature,
                 coding_enabled=coding_enabled,
@@ -773,6 +826,11 @@ class AgentLoop:
             final_content = await self._apply_persona_output_controls(
                 final_content,
                 all_msgs,
+                coding_enabled=coding_enabled,
+            )
+            final_content = self._apply_coding_summary(
+                final_content,
+                turn_state,
                 coding_enabled=coding_enabled,
             )
             self._save_turn(session, all_msgs, 1 + len(history))
@@ -1067,7 +1125,7 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, _, all_msgs, turn_state = await self._run_agent_loop(
             initial_messages,
             on_progress=on_progress or _bus_progress,
             temperature_override=turn_temperature,
@@ -1076,6 +1134,11 @@ class AgentLoop:
         final_content = await self._apply_persona_output_controls(
             final_content,
             all_msgs,
+            coding_enabled=coding_enabled,
+        )
+        final_content = self._apply_coding_summary(
+            final_content,
+            turn_state,
             coding_enabled=coding_enabled,
         )
 

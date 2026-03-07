@@ -58,7 +58,7 @@ async def test_run_agent_loop_uses_temperature_override() -> None:
     loop.max_tokens = 256
     loop.reasoning_effort = None
 
-    final, _, _ = await loop._run_agent_loop(
+    final, _, _, _ = await loop._run_agent_loop(
         initial_messages=[{"role": "system", "content": "s"}, {"role": "user", "content": "u"}],
         temperature_override=0.66,
     )
