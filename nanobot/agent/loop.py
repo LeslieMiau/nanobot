@@ -46,7 +46,13 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 500
-    _RESTART_ALIASES = {"重启", "重新启动", "restart"}
+    _COMMAND_ALIASES: dict[str, set[str]] = {
+        "/start": {"/start", "start", "开始", "启动"},
+        "/new": {"/new", "new", "新会话", "新建会话", "重新开始", "重开"},
+        "/help": {"/help", "help", "帮助", "命令"},
+        "/stop": {"/stop", "stop", "停止", "停下", "停止任务"},
+        "/restart": {"/restart", "restart", "重启", "重新启动"},
+    }
     _SHINCHAN_WELCOME = "哟～你来啦！我是 nanobot 小新版，今天也一起把事情搞定吧～"
 
     def __init__(
@@ -210,6 +216,15 @@ class AgentLoop:
         # Rough heuristic for mixed CJK/English prompts.
         return max(1, (total_chars + 2) // 3)
 
+    @classmethod
+    def _normalize_user_command(cls, content: str) -> str:
+        """Normalize command aliases (Chinese/English) to canonical slash commands."""
+        cmd = content.strip().lower()
+        for canonical, aliases in cls._COMMAND_ALIASES.items():
+            if cmd in aliases:
+                return canonical
+        return cmd
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -335,7 +350,7 @@ class AgentLoop:
             except asyncio.TimeoutError:
                 continue
 
-            if msg.content.strip().lower() == "/stop":
+            if self._normalize_user_command(msg.content) == "/stop":
                 await self._handle_stop(msg)
             else:
                 task = asyncio.create_task(self._dispatch(msg))
@@ -433,11 +448,13 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
 
         # Slash commands
-        cmd = msg.content.strip().lower()
-        if cmd in self._RESTART_ALIASES:
-            cmd = "/restart"
+        cmd = self._normalize_user_command(msg.content)
         confirm_cmd = self.token_guard.confirm_command.strip().lower()
         cancel_cmd = self.token_guard.cancel_command.strip().lower()
+        if cmd == confirm_cmd.lstrip("/"):
+            cmd = confirm_cmd
+        if cmd == cancel_cmd.lstrip("/"):
+            cmd = cancel_cmd
         if cmd == confirm_cmd:
             pending = self._token_guard_pending.pop(key, None)
             if not pending:
