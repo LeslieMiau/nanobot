@@ -29,7 +29,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, PersonaConfig, TokenGuardConfig
+    from nanobot.config.schema import ChannelsConfig, CodingConfig, ExecToolConfig, PersonaConfig, TokenGuardConfig
     from nanobot.cron.service import CronService
 
 
@@ -53,9 +53,25 @@ class AgentLoop:
         "/stop": {"/stop", "stop", "停止", "停下", "停止任务"},
         "/restart": {"/restart", "restart", "重启", "重新启动"},
         "/model": {"/model", "model", "模型", "切换模型"},
+        "/coding": {"/coding", "coding", "代码模式", "编码模式"},
     }
     _TOKEN_GUARD_EXIT_ALIASES = {"exit", "quit", "/exit", "/quit", ":q", "退出", "退出吧", "结束"}
     _SHINCHAN_WELCOME = "哟～你来啦！我是 nanobot 小新版，今天也一起把事情搞定吧～"
+    _CODING_SESSION_MODES = {"auto", "on", "off"}
+    _CODING_KEYWORDS = (
+        "code", "coding", "implement", "implementation", "fix", "bug", "debug", "refactor",
+        "test", "tests", "compile", "build", "error", "stack trace", "exception",
+        "代码", "编码", "实现", "修复", "报错", "错误", "测试", "重构", "编译", "构建",
+    )
+    _REPO_KEYWORDS = (
+        "repo", "repository", "workspace", "project", "git", "commit", "branch", "pr",
+        "仓库", "工程", "项目", "分支", "提交", "文件", "目录", "路径",
+    )
+    _REPO_MARKERS = (".git", "pyproject.toml", "package.json", "Cargo.toml", "go.mod", "Makefile")
+    _SHELL_COMMAND_PREFIXES = (
+        "git ", "pytest", "npm ", "pnpm ", "yarn ", "uv ", "python ", "pip ",
+        "cargo ", "go ", "make", "cmake", "docker ", "kubectl ", "mvn ", "gradle ", "bun ",
+    )
 
     def __init__(
         self,
@@ -78,11 +94,12 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         persona_config: PersonaConfig | None = None,
         token_guard_config: TokenGuardConfig | None = None,
+        coding_config: CodingConfig | None = None,
         restart_callback: Callable[[], Awaitable[None]] | None = None,
         provider_name: str | None = None,
         provider_switcher: Callable[[str | None], tuple[LLMProvider, str, str | None]] | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig, TokenGuardConfig
+        from nanobot.config.schema import CodingConfig, ExecToolConfig, TokenGuardConfig
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -101,6 +118,7 @@ class AgentLoop:
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.token_guard = token_guard_config or TokenGuardConfig()
+        self.coding_config = coding_config or CodingConfig()
         self.persona = PersonaEngine(persona_config)
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -122,6 +140,7 @@ class AgentLoop:
             web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
+            coding_config=self.coding_config,
         )
 
         self._running = False
@@ -177,12 +196,74 @@ class AgentLoop:
         finally:
             self._mcp_connecting = False
 
-    def _set_tool_context(self, channel: str, chat_id: str, message_id: str | None = None) -> None:
+    def _set_tool_context(
+        self,
+        channel: str,
+        chat_id: str,
+        message_id: str | None = None,
+        *,
+        coding_enabled: bool = False,
+    ) -> None:
         """Update context for all tools that need routing info."""
         for name in ("message", "spawn", "cron"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
-                    tool.set_context(channel, chat_id, *([message_id] if name == "message" else []))
+                    if name == "message":
+                        tool.set_context(channel, chat_id, message_id)
+                    elif name == "spawn":
+                        tool.set_context(channel, chat_id, coding_enabled=coding_enabled)
+                    else:
+                        tool.set_context(channel, chat_id)
+
+    @classmethod
+    def _session_coding_mode(cls, session: Session) -> str:
+        mode = str(session.metadata.get("coding_mode", "auto")).strip().lower()
+        return mode if mode in cls._CODING_SESSION_MODES else "auto"
+
+    def _workspace_has_repo_markers(self) -> bool:
+        return any((self.workspace / marker).exists() for marker in self._REPO_MARKERS)
+
+    @classmethod
+    def _looks_like_shell_command(cls, text: str) -> bool:
+        lowered = text.strip().lower()
+        return any(lowered.startswith(prefix) for prefix in cls._SHELL_COMMAND_PREFIXES)
+
+    @classmethod
+    def _looks_like_path_or_code(cls, text: str) -> bool:
+        if "```" in text:
+            return True
+        if re.search(r"(?:^|\s)(?:\./|\.\./|/)?[\w.-]+/[\w./-]+", text):
+            return True
+        return bool(
+            re.search(r"\b[\w./-]+\.(?:py|ts|tsx|js|jsx|json|toml|ya?ml|md|rs|go|java|c|cc|cpp|h)\b", text)
+        )
+
+    @classmethod
+    def _looks_like_coding_request(cls, text: str) -> bool:
+        lowered = text.lower()
+        if any(keyword in lowered for keyword in cls._CODING_KEYWORDS):
+            return True
+        if any(keyword in lowered for keyword in cls._REPO_KEYWORDS):
+            return True
+        if cls._looks_like_shell_command(text):
+            return True
+        return cls._looks_like_path_or_code(text)
+
+    def _resolve_coding_mode(self, session: Session, user_text: str) -> tuple[str, bool]:
+        setting = self._session_coding_mode(session)
+        if not self.coding_config.enabled:
+            return setting, False
+        if setting == "on":
+            return setting, True
+        if setting == "off":
+            return setting, False
+        if not self.coding_config.auto_detect:
+            return setting, False
+        if self._looks_like_coding_request(user_text):
+            return setting, True
+        return setting, self._workspace_has_repo_markers() and any(
+            token in user_text.lower() for token in ("help me", "帮我", "请你", "how do i", "怎么", "如何")
+        )
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -486,7 +567,13 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
-            self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
+            _, coding_enabled = self._resolve_coding_mode(session, msg.content)
+            self._set_tool_context(
+                channel,
+                chat_id,
+                msg.metadata.get("message_id"),
+                coding_enabled=coding_enabled,
+            )
             history = session.get_history(max_messages=self.memory_window)
             persona_hints = self.persona.build_runtime_hints(msg.content)
             turn_temperature = self.persona.recommended_temperature(msg.content, self.temperature)
@@ -645,6 +732,48 @@ class AgentLoop:
                 chat_id=msg.chat_id,
                 content=f"Model switched to: `{self.model}` (provider: `{self.provider_name or 'unknown'}`)",
             )
+        if cmd == "/coding":
+            arg = cmd_arg.strip().lower()
+            if not self.coding_config.enabled:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="Coding mode is disabled in config.",
+                )
+            if arg in {"", "status"}:
+                setting, _ = self._resolve_coding_mode(session, "")
+                workspace_repo = "yes" if self._workspace_has_repo_markers() else "no"
+                active_desc = (
+                    "always active"
+                    if setting == "on"
+                    else "always off"
+                    if setting == "off"
+                    else "auto-detected per request"
+                )
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=(
+                        f"Coding mode setting: `{setting}`\n"
+                        f"Auto-detect: `{self.coding_config.auto_detect}`\n"
+                        f"Workspace looks like repo: `{workspace_repo}`\n"
+                        f"Current behavior: {active_desc}\n"
+                        "Use `/coding on`, `/coding off`, or `/coding auto`."
+                    ),
+                )
+            if arg not in self._CODING_SESSION_MODES:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="Usage: `/coding status|on|off|auto`",
+                )
+            session.metadata["coding_mode"] = arg
+            self.sessions.save(session)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"Coding mode set to: `{arg}`",
+            )
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
@@ -664,7 +793,13 @@ class AgentLoop:
             _task = asyncio.create_task(_consolidate_and_unlock())
             self._consolidation_tasks.add(_task)
 
-        self._set_tool_context(msg.channel, msg.chat_id, msg.metadata.get("message_id"))
+        _, coding_enabled = self._resolve_coding_mode(session, msg.content)
+        self._set_tool_context(
+            msg.channel,
+            msg.chat_id,
+            msg.metadata.get("message_id"),
+            coding_enabled=coding_enabled,
+        )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()

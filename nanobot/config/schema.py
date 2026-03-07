@@ -256,6 +256,16 @@ class TokenGuardConfig(Base):
     cancel_command: str = "/cancel"
 
 
+class CodingConfig(Base):
+    """Coding-mode behavior controls."""
+
+    enabled: bool = True
+    auto_detect: bool = True
+    disable_persona: bool = True
+    enforce_read_before_write: bool = True
+    require_verification_after_edits: bool = True
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -271,6 +281,7 @@ class AgentDefaults(Base):
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
     persona: PersonaConfig = Field(default_factory=PersonaConfig)
     token_guard: TokenGuardConfig = Field(default_factory=TokenGuardConfig)
+    coding: CodingConfig = Field(default_factory=CodingConfig)
 
 
 class AgentsConfig(Base):

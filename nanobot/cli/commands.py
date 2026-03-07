@@ -304,6 +304,7 @@ def gateway(
         channels_config=config.channels,
         persona_config=config.agents.defaults.persona,
         token_guard_config=config.agents.defaults.token_guard,
+        coding_config=config.agents.defaults.coding,
         restart_callback=request_restart,
         provider_name=default_provider_name,
         provider_switcher=provider_switcher,
@@ -561,6 +562,7 @@ def agent(
         channels_config=config.channels,
         persona_config=config.agents.defaults.persona,
         token_guard_config=config.agents.defaults.token_guard,
+        coding_config=config.agents.defaults.coding,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
