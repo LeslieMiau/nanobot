@@ -46,6 +46,7 @@ class AgentLoop:
     """
 
     _TOOL_RESULT_MAX_CHARS = 500
+    _RESTART_ALIASES = {"重启", "重新启动", "restart"}
 
     def __init__(
         self,
@@ -432,6 +433,8 @@ class AgentLoop:
 
         # Slash commands
         cmd = msg.content.strip().lower()
+        if cmd in self._RESTART_ALIASES:
+            cmd = "/restart"
         confirm_cmd = self.token_guard.confirm_command.strip().lower()
         cancel_cmd = self.token_guard.cancel_command.strip().lower()
         if cmd == confirm_cmd:

@@ -59,3 +59,16 @@ async def test_restart_command_calls_callback(tmp_path: Path) -> None:
     cb.assert_awaited_once()
     assert out is not None
     assert out.content == "Restarting nanobot..."
+
+
+@pytest.mark.asyncio
+async def test_restart_alias_in_chinese_calls_callback(tmp_path: Path) -> None:
+    cb = AsyncMock()
+    loop = _make_loop(tmp_path, restart_callback=cb)
+    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="重启")
+
+    out = await loop._process_message(msg)
+
+    cb.assert_awaited_once()
+    assert out is not None
+    assert out.content == "Restarting nanobot..."
