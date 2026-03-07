@@ -281,8 +281,9 @@ def gateway(
     from nanobot.channels.manager import ChannelManager
     from nanobot.config.loader import load_config
     from nanobot.cron.service import CronService
-    from nanobot.cron.types import CronJob
+    from nanobot.cron.types import CronJob, CronSchedule
     from nanobot.heartbeat.service import HeartbeatService
+    from nanobot.repo_sync.service import sync_fork_once
     from nanobot.session.manager import SessionManager
 
     if verbose:
@@ -304,6 +305,8 @@ def gateway(
     # Use workspace path for per-instance cron store
     cron_store_path = config.workspace_path / "cron" / "jobs.json"
     cron = CronService(cron_store_path)
+    repo_sync_cfg = config.gateway.repo_sync
+    repo_sync_marker = "__repo_sync__::"
 
     # Create agent with cron service
     agent = AgentLoop(
@@ -324,11 +327,25 @@ def gateway(
         session_manager=session_manager,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        persona_config=config.agents.defaults.persona,
     )
 
     # Set cron callback (needs agent)
     async def on_cron_job(job: CronJob) -> str | None:
         """Execute a cron job through the agent."""
+        if job.payload.message.startswith(repo_sync_marker):
+            if not repo_sync_cfg.enabled:
+                return "Repo sync skipped: feature is disabled in config."
+            return await sync_fork_once(
+                repo_path=repo_sync_cfg.repo_path,
+                branch=repo_sync_cfg.branch,
+                upstream_remote=repo_sync_cfg.upstream_remote,
+                upstream_url=repo_sync_cfg.upstream_url,
+                push_remote=repo_sync_cfg.push_remote,
+                auto_push=repo_sync_cfg.auto_push,
+                allow_dirty_worktree=repo_sync_cfg.allow_dirty_worktree,
+            )
+
         from nanobot.agent.tools.cron import CronTool
         from nanobot.agent.tools.message import MessageTool
         reminder_note = (
@@ -366,6 +383,44 @@ def gateway(
             ))
         return response
     cron.on_job = on_cron_job
+
+    if repo_sync_cfg.enabled:
+        desired_schedule = CronSchedule(
+            kind="cron",
+            expr=repo_sync_cfg.cron_expr,
+            tz=repo_sync_cfg.tz,
+        )
+        desired_message = (
+            f"{repo_sync_marker}{repo_sync_cfg.repo_path}::{repo_sync_cfg.branch}"
+        )
+        repo_jobs = [
+            j for j in cron.list_jobs(include_disabled=True)
+            if j.payload.message.startswith(repo_sync_marker)
+        ]
+        matched = next(
+            (
+                j for j in repo_jobs
+                if j.payload.message == desired_message
+                and j.schedule.kind == "cron"
+                and j.schedule.expr == desired_schedule.expr
+                and j.schedule.tz == desired_schedule.tz
+                and j.enabled
+            ),
+            None,
+        )
+        if not matched:
+            for job in repo_jobs:
+                cron.remove_job(job.id)
+            cron.add_job(
+                name=f"Repo sync ({repo_sync_cfg.branch})",
+                schedule=desired_schedule,
+                message=desired_message,
+                deliver=False,
+            )
+            console.print(
+                f"[green]✓[/green] Repo sync schedule installed: "
+                f"{repo_sync_cfg.cron_expr} ({repo_sync_cfg.tz})"
+            )
 
     # Create channel manager
     channels = ChannelManager(config, bus)
@@ -506,6 +561,7 @@ def agent(
         restrict_to_workspace=config.tools.restrict_to_workspace,
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
+        persona_config=config.agents.defaults.persona,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on
@@ -847,6 +903,13 @@ def status():
         from nanobot.providers.registry import PROVIDERS
 
         console.print(f"Model: {config.agents.defaults.model}")
+        persona = config.agents.defaults.persona
+        console.print(
+            "Persona: "
+            f"{persona.mode} "
+            f"(dialect={persona.dialect}, script={persona.script}, "
+            f"intensity={persona.intensity}, quoteRetrieval={persona.quote_retrieval})"
+        )
 
         # Check API keys from registry
         for spec in PROVIDERS:
