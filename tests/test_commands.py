@@ -128,3 +128,24 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_config_forced_aicodewith_provider_uses_default_gateway_base():
+    config = Config()
+    config.agents.defaults.provider = "aicodewith"
+    config.agents.defaults.model = "gpt-4.1"
+    config.providers.aicodewith.api_key = "test-key"
+
+    assert config.get_provider_name() == "aicodewith"
+    assert config.get_api_base() == "https://api.aicodewith.com/v1"
+
+
+def test_litellm_provider_resolves_aicodewith_as_openai_gateway():
+    provider = LiteLLMProvider(
+        default_model="anthropic/claude-sonnet-4-5",
+        provider_name="aicodewith",
+    )
+
+    resolved = provider._resolve_model("anthropic/claude-sonnet-4-5")
+
+    assert resolved == "openai/claude-sonnet-4-5"
