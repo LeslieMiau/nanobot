@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 
@@ -218,6 +218,35 @@ class ChannelsConfig(Base):
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
+class PersonaConfig(Base):
+    """Persona/styling configuration."""
+
+    mode: Literal["default", "shinchan_tw_s1"] = "default"
+    dialect: Literal["tw_s1"] = "tw_s1"
+    script: Literal["simplified", "traditional"] = "simplified"
+    intensity: Literal["adaptive", "high", "medium"] = "adaptive"
+    quote_retrieval: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_language_to_script(cls, data):
+        """Backward-compatible migration: legacy `language` -> `script`."""
+        if not isinstance(data, dict):
+            return data
+        if "script" in data and data["script"]:
+            return data
+
+        legacy = str(data.get("language", "")).strip().lower()
+        if not legacy:
+            return data
+
+        if legacy in {"zh-tw", "zh_hant", "traditional", "繁体", "繁體"}:
+            data["script"] = "traditional"
+        elif legacy in {"zh-cn", "zh_hans", "simplified", "简体", "簡體"}:
+            data["script"] = "simplified"
+        return data
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -231,6 +260,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    persona: PersonaConfig = Field(default_factory=PersonaConfig)
 
 
 class AgentsConfig(Base):
@@ -277,12 +307,28 @@ class HeartbeatConfig(Base):
     interval_s: int = 30 * 60  # 30 minutes
 
 
+class RepoSyncConfig(Base):
+    """Repository fork auto-sync configuration."""
+
+    enabled: bool = False
+    repo_path: str = "."  # Local git repository path
+    branch: str = "main"
+    upstream_remote: str = "upstream"
+    upstream_url: str = "https://github.com/HKUDS/nanobot.git"
+    push_remote: str = "origin"
+    auto_push: bool = True
+    allow_dirty_worktree: bool = False
+    cron_expr: str = "0 9 * * *"  # Every day at 09:00
+    tz: str = "Asia/Shanghai"
+
+
 class GatewayConfig(Base):
     """Gateway/server configuration."""
 
     host: str = "0.0.0.0"
     port: int = 18790
     heartbeat: HeartbeatConfig = Field(default_factory=HeartbeatConfig)
+    repo_sync: RepoSyncConfig = Field(default_factory=RepoSyncConfig)
 
 
 class WebSearchConfig(Base):

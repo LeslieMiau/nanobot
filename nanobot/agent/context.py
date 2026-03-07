@@ -24,9 +24,16 @@ class ContextBuilder:
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+    def build_system_prompt(
+        self,
+        skill_names: list[str] | None = None,
+        persona_runtime_hints: str | None = None,
+    ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
+
+        if persona_runtime_hints:
+            parts.append(f"# Persona Runtime Directive\n\n{persona_runtime_hints}")
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
@@ -111,6 +118,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
+        persona_runtime_hints: str | None = None,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id)
@@ -124,7 +132,13 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
 
         return [
-            {"role": "system", "content": self.build_system_prompt(skill_names)},
+            {
+                "role": "system",
+                "content": self.build_system_prompt(
+                    skill_names=skill_names,
+                    persona_runtime_hints=persona_runtime_hints,
+                ),
+            },
             *history,
             {"role": "user", "content": merged},
         ]

@@ -63,3 +63,18 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "Channel: cli" in user_content
     assert "Chat ID: direct" in user_content
     assert "Return exactly: OK" in user_content
+
+
+def test_persona_runtime_hints_are_injected_into_system_prompt(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    messages = builder.build_messages(
+        history=[],
+        current_message="你好",
+        persona_runtime_hints="文字要求：最终输出必须全部使用简体中文。",
+    )
+
+    assert messages[0]["role"] == "system"
+    assert "Persona Runtime Directive" in messages[0]["content"]
+    assert "最终输出必须全部使用简体中文" in messages[0]["content"]

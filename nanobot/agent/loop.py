@@ -24,11 +24,12 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.persona.engine import PersonaEngine
 from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, PersonaConfig
     from nanobot.cron.service import CronService
 
 
@@ -65,6 +66,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        persona_config: PersonaConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig
         self.bus = bus
@@ -80,6 +82,7 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
+        self.persona = PersonaEngine(persona_config)
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
@@ -181,12 +184,14 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
+        temperature_override: float | None = None,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        temperature = self.temperature if temperature_override is None else temperature_override
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -195,7 +200,7 @@ class AgentLoop:
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=self.model,
-                temperature=self.temperature,
+                temperature=temperature,
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
             )
@@ -264,6 +269,29 @@ class AgentLoop:
             )
 
         return final_content, tools_used, messages
+
+    async def _apply_persona_output_controls(
+        self,
+        content: str | None,
+        all_messages: list[dict[str, Any]],
+    ) -> str | None:
+        """Apply persona postprocessing (e.g. script normalization) to final text."""
+        if not content:
+            return content
+
+        normalized = await self.persona.normalize_output(
+            text=content,
+            provider=self.provider,
+            model=self.model,
+            max_tokens=self.max_tokens,
+            reasoning_effort=self.reasoning_effort,
+        )
+        if normalized != content:
+            for msg in reversed(all_messages):
+                if msg.get("role") == "assistant" and not msg.get("tool_calls"):
+                    msg["content"] = normalized
+                    break
+        return normalized
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -352,11 +380,16 @@ class AgentLoop:
             session = self.sessions.get_or_create(key)
             self._set_tool_context(channel, chat_id, msg.metadata.get("message_id"))
             history = session.get_history(max_messages=self.memory_window)
+            persona_hints = self.persona.build_runtime_hints(msg.content)
+            turn_temperature = self.persona.recommended_temperature(msg.content, self.temperature)
             messages = self.context.build_messages(
-                history=history,
-                current_message=msg.content, channel=channel, chat_id=chat_id,
+                history=history, current_message=msg.content, channel=channel, chat_id=chat_id,
+                persona_runtime_hints=persona_hints,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs = await self._run_agent_loop(
+                messages, temperature_override=turn_temperature,
+            )
+            final_content = await self._apply_persona_output_controls(final_content, all_msgs)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -426,11 +459,14 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.memory_window)
+        persona_hints = self.persona.build_runtime_hints(msg.content)
+        turn_temperature = self.persona.recommended_temperature(msg.content, self.temperature)
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
+            persona_runtime_hints=persona_hints,
         )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -442,8 +478,11 @@ class AgentLoop:
             ))
 
         final_content, _, all_msgs = await self._run_agent_loop(
-            initial_messages, on_progress=on_progress or _bus_progress,
+            initial_messages,
+            on_progress=on_progress or _bus_progress,
+            temperature_override=turn_temperature,
         )
+        final_content = await self._apply_persona_output_controls(final_content, all_msgs)
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."
