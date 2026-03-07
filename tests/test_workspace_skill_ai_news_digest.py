@@ -22,3 +22,4 @@ def test_workspace_ai_news_digest_skill_loads_content() -> None:
     assert content is not None
     assert "Andrej Karpathy" in content
     assert 'cron_expr="0 8 * * *"' in content
+    assert "same-day hot items" in content

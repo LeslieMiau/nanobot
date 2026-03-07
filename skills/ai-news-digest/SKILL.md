@@ -16,24 +16,29 @@ Prioritize these sources:
 
 ## Workflow
 
-1. Gather only fresh items. Prefer content from the last 24 hours for a daily briefing; expand to the last 72 hours only when the news cycle is quiet.
-2. Verify with primary sources first:
+1. Gather only same-day hot items by default. Use Asia/Shanghai as the reporting date unless the user specifies another timezone.
+2. Prefer items published on the current calendar date. If an item was published earlier, include it only when it is clearly trending today on Hacker News or the named X accounts, and label it as `旧文今日热议`.
+3. Verify with primary sources first:
 - Official blog posts
 - Official YouTube channel uploads or release videos
 - Original X posts from the listed accounts
-3. Use Hacker News to detect what the technical community is amplifying, but do not treat HN discussion alone as the source of truth.
-4. Keep only important items. Ignore repetitive engagement bait, generic opinions, reposts, and minor product chatter without substance.
-5. If a claim cannot be verified from a source you can fetch, say so explicitly instead of guessing.
+4. Use Hacker News to detect what the technical community is amplifying today, but do not treat HN discussion alone as the source of truth.
+5. Keep only important items. Ignore repetitive engagement bait, generic opinions, reposts, and minor product chatter without substance.
+6. If a claim cannot be verified from a source you can fetch, say so explicitly instead of guessing.
 
 ## Importance Filter
 
-Include an item only if at least one of these is true:
+Include an item only if both conditions hold:
+- It is hot today in Asia/Shanghai date terms, or it is explicitly marked `旧文今日热议`
+- It satisfies at least one of the importance conditions below
+
+Importance conditions:
 - New model, product, benchmark, API, pricing, policy, funding, or org change
 - Credible forward-looking comment from one of the named people that shifts expectations
 - Strong community signal on Hacker News around an AI technical release, paper, or tool
 - Security, safety, legal, or platform change likely to affect builders or users
 
-Prefer 3 to 7 items total. If there is no genuinely important update, say that the day is quiet.
+Prefer 3 to 7 items total. If there are fewer than 3 genuinely important same-day items, return fewer items and explicitly say `今天重要新内容偏少`.
 
 ## Output Format
 
@@ -48,6 +53,7 @@ Use this structure:
 - 要点: 1 to 2 sentences on what happened
 - 为什么重要: 1 sentence on impact
 - 链接: direct source URL
+- 热度归因: why this counts as hot today, for example HN front page / official same-day release / named-account same-day post
 
 ## 2. 标题
 ...
@@ -61,6 +67,7 @@ Rules:
 - Use absolute dates like `2026-03-07 08:00 CST`, not "today" or "yesterday".
 - Include direct source links for every item.
 - Separate facts from inference. Label inference as `判断`.
+- Do not pad the briefing with older items just to reach a quota.
 
 ## Tooling Notes
 
@@ -68,7 +75,7 @@ Rules:
 - Prefer `web_fetch` on the final source URLs you cite.
 - For X-heavy topics, search by account name plus topic instead of relying on memory.
 - For official labs, check both blog and YouTube when launches may have video demos.
-- For Hacker News, focus on front-page AI items and use it as a prioritization signal.
+- For Hacker News, focus on front-page AI items and use it as a same-day prioritization signal.
 
 ## Daily 08:00 Delivery
 
@@ -77,7 +84,7 @@ If the user asks to receive this automatically every morning, schedule it with `
 ```python
 cron(
     action="add",
-    message="Use the ai-news-digest skill to compile today's important AI news from Andrej Karpathy, 宝玉, Sam Altman, official OpenAI/Anthropic/Gemini X+YouTube+blogs, and Hacker News hot topics. Send a concise Chinese briefing with source links, absolute timestamps, and a short final takeaway.",
+    message="Use the ai-news-digest skill to compile only today's hot AI articles and posts in Asia/Shanghai time from Andrej Karpathy, 宝玉, Sam Altman, official OpenAI/Anthropic/Gemini X+YouTube+blogs, and Hacker News hot topics. Prefer same-day items only; include older items only if they are clearly trending today and label them 旧文今日热议. Send a concise Chinese briefing with source links, absolute timestamps, hotness attribution, and a short final takeaway.",
     cron_expr="0 8 * * *",
     tz="Asia/Shanghai",
 )
