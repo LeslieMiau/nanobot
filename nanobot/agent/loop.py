@@ -312,19 +312,30 @@ class AgentLoop:
             persona_runtime_hints=self._persona_hints_for_turn(msg.content, coding_enabled=coding_enabled),
             coding_mode=coding_enabled,
         )
-        response = await self.provider.chat(
-            messages=messages,
-            tools=None,
-            model=self.model,
-            temperature=min(self._temperature_for_turn(msg.content, coding_enabled=coding_enabled), 0.1),
-            max_tokens=min(self.max_tokens, 1024),
-            reasoning_effort=self.reasoning_effort,
-        )
-        plan = self._strip_think(response.content) or (
-            "Planned steps:\n1. Inspect the relevant files and tests.\n"
-            "2. Implement the change with minimal edits.\n"
-            "3. Run the narrowest verification and report any remaining risk."
-        )
+        try:
+            response = await self.provider.chat(
+                messages=messages,
+                tools=None,
+                model=self.model,
+                temperature=min(self._temperature_for_turn(msg.content, coding_enabled=coding_enabled), 0.1),
+                max_tokens=min(self.max_tokens, 1024),
+                reasoning_effort=self.reasoning_effort,
+            )
+            candidate = self._strip_think(response.content)
+            if (
+                response.finish_reason == "error"
+                or not candidate
+                or candidate.startswith("Error:")
+            ):
+                raise RuntimeError(candidate or "Failed to generate plan")
+            plan = candidate
+        except Exception:
+            plan = (
+                "Planned steps:\n"
+                "1. Inspect the relevant files and tests.\n"
+                "2. Implement the change with minimal edits.\n"
+                "3. Run the narrowest verification and report any remaining risk."
+            )
         return (
             f"{plan}\n\n"
             f"Reply `{self.token_guard.confirm_command}` to execute this larger change, "

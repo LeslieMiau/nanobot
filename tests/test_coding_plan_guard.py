@@ -124,3 +124,21 @@ async def test_small_coding_request_skips_plan_guard(tmp_path: Path) -> None:
     assert out is not None
     assert out.content == "fixed"
     assert provider.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_large_change_plan_falls_back_when_provider_errors(tmp_path: Path) -> None:
+    loop, provider = _make_loop(
+        tmp_path,
+        [LLMResponse(content="Error: upstream unavailable", finish_reason="error")],
+    )
+
+    initial = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="请重构整个 agent loop")
+    )
+
+    assert initial is not None
+    assert "Planned steps:" in initial.content
+    assert "Inspect the relevant files and tests." in initial.content
+    assert "upstream unavailable" not in initial.content
+    assert provider.calls == 1
