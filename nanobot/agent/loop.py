@@ -52,6 +52,7 @@ class AgentLoop:
         "/help": {"/help", "help", "帮助", "命令"},
         "/stop": {"/stop", "stop", "停止", "停下", "停止任务"},
         "/restart": {"/restart", "restart", "重启", "重新启动"},
+        "/model": {"/model", "model", "模型", "切换模型"},
     }
     _SHINCHAN_WELCOME = "哟～你来啦！我是 nanobot 小新版，今天也一起把事情搞定吧～"
 
@@ -84,6 +85,7 @@ class AgentLoop:
         self.provider = provider
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self._default_model = self.model
         self.max_iterations = max_iterations
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -218,12 +220,21 @@ class AgentLoop:
 
     @classmethod
     def _normalize_user_command(cls, content: str) -> str:
-        """Normalize command aliases (Chinese/English) to canonical slash commands."""
+        """Normalize a single command token to canonical slash command."""
         cmd = content.strip().lower()
         for canonical, aliases in cls._COMMAND_ALIASES.items():
             if cmd in aliases:
                 return canonical
         return cmd
+
+    @classmethod
+    def _parse_user_command(cls, content: str) -> tuple[str, str]:
+        """Parse input into (normalized command, argument text)."""
+        raw = content.strip()
+        if not raw:
+            return "", ""
+        first, rest = (raw.split(maxsplit=1) + [""])[:2]
+        return cls._normalize_user_command(first), rest.strip()
 
     async def _run_agent_loop(
         self,
@@ -350,7 +361,8 @@ class AgentLoop:
             except asyncio.TimeoutError:
                 continue
 
-            if self._normalize_user_command(msg.content) == "/stop":
+            cmd, _ = self._parse_user_command(msg.content)
+            if cmd == "/stop":
                 await self._handle_stop(msg)
             else:
                 task = asyncio.create_task(self._dispatch(msg))
@@ -448,7 +460,7 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
 
         # Slash commands
-        cmd = self._normalize_user_command(msg.content)
+        cmd, cmd_arg = self._parse_user_command(msg.content)
         confirm_cmd = self.token_guard.confirm_command.strip().lower()
         cancel_cmd = self.token_guard.cancel_command.strip().lower()
         if cmd == confirm_cmd.lstrip("/"):
@@ -535,7 +547,33 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/start — Show welcome message\n/new — Start a new conversation\n/stop — Stop the current task\n/restart — Restart nanobot (gateway mode)\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/start — Show welcome message\n/new — Start a new conversation\n/model — Show or switch model\n/stop — Stop the current task\n/restart — Restart nanobot (gateway mode)\n/help — Show available commands")
+        if cmd == "/model":
+            arg = cmd_arg.strip()
+            if not arg:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=(
+                        f"Current model: `{self.model}`\n"
+                        "Use `/model <name>` to switch, or `/model reset` to restore default."
+                    ),
+                )
+            if arg.lower() in {"reset", "default", "默认", "恢复默认"}:
+                self.model = self._default_model
+                self.subagents.model = self.model
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=f"Model reset to default: `{self.model}`",
+                )
+            self.model = arg
+            self.subagents.model = self.model
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"Model switched to: `{self.model}`",
+            )
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
