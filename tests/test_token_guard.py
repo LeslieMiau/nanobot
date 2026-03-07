@@ -94,3 +94,36 @@ async def test_token_guard_cancel_clears_pending_task(tmp_path: Path) -> None:
     assert canceled is not None
     assert "Canceled pending" in canceled.content
     assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_token_guard_exit_alias_cancels_pending_task(tmp_path: Path) -> None:
+    loop, provider = _make_loop(tmp_path, threshold=10)
+    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="A" * 300)
+    await loop._process_message(msg)
+
+    exit_msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="exit")
+    canceled = await loop._process_message(exit_msg)
+
+    assert canceled is not None
+    assert "Canceled pending" in canceled.content
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_token_guard_pending_preserves_original_request(tmp_path: Path) -> None:
+    loop, provider = _make_loop(tmp_path, threshold=10)
+    first = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="A" * 300)
+    second = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="B" * 300)
+
+    blocked = await loop._process_message(first)
+    blocked_again = await loop._process_message(second)
+    confirm = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/confirm")
+    resumed = await loop._process_message(confirm)
+
+    assert blocked is not None
+    assert blocked_again is not None
+    assert "pending large task" in blocked_again.content.lower()
+    assert resumed is not None
+    assert resumed.content == "ok"
+    assert provider.calls == 1

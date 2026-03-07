@@ -54,6 +54,7 @@ class AgentLoop:
         "/restart": {"/restart", "restart", "重启", "重新启动"},
         "/model": {"/model", "model", "模型", "切换模型"},
     }
+    _TOKEN_GUARD_EXIT_ALIASES = {"exit", "quit", "/exit", "/quit", ":q", "退出", "退出吧", "结束"}
     _SHINCHAN_WELCOME = "哟～你来啦！我是 nanobot 小新版，今天也一起把事情搞定吧～"
 
     def __init__(
@@ -516,6 +517,21 @@ class AgentLoop:
             cmd = confirm_cmd
         if cmd == cancel_cmd.lstrip("/"):
             cmd = cancel_cmd
+        pending = self._token_guard_pending.get(key)
+        if pending is not None:
+            if cmd in self._TOKEN_GUARD_EXIT_ALIASES:
+                cmd = cancel_cmd
+            elif cmd not in {confirm_cmd, cancel_cmd}:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=(
+                        "There is already a pending large task.\n"
+                        f"Reply `{self.token_guard.confirm_command}` to continue it, or "
+                        f"`{self.token_guard.cancel_command}` to cancel."
+                    ),
+                    metadata=msg.metadata or {},
+                )
         if cmd == confirm_cmd:
             pending = self._token_guard_pending.pop(key, None)
             if not pending:
