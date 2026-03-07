@@ -160,6 +160,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("start", "Start the bot"),
         BotCommand("new", "Start a new conversation"),
         BotCommand("model", "Show or switch model"),
+        BotCommand("coding", "Show or set coding mode"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("restart", "Restart nanobot"),
         BotCommand("help", "Show available commands"),
@@ -201,6 +202,7 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
         self._app.add_handler(CommandHandler("model", self._forward_command))
+        self._app.add_handler(CommandHandler("coding", self._forward_command))
         self._app.add_handler(CommandHandler("stop", self._forward_command))
         self._app.add_handler(CommandHandler("restart", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
@@ -388,6 +390,7 @@ class TelegramChannel(BaseChannel):
             "🐈 nanobot commands:\n"
             "/new — Start a new conversation\n"
             "/model — Show or switch model\n"
+            "/coding — Show or set coding mode\n"
             "/stop — Stop the current task\n"
             "/restart — Restart nanobot (gateway mode)\n"
             "/help — Show available commands"

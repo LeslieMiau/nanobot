@@ -58,6 +58,7 @@ async def test_help_alias_works(tmp_path: Path) -> None:
 
     assert out is not None
     assert "/help" in out.content
+    assert "/coding" in out.content
     assert "/stop" in out.content
 
 

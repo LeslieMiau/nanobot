@@ -834,7 +834,7 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/start — Show welcome message\n/new — Start a new conversation\n/model — Show or switch model\n/stop — Stop the current task\n/restart — Restart nanobot (gateway mode)\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/start — Show welcome message\n/new — Start a new conversation\n/model — Show or switch model\n/coding — Show or set coding mode\n/stop — Stop the current task\n/restart — Restart nanobot (gateway mode)\n/help — Show available commands")
         if cmd == "/model":
             arg = cmd_arg.strip()
             if not arg:

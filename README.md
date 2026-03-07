@@ -160,6 +160,12 @@ Add or merge these **two parts** into your config (other options have defaults).
 nanobot agent
 ```
 
+**4. Coding Mode** (enabled by default for code-like requests)
+
+- Use `/coding status` inside a chat to inspect the current setting
+- Use `/coding on|off|auto` to force or relax Codex-like coding guardrails
+- Edit `~/.nanobot/workspace/CODING.md` to customize the coding prompt
+
 That's it! You have a working AI assistant in 2 minutes.
 
 ## 💬 Chat Apps
@@ -939,6 +945,8 @@ Each instance has its own:
 | `nanobot channels status` | Show channel status |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
+
+In-chat commands: `/model`, `/coding status|on|off|auto`, `/new`, `/stop`, `/restart`, `/help`.
 
 <details>
 <summary><b>Heartbeat (Periodic Tasks)</b></summary>
