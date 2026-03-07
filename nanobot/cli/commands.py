@@ -307,6 +307,11 @@ def gateway(
     cron = CronService(cron_store_path)
     repo_sync_cfg = config.gateway.repo_sync
     repo_sync_marker = "__repo_sync__::"
+    restart_requested = False
+
+    async def request_restart() -> None:
+        nonlocal restart_requested
+        restart_requested = True
 
     # Create agent with cron service
     agent = AgentLoop(
@@ -329,6 +334,7 @@ def gateway(
         channels_config=config.channels,
         persona_config=config.agents.defaults.persona,
         token_guard_config=config.agents.defaults.token_guard,
+        restart_callback=request_restart,
     )
 
     # Set cron callback (needs agent)
@@ -489,16 +495,33 @@ def gateway(
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
     async def run():
+        agent_task: asyncio.Task | None = None
+        channels_task: asyncio.Task | None = None
         try:
             await cron.start()
             await heartbeat.start()
-            await asyncio.gather(
-                agent.run(),
-                channels.start_all(),
-            )
+            agent_task = asyncio.create_task(agent.run())
+            channels_task = asyncio.create_task(channels.start_all())
+            while True:
+                if restart_requested:
+                    await asyncio.sleep(0.2)  # best-effort: let restart acknowledgement flush
+                    break
+                done, _ = await asyncio.wait(
+                    {agent_task, channels_task},
+                    timeout=0.5,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if done:
+                    break
         except KeyboardInterrupt:
             console.print("\nShutting down...")
         finally:
+            if agent_task and not agent_task.done():
+                agent.stop()
+                agent_task.cancel()
+            if channels_task and not channels_task.done():
+                channels_task.cancel()
+            await asyncio.gather(*(t for t in (agent_task, channels_task) if t), return_exceptions=True)
             await agent.close_mcp()
             heartbeat.stop()
             cron.stop()
@@ -506,6 +529,8 @@ def gateway(
             await channels.stop_all()
 
     asyncio.run(run())
+    if restart_requested:
+        os.execv(sys.executable, [sys.executable, "-m", "nanobot", *sys.argv[1:]])
 
 
 

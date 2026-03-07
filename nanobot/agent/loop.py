@@ -68,6 +68,7 @@ class AgentLoop:
         channels_config: ChannelsConfig | None = None,
         persona_config: PersonaConfig | None = None,
         token_guard_config: TokenGuardConfig | None = None,
+        restart_callback: Callable[[], Awaitable[None]] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, TokenGuardConfig
         self.bus = bus
@@ -87,6 +88,7 @@ class AgentLoop:
         self.persona = PersonaEngine(persona_config)
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self._restart_callback = restart_callback
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -463,6 +465,19 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id,
                 content="Canceled pending large task.",
             )
+        if cmd == "/restart":
+            if not self._restart_callback:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="Restart is not available in this mode.",
+                )
+            await self._restart_callback()
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Restarting nanobot...",
+            )
         if cmd == "/new":
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
             self._consolidating.add(session.key)
@@ -493,7 +508,7 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/restart — Restart nanobot (gateway mode)\n/help — Show available commands")
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
