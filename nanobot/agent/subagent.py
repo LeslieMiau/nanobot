@@ -3,6 +3,7 @@
 import asyncio
 import json
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,17 @@ from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.config.schema import CodingConfig, ExecToolConfig
 from nanobot.providers.base import LLMProvider
+
+
+@dataclass
+class _SubagentTurnState:
+    files_read: set[str] = field(default_factory=set)
+    files_edited: set[str] = field(default_factory=set)
+    commands_run: list[str] = field(default_factory=list)
+    verification_notes: list[str] = field(default_factory=list)
+    edit_generation: int = 0
+    verification_generation: int = 0
+    verification_prompted: bool = False
 
 
 class SubagentManager:
@@ -85,6 +97,142 @@ class SubagentManager:
         logger.info("Spawned subagent [{}]: {}", task_id, display_label)
         return f"Subagent [{display_label}] started (id: {task_id}). I'll notify you when it completes."
 
+    def _track_path(self, raw_path: Any) -> str | None:
+        if not isinstance(raw_path, str) or not raw_path.strip():
+            return None
+        path = Path(raw_path).expanduser()
+        if not path.is_absolute():
+            path = self.workspace / path
+        try:
+            return str(path.resolve())
+        except Exception:
+            return str(path)
+
+    def _guard_coding_tool_call(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        turn_state: _SubagentTurnState,
+        *,
+        coding_enabled: bool,
+    ) -> str | None:
+        if not coding_enabled or not self.coding_config.enforce_read_before_write:
+            return None
+        if tool_name not in {"write_file", "edit_file"}:
+            return None
+
+        tracked_path = self._track_path(arguments.get("path"))
+        if not tracked_path:
+            return None
+
+        if tool_name == "write_file":
+            try:
+                if not Path(tracked_path).exists():
+                    return None
+            except Exception:
+                return None
+
+        if tracked_path in turn_state.files_read:
+            return None
+
+        return (
+            "Error: Coding mode requires reading a file before modifying it. "
+            f"Call `read_file` for `{arguments.get('path')}` first."
+        )
+
+    def _record_tool_execution(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        result: str,
+        turn_state: _SubagentTurnState,
+    ) -> None:
+        tracked_path = self._track_path(arguments.get("path"))
+        if tool_name == "read_file" and tracked_path and not result.startswith("Error:"):
+            turn_state.files_read.add(tracked_path)
+            return
+        if tool_name in {"write_file", "edit_file"} and tracked_path and not result.startswith("Error:"):
+            turn_state.files_edited.add(tracked_path)
+            turn_state.edit_generation += 1
+            return
+        if tool_name == "exec":
+            command = str(arguments.get("command", "")).strip()
+            if command:
+                turn_state.commands_run.append(command)
+            if turn_state.edit_generation > 0:
+                turn_state.verification_generation = turn_state.edit_generation
+                if result.startswith("Error:") or "\nExit code:" in result:
+                    turn_state.verification_notes.append(
+                        f"Verification command reported a problem: `{command or 'exec'}`"
+                    )
+
+    def _needs_verification_follow_up(
+        self,
+        turn_state: _SubagentTurnState,
+        *,
+        coding_enabled: bool,
+    ) -> bool:
+        return (
+            coding_enabled
+            and self.coding_config.require_verification_after_edits
+            and turn_state.edit_generation > turn_state.verification_generation
+            and not turn_state.verification_prompted
+        )
+
+    @staticmethod
+    def _verification_follow_up_message() -> str:
+        return (
+            "[Coding mode guard] You edited files in this task but did not attempt verification.\n"
+            "Use the `exec` tool to run the narrowest relevant test/build/check, or explain why verification "
+            "could not be run and what remains unverified."
+        )
+
+    def _display_path(self, path_str: str) -> str:
+        path = Path(path_str)
+        try:
+            return str(path.relative_to(self.workspace))
+        except ValueError:
+            return str(path)
+
+    def _apply_coding_summary(
+        self,
+        content: str | None,
+        turn_state: _SubagentTurnState,
+        *,
+        coding_enabled: bool,
+    ) -> str | None:
+        if not content or not coding_enabled:
+            return content
+        lowered = content.lower()
+        if all(label in lowered for label in ("changed:", "verified:", "unverified:")):
+            return content
+        if not (turn_state.files_edited or turn_state.commands_run or turn_state.verification_notes):
+            return content
+
+        changed = (
+            "\n".join(f"- {self._display_path(path)}" for path in sorted(turn_state.files_edited))
+            if turn_state.files_edited
+            else "- No files changed."
+        )
+        verified = (
+            "\n".join(f"- `{cmd}`" for cmd in turn_state.commands_run)
+            if turn_state.commands_run
+            else "- No verification command recorded."
+        )
+        unverified_items: list[str] = []
+        if turn_state.files_edited and turn_state.verification_generation < turn_state.edit_generation:
+            unverified_items.append("- Edits were not verified with an exec command.")
+        if turn_state.verification_notes:
+            unverified_items.extend(f"- {note}" for note in turn_state.verification_notes)
+        if not unverified_items:
+            unverified_items.append("- None noted.")
+
+        return (
+            content.rstrip()
+            + f"\n\nChanged:\n{changed}\n\nVerified:\n{verified}\n\nUnverified:\n"
+            + "\n".join(unverified_items)
+        )
+
     async def _run_subagent(
         self,
         task_id: str,
@@ -123,6 +271,7 @@ class SubagentManager:
             max_iterations = 15
             iteration = 0
             final_result: str | None = None
+            turn_state = _SubagentTurnState()
 
             while iteration < max_iterations:
                 iteration += 1
@@ -159,7 +308,15 @@ class SubagentManager:
                     for tool_call in response.tool_calls:
                         args_str = json.dumps(tool_call.arguments, ensure_ascii=False)
                         logger.debug("Subagent [{}] executing: {} with arguments: {}", task_id, tool_call.name, args_str)
-                        result = await tools.execute(tool_call.name, tool_call.arguments)
+                        result = self._guard_coding_tool_call(
+                            tool_call.name,
+                            tool_call.arguments,
+                            turn_state,
+                            coding_enabled=coding_enabled,
+                        )
+                        if result is None:
+                            result = await tools.execute(tool_call.name, tool_call.arguments)
+                        self._record_tool_execution(tool_call.name, tool_call.arguments, result, turn_state)
                         messages.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
@@ -167,11 +324,20 @@ class SubagentManager:
                             "content": result,
                         })
                 else:
+                    if self._needs_verification_follow_up(turn_state, coding_enabled=coding_enabled):
+                        turn_state.verification_prompted = True
+                        messages.append({"role": "user", "content": self._verification_follow_up_message()})
+                        continue
                     final_result = response.content
                     break
 
             if final_result is None:
                 final_result = "Task completed but no final response was generated."
+            final_result = self._apply_coding_summary(
+                final_result,
+                turn_state,
+                coding_enabled=coding_enabled,
+            )
 
             logger.info("Subagent [{}] completed successfully", task_id)
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
