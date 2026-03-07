@@ -24,6 +24,7 @@ Read [references/sources.md](references/sources.md) to get the current subscript
 6. Keep only important items. Ignore repetitive engagement bait, generic opinions, reposts, screenshots of posts, and minor product chatter without substance.
 7. If a claim cannot be verified from a source you can fetch, say so explicitly instead of guessing.
 8. When the user asks to add or remove a subscription source, update `references/sources.md` instead of hardcoding the source list into this file.
+9. For named people, include only domain-relevant statements. Ignore their posts about politics, lifestyle, personal chatter, memes, sports, or any other non-AI/non-technical topic unless the user explicitly asks for broader coverage.
 
 ## Importance Filter
 
@@ -36,6 +37,8 @@ Importance conditions:
 - Credible forward-looking comment from one of the named people that shifts expectations
 - Strong community signal on Hacker News around an AI technical release, paper, or tool
 - Security, safety, legal, or platform change likely to affect builders or users
+
+For named people, `credible forward-looking comment` means comments about AI research, models, tooling, product direction, engineering practice, safety, regulation, or the AI industry. Do not include off-topic personal commentary.
 
 Prefer 3 to 5 items total. Fewer is better than padding. If there are fewer than 3 genuinely important items, return fewer items and explicitly say `今天重要新内容偏少`.
 

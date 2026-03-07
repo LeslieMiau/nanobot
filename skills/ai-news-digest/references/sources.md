@@ -37,3 +37,4 @@ Update this file when adding or removing subscriptions. Keep entries first-hand 
 - Prefer original accounts, official blogs, and original article URLs.
 - Add a source only if it regularly produces first-hand AI information.
 - Remove low-signal feeds instead of letting the list grow without bound.
+- For named people, read selectively: only keep their professional AI-domain posts, not general chatter.
