@@ -265,6 +265,16 @@ class AgentLoop:
             token in user_text.lower() for token in ("help me", "帮我", "请你", "how do i", "怎么", "如何")
         )
 
+    def _persona_hints_for_turn(self, user_text: str, *, coding_enabled: bool) -> str | None:
+        if coding_enabled and self.coding_config.disable_persona:
+            return None
+        return self.persona.build_runtime_hints(user_text)
+
+    def _temperature_for_turn(self, user_text: str, *, coding_enabled: bool) -> float:
+        if coding_enabled:
+            return min(float(self.temperature), 0.1)
+        return self.persona.recommended_temperature(user_text, self.temperature)
+
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
         """Remove <think>…</think> blocks that some models embed in content."""
@@ -461,9 +471,13 @@ class AgentLoop:
         self,
         content: str | None,
         all_messages: list[dict[str, Any]],
+        *,
+        coding_enabled: bool = False,
     ) -> str | None:
         """Apply persona postprocessing (e.g. script normalization) to final text."""
         if not content:
+            return content
+        if coding_enabled and self.coding_config.disable_persona:
             return content
 
         normalized = await self.persona.normalize_output(
@@ -575,16 +589,21 @@ class AgentLoop:
                 coding_enabled=coding_enabled,
             )
             history = session.get_history(max_messages=self.memory_window)
-            persona_hints = self.persona.build_runtime_hints(msg.content)
-            turn_temperature = self.persona.recommended_temperature(msg.content, self.temperature)
+            persona_hints = self._persona_hints_for_turn(msg.content, coding_enabled=coding_enabled)
+            turn_temperature = self._temperature_for_turn(msg.content, coding_enabled=coding_enabled)
             messages = self.context.build_messages(
                 history=history, current_message=msg.content, channel=channel, chat_id=chat_id,
                 persona_runtime_hints=persona_hints,
+                coding_mode=coding_enabled,
             )
             final_content, _, all_msgs = await self._run_agent_loop(
                 messages, temperature_override=turn_temperature,
             )
-            final_content = await self._apply_persona_output_controls(final_content, all_msgs)
+            final_content = await self._apply_persona_output_controls(
+                final_content,
+                all_msgs,
+                coding_enabled=coding_enabled,
+            )
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -805,14 +824,15 @@ class AgentLoop:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.memory_window)
-        persona_hints = self.persona.build_runtime_hints(msg.content)
-        turn_temperature = self.persona.recommended_temperature(msg.content, self.temperature)
+        persona_hints = self._persona_hints_for_turn(msg.content, coding_enabled=coding_enabled)
+        turn_temperature = self._temperature_for_turn(msg.content, coding_enabled=coding_enabled)
         initial_messages = self.context.build_messages(
             history=history,
             current_message=msg.content,
             media=msg.media if msg.media else None,
             channel=msg.channel, chat_id=msg.chat_id,
             persona_runtime_hints=persona_hints,
+            coding_mode=coding_enabled,
         )
         if self.token_guard.enabled and not bypass_token_guard:
             estimated = self._estimate_tokens(initial_messages)
@@ -843,7 +863,11 @@ class AgentLoop:
             on_progress=on_progress or _bus_progress,
             temperature_override=turn_temperature,
         )
-        final_content = await self._apply_persona_output_controls(final_content, all_msgs)
+        final_content = await self._apply_persona_output_controls(
+            final_content,
+            all_msgs,
+            coding_enabled=coding_enabled,
+        )
 
         if final_content is None:
             final_content = "I've completed processing but have no response to give."

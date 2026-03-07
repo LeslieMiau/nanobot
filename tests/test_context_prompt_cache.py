@@ -78,3 +78,15 @@ def test_persona_runtime_hints_are_injected_into_system_prompt(tmp_path) -> None
     assert messages[0]["role"] == "system"
     assert "Persona Runtime Directive" in messages[0]["content"]
     assert "最终输出必须全部使用简体中文" in messages[0]["content"]
+
+
+def test_coding_prompt_is_injected_only_when_coding_mode_enabled(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    (workspace / "CODING.md").write_text("Always inspect files before editing.", encoding="utf-8")
+    builder = ContextBuilder(workspace)
+
+    normal = builder.build_messages(history=[], current_message="hello", coding_mode=False)
+    coding = builder.build_messages(history=[], current_message="fix bug", coding_mode=True)
+
+    assert "Always inspect files before editing." not in normal[0]["content"]
+    assert "Always inspect files before editing." in coding[0]["content"]

@@ -70,6 +70,7 @@ async def test_run_agent_loop_uses_temperature_override() -> None:
 async def test_apply_persona_output_controls_updates_final_assistant_message() -> None:
     provider = _Provider()
     loop = AgentLoop.__new__(AgentLoop)
+    loop.coding_config = None
     loop.persona = PersonaEngine(
         PersonaConfig(mode="shinchan_tw_s1", dialect="tw_s1", script="simplified", intensity="adaptive")
     )
@@ -79,7 +80,38 @@ async def test_apply_persona_output_controls_updates_final_assistant_message() -
     loop.reasoning_effort = None
 
     all_messages = [{"role": "assistant", "content": "這樣喔，你賴東東不錯喔"}]
+    class _CodingConfig:
+        disable_persona = False
+
+    loop.coding_config = _CodingConfig()
     normalized = await loop._apply_persona_output_controls(all_messages[0]["content"], all_messages)
 
     assert normalized == "这样喔，你赖东东不错喔"
     assert all_messages[0]["content"] == "这样喔，你赖东东不错喔"
+
+
+async def test_apply_persona_output_controls_skips_when_coding_mode_disables_persona() -> None:
+    provider = _Provider()
+    loop = AgentLoop.__new__(AgentLoop)
+    loop.persona = PersonaEngine(
+        PersonaConfig(mode="shinchan_tw_s1", dialect="tw_s1", script="simplified", intensity="adaptive")
+    )
+    loop.provider = provider
+    loop.model = "dummy"
+    loop.max_tokens = 512
+    loop.reasoning_effort = None
+
+    class _CodingConfig:
+        disable_persona = True
+
+    loop.coding_config = _CodingConfig()
+    all_messages = [{"role": "assistant", "content": "這樣喔，你賴東東不錯喔"}]
+    normalized = await loop._apply_persona_output_controls(
+        all_messages[0]["content"],
+        all_messages,
+        coding_enabled=True,
+    )
+
+    assert normalized == "這樣喔，你賴東東不錯喔"
+    assert all_messages[0]["content"] == "這樣喔，你賴東東不錯喔"
+    assert provider.temperatures == []

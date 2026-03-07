@@ -28,12 +28,16 @@ class ContextBuilder:
         self,
         skill_names: list[str] | None = None,
         persona_runtime_hints: str | None = None,
+        coding_mode: bool = False,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
 
         if persona_runtime_hints:
             parts.append(f"# Persona Runtime Directive\n\n{persona_runtime_hints}")
+
+        if coding_mode and (coding_prompt := self._load_optional_file("CODING.md")):
+            parts.append(f"# Coding Mode\n\n{coding_prompt}")
 
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
@@ -103,12 +107,16 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         parts = []
 
         for filename in self.BOOTSTRAP_FILES:
-            file_path = self.workspace / filename
-            if file_path.exists():
-                content = file_path.read_text(encoding="utf-8")
+            if content := self._load_optional_file(filename):
                 parts.append(f"## {filename}\n\n{content}")
 
         return "\n\n".join(parts) if parts else ""
+
+    def _load_optional_file(self, filename: str) -> str:
+        file_path = self.workspace / filename
+        if not file_path.exists():
+            return ""
+        return file_path.read_text(encoding="utf-8")
 
     def build_messages(
         self,
@@ -119,6 +127,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         channel: str | None = None,
         chat_id: str | None = None,
         persona_runtime_hints: str | None = None,
+        coding_mode: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
         runtime_ctx = self._build_runtime_context(channel, chat_id)
@@ -137,6 +146,7 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 "content": self.build_system_prompt(
                     skill_names=skill_names,
                     persona_runtime_hints=persona_runtime_hints,
+                    coding_mode=coding_mode,
                 ),
             },
             *history,
