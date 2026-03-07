@@ -31,7 +31,12 @@ class _Provider(LLMProvider):
         return "dummy"
 
 
-def _make_loop(workspace: Path) -> tuple[AgentLoop, _Provider]:
+def _make_loop(
+    workspace: Path,
+    *,
+    provider_name: str | None = None,
+    provider_switcher=None,
+) -> tuple[AgentLoop, _Provider]:
     bus = MessageBus()
     provider = _Provider()
     loop = AgentLoop(
@@ -40,13 +45,15 @@ def _make_loop(workspace: Path) -> tuple[AgentLoop, _Provider]:
         workspace=workspace,
         model="dummy",
         max_iterations=1,
+        provider_name=provider_name,
+        provider_switcher=provider_switcher,
     )
     return loop, provider
 
 
 @pytest.mark.asyncio
 async def test_model_command_shows_current_model(tmp_path: Path) -> None:
-    loop, _ = _make_loop(tmp_path)
+    loop, _ = _make_loop(tmp_path, provider_name="custom")
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/model")
 
     out = await loop._process_message(msg)
@@ -54,6 +61,8 @@ async def test_model_command_shows_current_model(tmp_path: Path) -> None:
     assert out is not None
     assert "Current model" in out.content
     assert "`dummy`" in out.content
+    assert "Current provider" in out.content
+    assert "`custom`" in out.content
 
 
 @pytest.mark.asyncio
@@ -90,3 +99,83 @@ async def test_model_command_chinese_alias_and_reset(tmp_path: Path) -> None:
     assert "dummy" in reset_out.content
     assert loop.model == "dummy"
 
+
+@pytest.mark.asyncio
+async def test_model_command_natural_language_switches_provider(tmp_path: Path) -> None:
+    switch_calls: list[str | None] = []
+
+    class _SwitchedProvider(_Provider):
+        pass
+
+    def provider_switcher(requested_model: str | None):
+        switch_calls.append(requested_model)
+        provider = _SwitchedProvider()
+        if requested_model is None:
+            return provider, "dummy", "custom"
+        return provider, requested_model, "github_copilot"
+
+    loop, _ = _make_loop(
+        tmp_path,
+        provider_name="custom",
+        provider_switcher=provider_switcher,
+    )
+
+    switched = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="把模型换成 gpt-5.3-codex")
+    )
+
+    assert switched is not None
+    assert "gpt-5.3-codex" in switched.content
+    assert "github_copilot" in switched.content
+    assert loop.model == "gpt-5.3-codex"
+    assert loop.provider_name == "github_copilot"
+    assert switch_calls == ["gpt-5.3-codex"]
+
+
+@pytest.mark.asyncio
+async def test_model_command_reset_restores_default_provider(tmp_path: Path) -> None:
+    class _SwitchedProvider(_Provider):
+        pass
+
+    def provider_switcher(requested_model: str | None):
+        provider = _SwitchedProvider()
+        if requested_model is None:
+            return provider, "dummy", "custom"
+        return provider, requested_model, "openai"
+
+    loop, _ = _make_loop(
+        tmp_path,
+        provider_name="custom",
+        provider_switcher=provider_switcher,
+    )
+
+    await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/model gpt-5.2")
+    )
+    reset_out = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/model reset")
+    )
+
+    assert reset_out is not None
+    assert "provider: `custom`" in reset_out.content
+    assert loop.model == "dummy"
+    assert loop.provider_name == "custom"
+
+
+@pytest.mark.asyncio
+async def test_model_command_reports_provider_switch_errors(tmp_path: Path) -> None:
+    def provider_switcher(requested_model: str | None):
+        raise ValueError(f"Provider unavailable for {requested_model}")
+
+    loop, _ = _make_loop(
+        tmp_path,
+        provider_name="custom",
+        provider_switcher=provider_switcher,
+    )
+
+    out = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="把模型换成 gpt-5.3-codex")
+    )
+
+    assert out is not None
+    assert out.content == "Model switch failed: Provider unavailable for gpt-5.3-codex"

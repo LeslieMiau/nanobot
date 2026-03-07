@@ -78,14 +78,19 @@ class AgentLoop:
         persona_config: PersonaConfig | None = None,
         token_guard_config: TokenGuardConfig | None = None,
         restart_callback: Callable[[], Awaitable[None]] | None = None,
+        provider_name: str | None = None,
+        provider_switcher: Callable[[str | None], tuple[LLMProvider, str, str | None]] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, TokenGuardConfig
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
+        self.provider_name = provider_name
         self.workspace = workspace
         self.model = model or provider.get_default_model()
         self._default_model = self.model
+        self._default_provider = provider
+        self._default_provider_name = provider_name
         self.max_iterations = max_iterations
         self.temperature = temperature
         self.max_tokens = max_tokens
@@ -99,6 +104,7 @@ class AgentLoop:
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self._restart_callback = restart_callback
+        self._provider_switcher = provider_switcher
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -233,8 +239,51 @@ class AgentLoop:
         raw = content.strip()
         if not raw:
             return "", ""
+        if match := cls._parse_natural_model_switch(raw):
+            return "/model", match
         first, rest = (raw.split(maxsplit=1) + [""])[:2]
         return cls._normalize_user_command(first), rest.strip()
+
+    @staticmethod
+    def _parse_natural_model_switch(content: str) -> str | None:
+        """Recognize natural-language model switch requests."""
+        patterns = (
+            r"^(?:请)?(?:把)?模型(?:切换|换|改)(?:到|成|为)?\s+(.+)$",
+            r"^(?:请)?(?:把)?模型切换(?:到|成|为)?\s+(.+)$",
+            r"^(?:请)?(?:把)?模型换成\s+(.+)$",
+            r"^(?:请)?(?:把)?模型改成\s+(.+)$",
+            r"^(?:请)?使用模型\s+(.+)$",
+        )
+        for pattern in patterns:
+            match = re.match(pattern, content.strip(), flags=re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return None
+
+    def _apply_model_provider(self, provider: LLMProvider, model: str, provider_name: str | None) -> None:
+        """Update runtime provider/model state for the main loop and subagents."""
+        self.provider = provider
+        self.provider_name = provider_name
+        self.model = model
+        self.subagents.provider = provider
+        self.subagents.model = model
+
+    def _reset_model_provider(self) -> None:
+        """Restore runtime model/provider to startup defaults."""
+        if self._provider_switcher:
+            provider, model, provider_name = self._provider_switcher(None)
+            self._apply_model_provider(provider, model, provider_name)
+            return
+        self._apply_model_provider(self._default_provider, self._default_model, self._default_provider_name)
+
+    def _switch_model_provider(self, requested_model: str) -> None:
+        """Switch runtime model/provider for subsequent turns."""
+        if self._provider_switcher:
+            provider, model, provider_name = self._provider_switcher(requested_model)
+            self._apply_model_provider(provider, model, provider_name)
+            return
+        self.model = requested_model
+        self.subagents.model = requested_model
 
     async def _run_agent_loop(
         self,
@@ -556,23 +605,29 @@ class AgentLoop:
                     chat_id=msg.chat_id,
                     content=(
                         f"Current model: `{self.model}`\n"
+                        f"Current provider: `{self.provider_name or 'unknown'}`\n"
                         "Use `/model <name>` to switch, or `/model reset` to restore default."
                     ),
                 )
             if arg.lower() in {"reset", "default", "默认", "恢复默认"}:
-                self.model = self._default_model
-                self.subagents.model = self.model
+                self._reset_model_provider()
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
-                    content=f"Model reset to default: `{self.model}`",
+                    content=f"Model reset to default: `{self.model}` (provider: `{self.provider_name or 'unknown'}`)",
                 )
-            self.model = arg
-            self.subagents.model = self.model
+            try:
+                self._switch_model_provider(arg)
+            except Exception as e:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=f"Model switch failed: {e}",
+                )
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=f"Model switched to: `{self.model}`",
+                content=f"Model switched to: `{self.model}` (provider: `{self.provider_name or 'unknown'}`)",
             )
 
         unconsolidated = len(session.messages) - session.last_consolidated
