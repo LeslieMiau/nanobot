@@ -247,6 +247,15 @@ class PersonaConfig(Base):
         return data
 
 
+class TokenGuardConfig(Base):
+    """Token guard for large requests."""
+
+    enabled: bool = True
+    threshold_tokens: int = 24_000
+    confirm_command: str = "/confirm"
+    cancel_command: str = "/cancel"
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -261,6 +270,7 @@ class AgentDefaults(Base):
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
     persona: PersonaConfig = Field(default_factory=PersonaConfig)
+    token_guard: TokenGuardConfig = Field(default_factory=TokenGuardConfig)
 
 
 class AgentsConfig(Base):

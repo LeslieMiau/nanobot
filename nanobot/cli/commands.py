@@ -328,6 +328,7 @@ def gateway(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         persona_config=config.agents.defaults.persona,
+        token_guard_config=config.agents.defaults.token_guard,
     )
 
     # Set cron callback (needs agent)
@@ -562,6 +563,7 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         persona_config=config.agents.defaults.persona,
+        token_guard_config=config.agents.defaults.token_guard,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on

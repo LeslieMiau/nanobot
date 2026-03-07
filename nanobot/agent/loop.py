@@ -29,7 +29,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, PersonaConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, PersonaConfig, TokenGuardConfig
     from nanobot.cron.service import CronService
 
 
@@ -67,8 +67,9 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         persona_config: PersonaConfig | None = None,
+        token_guard_config: TokenGuardConfig | None = None,
     ):
-        from nanobot.config.schema import ExecToolConfig
+        from nanobot.config.schema import ExecToolConfig, TokenGuardConfig
         self.bus = bus
         self.channels_config = channels_config
         self.provider = provider
@@ -82,6 +83,7 @@ class AgentLoop:
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
+        self.token_guard = token_guard_config or TokenGuardConfig()
         self.persona = PersonaEngine(persona_config)
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
@@ -112,6 +114,7 @@ class AgentLoop:
         self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
         self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
+        self._token_guard_pending: dict[str, str] = {}  # session_key -> pending user message
         self._processing_lock = asyncio.Lock()
         self._register_default_tools()
 
@@ -179,6 +182,29 @@ class AgentLoop:
                 return tc.name
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
+
+    @staticmethod
+    def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
+        """Estimate token usage from message payload size."""
+        total_chars = 0
+
+        def walk(v: Any) -> None:
+            nonlocal total_chars
+            if isinstance(v, str):
+                total_chars += len(v)
+                return
+            if isinstance(v, dict):
+                for vv in v.values():
+                    walk(vv)
+                return
+            if isinstance(v, list):
+                for vv in v:
+                    walk(vv)
+                return
+
+        walk(messages)
+        # Rough heuristic for mixed CJK/English prompts.
+        return max(1, (total_chars + 2) // 3)
 
     async def _run_agent_loop(
         self,
@@ -369,6 +395,7 @@ class AgentLoop:
         msg: InboundMessage,
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        bypass_token_guard: bool = False,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -403,6 +430,39 @@ class AgentLoop:
 
         # Slash commands
         cmd = msg.content.strip().lower()
+        confirm_cmd = self.token_guard.confirm_command.strip().lower()
+        cancel_cmd = self.token_guard.cancel_command.strip().lower()
+        if cmd == confirm_cmd:
+            pending = self._token_guard_pending.pop(key, None)
+            if not pending:
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="No pending large task to confirm.",
+                )
+            replay = InboundMessage(
+                channel=msg.channel,
+                sender_id=msg.sender_id,
+                chat_id=msg.chat_id,
+                content=pending,
+                metadata=msg.metadata or {},
+            )
+            return await self._process_message(
+                replay,
+                session_key=key,
+                on_progress=on_progress,
+                bypass_token_guard=True,
+            )
+        if cmd == cancel_cmd:
+            removed = self._token_guard_pending.pop(key, None)
+            if removed is None:
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="No pending large task to cancel.",
+                )
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content="Canceled pending large task.",
+            )
         if cmd == "/new":
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
             self._consolidating.add(session.key)
@@ -468,6 +528,21 @@ class AgentLoop:
             channel=msg.channel, chat_id=msg.chat_id,
             persona_runtime_hints=persona_hints,
         )
+        if self.token_guard.enabled and not bypass_token_guard:
+            estimated = self._estimate_tokens(initial_messages)
+            if estimated >= self.token_guard.threshold_tokens:
+                self._token_guard_pending[key] = msg.content
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=(
+                        "Token Guard: this task is estimated to use "
+                        f"~{estimated} tokens (threshold {self.token_guard.threshold_tokens}).\n"
+                        f"Reply `{self.token_guard.confirm_command}` to continue, or "
+                        f"`{self.token_guard.cancel_command}` to cancel."
+                    ),
+                    metadata=msg.metadata or {},
+                )
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
