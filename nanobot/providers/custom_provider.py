@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 import json_repair
@@ -13,10 +14,10 @@ from openai import AsyncOpenAI
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.openai_codex_provider import _convert_messages, _convert_tools
 
-_AICODEWITH_RESPONSES_BASE_KEYWORDS = (
-    "api.aicodewith.com/chatgpt/v1",
-    "api.with7.cn/chatgpt/v1",
-)
+_AICODEWITH_HOST_KEYWORDS = ("aicodewith.com", "with7.cn")
+_AICODEWITH_DEFAULT_ORIGIN = "https://api.aicodewith.com"
+_AICODEWITH_OPENAI_PATH = "/chatgpt/v1"
+_AICODEWITH_GEMINI_PATH = "/gemini_cli"
 _AICODEWITH_MODEL_FALLBACKS = (
     "gpt-5.2",
     "gpt-5.4",
@@ -40,26 +41,52 @@ class CustomProvider(LLMProvider):
                    model: str | None = None, max_tokens: int = 4096, temperature: float = 0.7,
                    reasoning_effort: str | None = None) -> LLMResponse:
         requested_model = model or self.default_model
-        if self._use_responses_api():
-            last_error: Exception | None = None
-            for candidate_model in self._candidate_models(requested_model):
+
+        if self._is_aicodewith_gateway():
+            route = self._route_kind_for_model(requested_model)
+            normalized_model = self._normalize_model_for_route(requested_model, route)
+
+            if route == "anthropic":
                 try:
-                    return await self._chat_via_responses(
+                    return await self._chat_via_anthropic(
                         messages=messages,
                         tools=tools,
-                        model=candidate_model,
+                        model=normalized_model,
                         max_tokens=max_tokens,
-                        reasoning_effort=reasoning_effort,
+                        temperature=temperature,
                     )
-                except RuntimeError as e:
-                    msg = str(e)
-                    if "该模型暂不支持" in msg or "model" in msg.lower() and "support" in msg.lower():
-                        last_error = e
-                        continue
-                    return LLMResponse(content=f"Error: {e}", finish_reason="error")
                 except Exception as e:
                     return LLMResponse(content=f"Error: {e}", finish_reason="error")
-            return LLMResponse(content=f"Error: {last_error or 'No available model/channel'}", finish_reason="error")
+
+            if route == "gemini":
+                try:
+                    return await self._chat_via_gemini(
+                        messages=messages,
+                        tools=tools,
+                        model=normalized_model,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                    )
+                except Exception as e:
+                    return LLMResponse(content=f"Error: {e}", finish_reason="error")
+
+            return await self._chat_via_openai_responses_with_fallback(
+                messages=messages,
+                tools=tools,
+                requested_model=normalized_model,
+                max_tokens=max_tokens,
+                reasoning_effort=reasoning_effort,
+            )
+
+        if self._use_responses_api():
+            normalized_model = self._normalize_model_for_route(requested_model, "openai")
+            return await self._chat_via_openai_responses_with_fallback(
+                messages=messages,
+                tools=tools,
+                requested_model=normalized_model,
+                max_tokens=max_tokens,
+                reasoning_effort=reasoning_effort,
+            )
 
         kwargs: dict[str, Any] = {
             "model": requested_model,
@@ -76,10 +103,98 @@ class CustomProvider(LLMProvider):
         except Exception as e:
             return LLMResponse(content=f"Error: {e}", finish_reason="error")
 
+    async def _chat_via_openai_responses_with_fallback(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        requested_model: str,
+        max_tokens: int,
+        reasoning_effort: str | None,
+    ) -> LLMResponse:
+        last_error: Exception | None = None
+        for candidate_model in self._candidate_models(requested_model):
+            try:
+                return await self._chat_via_responses(
+                    messages=messages,
+                    tools=tools,
+                    model=candidate_model,
+                    max_tokens=max_tokens,
+                    reasoning_effort=reasoning_effort,
+                )
+            except RuntimeError as e:
+                msg = str(e)
+                if "该模型暂不支持" in msg or "model" in msg.lower() and "support" in msg.lower():
+                    last_error = e
+                    continue
+                return LLMResponse(content=f"Error: {e}", finish_reason="error")
+            except Exception as e:
+                return LLMResponse(content=f"Error: {e}", finish_reason="error")
+        return LLMResponse(content=f"Error: {last_error or 'No available model/channel'}", finish_reason="error")
+
+    def _is_aicodewith_gateway(self) -> bool:
+        base = (self.api_base or "").lower()
+        return any(k in base for k in _AICODEWITH_HOST_KEYWORDS)
+
     def _use_responses_api(self) -> bool:
         """Route specific gateways via Responses API for compatibility."""
         base = (self.api_base or "").rstrip("/").lower()
-        return any(k in base for k in _AICODEWITH_RESPONSES_BASE_KEYWORDS)
+        return "/chatgpt/v1" in base
+
+    @staticmethod
+    def _route_kind_for_model(model: str) -> str:
+        lowered = (model or "").lower()
+        if lowered.startswith("anthropic/") or "claude" in lowered:
+            return "anthropic"
+        if lowered.startswith("gemini/") or lowered.startswith("google/") or "gemini" in lowered:
+            return "gemini"
+        return "openai"
+
+    @staticmethod
+    def _normalize_model_for_route(model: str, route: str) -> str:
+        if "/" not in model:
+            return model
+        prefix, rest = model.split("/", 1)
+        normalized_prefix = prefix.lower().replace("-", "_")
+        if route == "anthropic" and normalized_prefix in {"anthropic", "claude"}:
+            return rest
+        if route == "gemini" and normalized_prefix in {"gemini", "google"}:
+            return rest
+        if route == "openai" and normalized_prefix in {"openai", "chatgpt"}:
+            return rest
+        return model
+
+    def _base_origin(self) -> str:
+        base = (self.api_base or "").rstrip("/")
+        if not base:
+            return _AICODEWITH_DEFAULT_ORIGIN
+        parsed = urlsplit(base)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+        return _AICODEWITH_DEFAULT_ORIGIN
+
+    def _openai_responses_base(self) -> str:
+        base = (self.api_base or "").rstrip("/")
+        if not base:
+            return f"{_AICODEWITH_DEFAULT_ORIGIN}{_AICODEWITH_OPENAI_PATH}"
+        lowered = base.lower()
+        if "/chatgpt/v1" in lowered:
+            return base
+        return f"{self._base_origin()}{_AICODEWITH_OPENAI_PATH}"
+
+    def _anthropic_base(self) -> str:
+        return self._base_origin()
+
+    def _gemini_base(self) -> str:
+        base = (self.api_base or "").rstrip("/")
+        if not base:
+            return f"{_AICODEWITH_DEFAULT_ORIGIN}{_AICODEWITH_GEMINI_PATH}"
+        parsed = urlsplit(base)
+        origin = self._base_origin()
+        path = (parsed.path or "").rstrip("/")
+        if "/gemini_cli" in path.lower():
+            idx = path.lower().index("/gemini_cli")
+            return f"{origin}{path[: idx + len('/gemini_cli')]}"
+        return f"{origin}{_AICODEWITH_GEMINI_PATH}"
 
     @staticmethod
     def _candidate_models(requested_model: str) -> list[str]:
@@ -87,6 +202,40 @@ class CustomProvider(LLMProvider):
         candidates = [requested_model]
         candidates.extend(m for m in _AICODEWITH_MODEL_FALLBACKS if m != requested_model)
         return candidates
+
+    @staticmethod
+    def _to_text(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("type") in {"text", "input_text", "output_text"} and isinstance(item.get("text"), str):
+                        parts.append(item["text"])
+                    elif item.get("type") == "image_url":
+                        url = (item.get("image_url") or {}).get("url")
+                        if isinstance(url, str) and url:
+                            parts.append(f"[image:{url}]")
+                elif isinstance(item, str):
+                    parts.append(item)
+            return "\n".join(p for p in parts if p)
+        if isinstance(content, dict):
+            return json.dumps(content, ensure_ascii=False)
+        if content is None:
+            return ""
+        return str(content)
+
+    @staticmethod
+    def _parse_json_args(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                return json_repair.loads(value)
+            except Exception:
+                return {"raw": value}
+        return {"raw": json.dumps(value, ensure_ascii=False)}
 
     async def _chat_via_responses(
         self,
@@ -115,7 +264,8 @@ class CustomProvider(LLMProvider):
             body["tool_choice"] = "auto"
             body["parallel_tool_calls"] = True
 
-        url = f"{self.api_base.rstrip('/')}/responses"
+        base_url = self._openai_responses_base() if self._is_aicodewith_gateway() else self.api_base.rstrip("/")
+        url = f"{base_url}/responses"
         headers = {
             "Authorization": f"Bearer {self.api_key or ''}",
             "Content-Type": "application/json",
@@ -133,6 +283,325 @@ class CustomProvider(LLMProvider):
 
         payload = response.json()
         return self._parse_responses(payload)
+
+    async def _chat_via_anthropic(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        model: str,
+        max_tokens: int,
+        temperature: float,
+    ) -> LLMResponse:
+        system_prompt, anthropic_messages = self._convert_messages_for_anthropic(self._sanitize_empty_content(messages))
+        body: dict[str, Any] = {
+            "model": model,
+            "max_tokens": max(1, max_tokens),
+            "messages": anthropic_messages,
+            "temperature": temperature,
+        }
+        if system_prompt:
+            body["system"] = system_prompt
+
+        if tools:
+            converted_tools = self._convert_tools_for_anthropic(tools)
+            if converted_tools:
+                body["tools"] = converted_tools
+                body["tool_choice"] = {"type": "auto"}
+
+        url = f"{self._anthropic_base().rstrip('/')}/v1/messages"
+        headers = {
+            "x-api-key": self.api_key or "",
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(url, headers=headers, json=body)
+        if response.status_code != 200:
+            raise RuntimeError(self._format_http_error(response))
+
+        return self._parse_anthropic(response.json())
+
+    async def _chat_via_gemini(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        model: str,
+        max_tokens: int,
+        temperature: float,
+    ) -> LLMResponse:
+        system_prompt, contents = self._convert_messages_for_gemini(self._sanitize_empty_content(messages))
+        body: dict[str, Any] = {
+            "contents": contents,
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max(1, max_tokens),
+            },
+        }
+        if system_prompt:
+            body["systemInstruction"] = {"parts": [{"text": system_prompt}]}
+        if tools:
+            converted_tools = self._convert_tools_for_gemini(tools)
+            if converted_tools:
+                body["tools"] = converted_tools
+                body["toolConfig"] = {"functionCallingConfig": {"mode": "AUTO"}}
+
+        model_name = self._normalize_model_for_route(model, "gemini")
+        url = f"{self._gemini_base().rstrip('/')}/v1beta/models/{model_name}:generateContent"
+        headers = {"Content-Type": "application/json"}
+        params = {"key": self.api_key or ""}
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(url, headers=headers, params=params, json=body)
+        if response.status_code != 200:
+            raise RuntimeError(self._format_http_error(response))
+
+        return self._parse_gemini(response.json())
+
+    @staticmethod
+    def _format_http_error(response: httpx.Response) -> str:
+        detail: Any = response.text
+        try:
+            payload = response.json()
+            err = payload.get("error")
+            if isinstance(err, dict):
+                detail = err.get("message") or err.get("type") or err
+            else:
+                detail = err or payload
+        except Exception:
+            pass
+        return f"HTTP {response.status_code}: {detail}"
+
+    def _convert_messages_for_anthropic(
+        self, messages: list[dict[str, Any]]
+    ) -> tuple[str, list[dict[str, Any]]]:
+        system_lines: list[str] = []
+        converted: list[dict[str, Any]] = []
+
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content")
+            if role == "system":
+                text = self._to_text(content)
+                if text:
+                    system_lines.append(text)
+                continue
+
+            if role == "user":
+                converted.append({"role": "user", "content": self._to_text(content)})
+                continue
+
+            if role == "assistant":
+                blocks: list[dict[str, Any]] = []
+                text = self._to_text(content)
+                if text:
+                    blocks.append({"type": "text", "text": text})
+                for idx, tc in enumerate(msg.get("tool_calls") or []):
+                    fn = tc.get("function") or {}
+                    blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": tc.get("id") or f"call_{idx}",
+                            "name": fn.get("name") or "",
+                            "input": self._parse_json_args(fn.get("arguments") or {}),
+                        }
+                    )
+                if blocks:
+                    converted.append({"role": "assistant", "content": blocks})
+                continue
+
+            if role == "tool":
+                converted.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": msg.get("tool_call_id") or "call_0",
+                                "content": self._to_text(content),
+                            }
+                        ],
+                    }
+                )
+
+        return "\n".join(system_lines).strip(), converted
+
+    @staticmethod
+    def _convert_tools_for_anthropic(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        converted: list[dict[str, Any]] = []
+        for tool in tools:
+            fn = (tool.get("function") or {}) if tool.get("type") == "function" else tool
+            name = fn.get("name")
+            if not name:
+                continue
+            schema = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {"type": "object", "properties": {}}
+            converted.append(
+                {
+                    "name": name,
+                    "description": fn.get("description") or "",
+                    "input_schema": schema,
+                }
+            )
+        return converted
+
+    def _convert_messages_for_gemini(self, messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+        system_lines: list[str] = []
+        converted: list[dict[str, Any]] = []
+        tool_name_by_call_id: dict[str, str] = {}
+
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content")
+
+            if role == "system":
+                text = self._to_text(content)
+                if text:
+                    system_lines.append(text)
+                continue
+
+            if role == "user":
+                converted.append({"role": "user", "parts": [{"text": self._to_text(content)}]})
+                continue
+
+            if role == "assistant":
+                parts: list[dict[str, Any]] = []
+                text = self._to_text(content)
+                if text:
+                    parts.append({"text": text})
+                for idx, tc in enumerate(msg.get("tool_calls") or []):
+                    fn = tc.get("function") or {}
+                    call_id = tc.get("id") or f"call_{idx}"
+                    name = fn.get("name") or ""
+                    tool_name_by_call_id[call_id] = name
+                    parts.append(
+                        {
+                            "functionCall": {
+                                "name": name,
+                                "args": self._parse_json_args(fn.get("arguments") or {}),
+                            }
+                        }
+                    )
+                if parts:
+                    converted.append({"role": "model", "parts": parts})
+                continue
+
+            if role == "tool":
+                tool_call_id = msg.get("tool_call_id") or ""
+                tool_name = tool_name_by_call_id.get(tool_call_id, "tool")
+                converted.append(
+                    {
+                        "role": "user",
+                        "parts": [
+                            {
+                                "functionResponse": {
+                                    "name": tool_name,
+                                    "response": {"result": self._to_text(content)},
+                                }
+                            }
+                        ],
+                    }
+                )
+
+        return "\n".join(system_lines).strip(), converted
+
+    @staticmethod
+    def _convert_tools_for_gemini(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        declarations: list[dict[str, Any]] = []
+        for tool in tools:
+            fn = (tool.get("function") or {}) if tool.get("type") == "function" else tool
+            name = fn.get("name")
+            if not name:
+                continue
+            params = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {"type": "object", "properties": {}}
+            declarations.append(
+                {
+                    "name": name,
+                    "description": fn.get("description") or "",
+                    "parameters": params,
+                }
+            )
+        if not declarations:
+            return []
+        return [{"functionDeclarations": declarations}]
+
+    def _parse_anthropic(self, payload: dict[str, Any]) -> LLMResponse:
+        text_parts: list[str] = []
+        tool_calls: list[ToolCallRequest] = []
+
+        for idx, block in enumerate(payload.get("content") or []):
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            if block_type == "text":
+                text = block.get("text")
+                if isinstance(text, str) and text:
+                    text_parts.append(text)
+            elif block_type == "tool_use":
+                tool_calls.append(
+                    ToolCallRequest(
+                        id=block.get("id") or f"call_{idx}",
+                        name=block.get("name") or "",
+                        arguments=block.get("input") if isinstance(block.get("input"), dict) else {},
+                    )
+                )
+
+        stop_reason = (payload.get("stop_reason") or "").lower()
+        finish_reason = "length" if "max" in stop_reason else "stop"
+
+        usage_raw = payload.get("usage") or {}
+        usage = {
+            "prompt_tokens": usage_raw.get("input_tokens", 0),
+            "completion_tokens": usage_raw.get("output_tokens", 0),
+            "total_tokens": usage_raw.get("input_tokens", 0) + usage_raw.get("output_tokens", 0),
+        }
+
+        return LLMResponse(
+            content="".join(text_parts) or None,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            usage=usage,
+        )
+
+    def _parse_gemini(self, payload: dict[str, Any]) -> LLMResponse:
+        candidates = payload.get("candidates") or []
+        candidate = candidates[0] if candidates else {}
+        content = candidate.get("content") if isinstance(candidate, dict) else {}
+        parts = content.get("parts") if isinstance(content, dict) else []
+
+        text_parts: list[str] = []
+        tool_calls: list[ToolCallRequest] = []
+        for idx, part in enumerate(parts or []):
+            if not isinstance(part, dict):
+                continue
+            text = part.get("text")
+            if isinstance(text, str) and text:
+                text_parts.append(text)
+            function_call = part.get("functionCall")
+            if isinstance(function_call, dict):
+                args = function_call.get("args")
+                parsed_args = args if isinstance(args, dict) else self._parse_json_args(args)
+                tool_calls.append(
+                    ToolCallRequest(
+                        id=f"gemini_call_{idx}",
+                        name=function_call.get("name") or "",
+                        arguments=parsed_args,
+                    )
+                )
+
+        finish_raw = str(candidate.get("finishReason") or "").upper()
+        finish_reason = "length" if finish_raw == "MAX_TOKENS" else "stop"
+
+        usage_raw = payload.get("usageMetadata") or {}
+        usage = {
+            "prompt_tokens": usage_raw.get("promptTokenCount", 0),
+            "completion_tokens": usage_raw.get("candidatesTokenCount", 0),
+            "total_tokens": usage_raw.get("totalTokenCount", 0),
+        }
+
+        return LLMResponse(
+            content="".join(text_parts) or None,
+            tool_calls=tool_calls,
+            finish_reason=finish_reason,
+            usage=usage,
+        )
 
     def _parse_responses(self, payload: dict[str, Any]) -> LLMResponse:
         """Parse OpenAI Responses API payload into standard LLMResponse."""
