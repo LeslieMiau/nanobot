@@ -47,6 +47,7 @@ class AgentLoop:
 
     _TOOL_RESULT_MAX_CHARS = 500
     _RESTART_ALIASES = {"重启", "重新启动", "restart"}
+    _SHINCHAN_WELCOME = "哟～你来啦！我是 nanobot 小新版，今天也一起把事情搞定吧～"
 
     def __init__(
         self,
@@ -479,7 +480,13 @@ class AgentLoop:
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content="Restarting nanobot...",
+                content=f"{self._SHINCHAN_WELCOME}\n我先转一圈，马上重启回来喔～",
+            )
+        if cmd == "/start":
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=self._SHINCHAN_WELCOME,
             )
         if cmd == "/new":
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
@@ -511,7 +518,7 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/new — Start a new conversation\n/stop — Stop the current task\n/restart — Restart nanobot (gateway mode)\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/start — Show welcome message\n/new — Start a new conversation\n/stop — Stop the current task\n/restart — Restart nanobot (gateway mode)\n/help — Show available commands")
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):

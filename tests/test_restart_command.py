@@ -58,7 +58,8 @@ async def test_restart_command_calls_callback(tmp_path: Path) -> None:
 
     cb.assert_awaited_once()
     assert out is not None
-    assert out.content == "Restarting nanobot..."
+    assert "我是 nanobot 小新版" in out.content
+    assert "重启回来" in out.content
 
 
 @pytest.mark.asyncio
@@ -71,4 +72,16 @@ async def test_restart_alias_in_chinese_calls_callback(tmp_path: Path) -> None:
 
     cb.assert_awaited_once()
     assert out is not None
-    assert out.content == "Restarting nanobot..."
+    assert "我是 nanobot 小新版" in out.content
+    assert "重启回来" in out.content
+
+
+@pytest.mark.asyncio
+async def test_start_command_returns_shinchan_welcome(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path)
+    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/start")
+
+    out = await loop._process_message(msg)
+
+    assert out is not None
+    assert "我是 nanobot 小新版" in out.content
