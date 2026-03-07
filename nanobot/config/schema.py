@@ -262,6 +262,7 @@ class CodingConfig(Base):
     enabled: bool = True
     auto_detect: bool = True
     disable_persona: bool = True
+    require_plan_for_large_changes: bool = True
     enforce_read_before_write: bool = True
     require_verification_after_edits: bool = True
 

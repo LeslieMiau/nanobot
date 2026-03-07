@@ -74,6 +74,11 @@ class AgentLoop:
         "test", "tests", "compile", "build", "error", "stack trace", "exception",
         "代码", "编码", "实现", "修复", "报错", "错误", "测试", "重构", "编译", "构建",
     )
+    _LARGE_CHANGE_KEYWORDS = (
+        "refactor", "rewrite", "redesign", "overhaul", "migration", "migrate", "architecture",
+        "feature", "multi-file", "across files", "rename", "restructure", "scaffold",
+        "重构", "重写", "重做", "迁移", "架构", "改造", "大改", "多文件", "跨文件", "整个", "全部",
+    )
     _REPO_KEYWORDS = (
         "repo", "repository", "workspace", "project", "git", "commit", "branch", "pr",
         "仓库", "工程", "项目", "分支", "提交", "文件", "目录", "路径",
@@ -164,6 +169,7 @@ class AgentLoop:
         self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._token_guard_pending: dict[str, str] = {}  # session_key -> pending user message
+        self._plan_guard_pending: dict[str, str] = {}  # session_key -> pending large coding request
         self._processing_lock = asyncio.Lock()
         self._register_default_tools()
 
@@ -274,6 +280,54 @@ class AgentLoop:
             return setting, True
         return setting, self._workspace_has_repo_markers() and any(
             token in user_text.lower() for token in ("help me", "帮我", "请你", "how do i", "怎么", "如何")
+        )
+
+    @classmethod
+    def _looks_like_large_change_request(cls, text: str) -> bool:
+        lowered = text.lower()
+        if any(keyword in lowered for keyword in cls._LARGE_CHANGE_KEYWORDS):
+            return True
+        return bool(re.search(r"\b(?:multiple|many|several)\s+files\b", lowered))
+
+    async def _build_large_change_plan(
+        self,
+        *,
+        history: list[dict[str, Any]],
+        msg: InboundMessage,
+        coding_enabled: bool,
+    ) -> str:
+        planning_request = (
+            f"{msg.content}\n\n"
+            "[Planning guard] This looks like a larger coding change. "
+            "Before making edits, provide a short implementation plan only. "
+            "Do not call tools, do not claim work is done, and keep it concise."
+        )
+        messages = self.context.build_messages(
+            history=history,
+            current_message=planning_request,
+            media=msg.media if msg.media else None,
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            persona_runtime_hints=self._persona_hints_for_turn(msg.content, coding_enabled=coding_enabled),
+            coding_mode=coding_enabled,
+        )
+        response = await self.provider.chat(
+            messages=messages,
+            tools=None,
+            model=self.model,
+            temperature=min(self._temperature_for_turn(msg.content, coding_enabled=coding_enabled), 0.1),
+            max_tokens=min(self.max_tokens, 1024),
+            reasoning_effort=self.reasoning_effort,
+        )
+        plan = self._strip_think(response.content) or (
+            "Planned steps:\n1. Inspect the relevant files and tests.\n"
+            "2. Implement the change with minimal edits.\n"
+            "3. Run the narrowest verification and report any remaining risk."
+        )
+        return (
+            f"{plan}\n\n"
+            f"Reply `{self.token_guard.confirm_command}` to execute this larger change, "
+            f"or `{self.token_guard.cancel_command}` to cancel."
         )
 
     def _persona_hints_for_turn(self, user_text: str, *, coding_enabled: bool) -> str | None:
@@ -686,6 +740,7 @@ class AgentLoop:
         session_key: str | None = None,
         on_progress: Callable[[str], Awaitable[None]] | None = None,
         bypass_token_guard: bool = False,
+        bypass_plan_guard: bool = False,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
         # System messages: parse origin from chat_id ("channel:chat_id")
@@ -740,15 +795,17 @@ class AgentLoop:
         if cmd == cancel_cmd.lstrip("/"):
             cmd = cancel_cmd
         pending = self._token_guard_pending.get(key)
-        if pending is not None:
+        plan_pending = self._plan_guard_pending.get(key)
+        if pending is not None or plan_pending is not None:
             if cmd in self._TOKEN_GUARD_EXIT_ALIASES:
                 cmd = cancel_cmd
             elif cmd not in {confirm_cmd, cancel_cmd}:
+                pending_kind = "large task" if pending is not None else "coding plan"
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
                     content=(
-                        "There is already a pending large task.\n"
+                        f"There is already a pending {pending_kind}.\n"
                         f"Reply `{self.token_guard.confirm_command}` to continue it, or "
                         f"`{self.token_guard.cancel_command}` to cancel."
                     ),
@@ -756,34 +813,52 @@ class AgentLoop:
                 )
         if cmd == confirm_cmd:
             pending = self._token_guard_pending.pop(key, None)
-            if not pending:
-                return OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content="No pending large task to confirm.",
+            if pending:
+                replay = InboundMessage(
+                    channel=msg.channel,
+                    sender_id=msg.sender_id,
+                    chat_id=msg.chat_id,
+                    content=pending,
+                    metadata=msg.metadata or {},
                 )
-            replay = InboundMessage(
-                channel=msg.channel,
-                sender_id=msg.sender_id,
-                chat_id=msg.chat_id,
-                content=pending,
-                metadata=msg.metadata or {},
-            )
-            return await self._process_message(
-                replay,
-                session_key=key,
-                on_progress=on_progress,
-                bypass_token_guard=True,
-            )
-        if cmd == cancel_cmd:
-            removed = self._token_guard_pending.pop(key, None)
-            if removed is None:
-                return OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content="No pending large task to cancel.",
+                return await self._process_message(
+                    replay,
+                    session_key=key,
+                    on_progress=on_progress,
+                    bypass_token_guard=True,
+                    bypass_plan_guard=bypass_plan_guard,
+                )
+            plan_pending = self._plan_guard_pending.pop(key, None)
+            if plan_pending:
+                replay = InboundMessage(
+                    channel=msg.channel,
+                    sender_id=msg.sender_id,
+                    chat_id=msg.chat_id,
+                    content=plan_pending,
+                    metadata=msg.metadata or {},
+                )
+                return await self._process_message(
+                    replay,
+                    session_key=key,
+                    on_progress=on_progress,
+                    bypass_token_guard=bypass_token_guard,
+                    bypass_plan_guard=True,
                 )
             return OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id,
-                content="Canceled pending large task.",
+                content="No pending large task or coding plan to confirm.",
+            )
+        if cmd == cancel_cmd:
+            removed = self._token_guard_pending.pop(key, None)
+            plan_removed = self._plan_guard_pending.pop(key, None)
+            if removed is None and plan_removed is None:
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content="No pending large task or coding plan to cancel.",
+                )
+            return OutboundMessage(
+                channel=msg.channel, chat_id=msg.chat_id,
+                content="Canceled pending task.",
             )
         if cmd == "/restart":
             if not self._restart_callback:
@@ -950,6 +1025,24 @@ class AgentLoop:
             persona_runtime_hints=persona_hints,
             coding_mode=coding_enabled,
         )
+        if (
+            coding_enabled
+            and not bypass_plan_guard
+            and self.coding_config.require_plan_for_large_changes
+            and self._looks_like_large_change_request(msg.content)
+        ):
+            self._plan_guard_pending[key] = msg.content
+            plan_content = await self._build_large_change_plan(
+                history=history,
+                msg=msg,
+                coding_enabled=coding_enabled,
+            )
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=plan_content,
+                metadata=msg.metadata or {},
+            )
         if self.token_guard.enabled and not bypass_token_guard:
             estimated = self._estimate_tokens(initial_messages)
             if estimated >= self.token_guard.threshold_tokens:

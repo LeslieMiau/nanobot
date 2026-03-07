@@ -14,6 +14,7 @@ def test_persona_defaults_are_backward_compatible() -> None:
     assert coding.enabled is True
     assert coding.auto_detect is True
     assert coding.disable_persona is True
+    assert coding.require_plan_for_large_changes is True
     assert coding.enforce_read_before_write is True
     assert coding.require_verification_after_edits is True
 
@@ -66,5 +67,6 @@ def test_coding_defaults_are_backward_compatible_when_missing_from_input() -> No
     assert coding.enabled is True
     assert coding.auto_detect is True
     assert coding.disable_persona is True
+    assert coding.require_plan_for_large_changes is True
     assert coding.enforce_read_before_write is True
     assert coding.require_verification_after_edits is True
