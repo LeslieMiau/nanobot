@@ -7,7 +7,8 @@ import pytest
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.providers.catalog import AvailableModel
+from nanobot.config.schema import Config
+from nanobot.providers.catalog import AvailableModel, build_available_models
 from nanobot.providers.base import LLMProvider, LLMResponse
 
 
@@ -210,6 +211,26 @@ async def test_model_command_lists_available_models(tmp_path: Path) -> None:
     assert "Current model: `dummy`" in out.content
 
 
+def test_build_available_models_skips_speculative_gateway_catalog_entries() -> None:
+    config = Config()
+    config.agents.defaults.provider = "aicodewith"
+    config.agents.defaults.model = "gpt-5.4"
+    config.providers.aicodewith.api_key = "test-key"
+
+    models = build_available_models(
+        config,
+        default_model=config.agents.defaults.model,
+        default_provider_name="aicodewith",
+        coding_config=config.agents.defaults.coding,
+    )
+
+    assert any(model.model == "gpt-5.4" and model.provider_name == "aicodewith" for model in models)
+    assert not any(
+        model.provider_name == "aicodewith" and model.source == "catalog"
+        for model in models
+    )
+
+
 @pytest.mark.asyncio
 async def test_model_command_selects_model_by_index(tmp_path: Path) -> None:
     switch_calls: list[tuple[str | None, str | None]] = []
@@ -368,6 +389,43 @@ async def test_model_command_persists_session_selection_across_reloads(tmp_path:
     )
     out = await reloaded_loop._process_message(
         InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="hello")
+    )
+
+    assert out is not None
+    assert out.content == "switched:gpt-5.2"
+
+
+@pytest.mark.asyncio
+async def test_system_messages_use_session_key_override_for_model_selection(tmp_path: Path) -> None:
+    def provider_switcher(requested_model: str | None):
+        if requested_model is None:
+            return _Provider("default"), "dummy", "custom"
+        return _Provider("switched"), requested_model, "openai"
+
+    loop, _ = _make_loop(
+        tmp_path,
+        provider_name="custom",
+        provider_switcher=provider_switcher,
+    )
+
+    await loop._process_message(
+        InboundMessage(
+            channel="cli",
+            sender_id="u1",
+            chat_id="room",
+            content="/model gpt-5.2",
+            session_key_override="cli:room:thread-a",
+        )
+    )
+
+    out = await loop._process_message(
+        InboundMessage(
+            channel="system",
+            sender_id="subagent",
+            chat_id="cli:room",
+            content="follow up",
+            session_key_override="cli:room:thread-a",
+        )
     )
 
     assert out is not None

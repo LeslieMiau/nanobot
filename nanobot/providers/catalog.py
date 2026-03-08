@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from nanobot.providers.factory import create_provider
 from nanobot.providers.factory import ProviderConfigError, resolve_switch_selection
 from nanobot.providers.registry import PROVIDERS, find_by_name
 
@@ -68,33 +69,6 @@ _PROVIDER_MODEL_CATALOG: dict[str, tuple[str, ...]] = {
         "groq/llama-3.3-70b-versatile",
         "groq/llama-3.1-8b-instant",
     ),
-    # Gateways can route multiple upstreams, so expose a compact cross-provider set.
-    "openrouter": (
-        "anthropic/claude-opus-4-5",
-        "anthropic/claude-sonnet-4-5",
-        "gpt-5.4",
-        "gpt-5.1",
-        "gemini/gemini-2.5-pro",
-        "deepseek/deepseek-chat",
-    ),
-    "aihubmix": (
-        "anthropic/claude-opus-4-5",
-        "gpt-5.4",
-        "gemini/gemini-2.5-pro",
-    ),
-    "aicodewith": (
-        "anthropic/claude-opus-4-5",
-        "gpt-5.4",
-        "deepseek/deepseek-chat",
-    ),
-    "siliconflow": (
-        "Qwen/Qwen3-32B",
-        "deepseek-ai/DeepSeek-V3",
-    ),
-    "volcengine": (
-        "doubao-1-5-pro-32k-250115",
-        "deepseek-v3-250324",
-    ),
 }
 
 
@@ -144,10 +118,20 @@ def build_available_models(
         default_provider_name=default_provider_name,
         current_provider_name=current_provider_name,
     ):
+        spec = find_by_name(provider_name)
+        if spec is None or spec.is_gateway or spec.is_local or provider_name in {"custom", "vllm"}:
+            continue
         for model in _PROVIDER_MODEL_CATALOG.get(provider_name, ()):
             add(model, provider_name, "catalog")
 
-    return options
+    return _filter_activatable_models(
+        config,
+        options,
+        default_model=default_model,
+        default_provider_name=default_provider_name,
+        current_model=current_model,
+        current_provider_name=current_provider_name,
+    )
 
 
 def _coding_models(coding_config: "CodingConfig | None") -> list[str]:
@@ -229,3 +213,38 @@ def _infer_provider_name(
         ).provider_name
     except ProviderConfigError:
         return config.get_provider_name(model)
+
+
+def _filter_activatable_models(
+    config: "Config",
+    options: list[AvailableModel],
+    *,
+    default_model: str,
+    default_provider_name: str | None,
+    current_model: str | None,
+    current_provider_name: str | None,
+) -> list[AvailableModel]:
+    filtered: list[AvailableModel] = []
+    for option in options:
+        provider_name = option.provider_name or _infer_provider_name(
+            config,
+            option.model,
+            default_model=default_model,
+            default_provider_name=default_provider_name,
+            current_model=current_model,
+            current_provider_name=current_provider_name,
+        )
+        if not provider_name:
+            continue
+        try:
+            create_provider(config, model=option.model, provider_name=provider_name)
+        except Exception:
+            continue
+        filtered.append(
+            AvailableModel(
+                model=option.model,
+                provider_name=provider_name,
+                source=option.source,
+            )
+        )
+    return filtered

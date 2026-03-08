@@ -72,14 +72,28 @@ class SubagentManager:
         origin_chat_id: str = "direct",
         session_key: str | None = None,
         coding_enabled: bool = False,
+        provider: LLMProvider | None = None,
+        model: str | None = None,
     ) -> str:
         """Spawn a subagent to execute a task in the background."""
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
-        origin = {"channel": origin_channel, "chat_id": origin_chat_id}
+        origin = {
+            "channel": origin_channel,
+            "chat_id": origin_chat_id,
+            "session_key": session_key,
+        }
 
         bg_task = asyncio.create_task(
-            self._run_subagent(task_id, task, display_label, origin, coding_enabled)
+            self._run_subagent(
+                task_id,
+                task,
+                display_label,
+                origin,
+                coding_enabled,
+                provider=provider or self.provider,
+                model=model or self.model,
+            )
         )
         self._running_tasks[task_id] = bg_task
         if session_key:
@@ -240,9 +254,14 @@ class SubagentManager:
         label: str,
         origin: dict[str, str],
         coding_enabled: bool,
+        *,
+        provider: LLMProvider | None = None,
+        model: str | None = None,
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
+        active_provider = provider or self.provider
+        active_model = model or self.model
 
         try:
             # Build subagent tools (no message tool, no spawn tool)
@@ -276,10 +295,10 @@ class SubagentManager:
             while iteration < max_iterations:
                 iteration += 1
 
-                response = await self.provider.chat(
+                response = await active_provider.chat(
                     messages=messages,
                     tools=tools.get_definitions(),
-                    model=self.model,
+                    model=active_model,
                     temperature=self.temperature,
                     max_tokens=self.max_tokens,
                     reasoning_effort=self.reasoning_effort,
@@ -374,6 +393,7 @@ Summarize this naturally for the user. Keep it brief (1-2 sentences). Do not men
             sender_id="subagent",
             chat_id=f"{origin['channel']}:{origin['chat_id']}",
             content=announce_content,
+            session_key_override=origin.get("session_key") or None,
         )
 
         await self.bus.publish_inbound(msg)

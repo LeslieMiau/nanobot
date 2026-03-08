@@ -262,6 +262,7 @@ class AgentLoop:
         message_id: str | None = None,
         *,
         coding_enabled: bool = False,
+        session_key: str | None = None,
     ) -> None:
         """Update context for all tools that need routing info."""
         for name in ("message", "spawn", "cron", "image_generate"):
@@ -270,7 +271,14 @@ class AgentLoop:
                     if name == "message":
                         tool.set_context(channel, chat_id, message_id)
                     elif name == "spawn":
-                        tool.set_context(channel, chat_id, coding_enabled=coding_enabled)
+                        tool.set_context(
+                            channel,
+                            chat_id,
+                            coding_enabled=coding_enabled,
+                            provider=self.provider,
+                            model=self.model,
+                            session_key=session_key,
+                        )
                     elif name == "image_generate":
                         tool.set_context(channel, chat_id)
                     else:
@@ -774,11 +782,11 @@ class AgentLoop:
         if self._available_models_provider:
             for option in self._available_models_provider(current_model, current_provider_name):
                 add(option.model, option.provider_name, option.source)
-
-        add(self._default_model, self._default_provider_name, "default")
-        add(current_model, current_provider_name, "current")
-        for model in self._coding_route_raw_models():
-            add(model, source="coding")
+        else:
+            add(self._default_model, self._default_provider_name, "default")
+            add(current_model, current_provider_name, "current")
+            for model in self._coding_route_raw_models():
+                add(model, source="coding")
         return options
 
     def _format_available_models(self, session: Session) -> str:
@@ -1303,7 +1311,7 @@ class AgentLoop:
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
                                 else ("cli", msg.chat_id))
             logger.info("Processing system message from {}", msg.sender_id)
-            key = f"{channel}:{chat_id}"
+            key = msg.session_key_override or f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
             self._restore_session_model_provider(session)
             _, coding_enabled = self._resolve_coding_mode(session, msg.content)
@@ -1312,6 +1320,7 @@ class AgentLoop:
                 chat_id,
                 msg.metadata.get("message_id"),
                 coding_enabled=coding_enabled,
+                session_key=key,
             )
             history = session.get_history(max_messages=self.memory_window)
             persona_hints = self._persona_hints_for_turn(msg.content, coding_enabled=coding_enabled)
@@ -1452,7 +1461,12 @@ class AgentLoop:
                     if snapshot:
                         temp = Session(key=session.key)
                         temp.messages = list(snapshot)
-                        if not await self._consolidate_memory(temp, archive_all=True):
+                        if not await self._consolidate_memory(
+                            temp,
+                            provider=self.provider,
+                            model=self.model,
+                            archive_all=True,
+                        ):
                             return OutboundMessage(
                                 channel=msg.channel, chat_id=msg.chat_id,
                                 content="Memory archival failed, session not cleared. Please try again.",
@@ -1592,11 +1606,17 @@ class AgentLoop:
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
             self._consolidating.add(session.key)
             lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
+            consolidation_provider = self.provider
+            consolidation_model = self.model
 
             async def _consolidate_and_unlock():
                 try:
                     async with lock:
-                        await self._consolidate_memory(session)
+                        await self._consolidate_memory(
+                            session,
+                            provider=consolidation_provider,
+                            model=consolidation_model,
+                        )
                 finally:
                     self._consolidating.discard(session.key)
                     _task = asyncio.current_task()
@@ -1612,6 +1632,7 @@ class AgentLoop:
             msg.chat_id,
             msg.metadata.get("message_id"),
             coding_enabled=coding_enabled,
+            session_key=key,
         )
         if message_tool := self.tools.get("message"):
             if isinstance(message_tool, MessageTool):
@@ -1749,10 +1770,17 @@ class AgentLoop:
             session.messages.append(entry)
         session.updated_at = datetime.now()
 
-    async def _consolidate_memory(self, session, archive_all: bool = False) -> bool:
+    async def _consolidate_memory(
+        self,
+        session,
+        *,
+        provider: LLMProvider,
+        model: str,
+        archive_all: bool = False,
+    ) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
         return await MemoryStore(self.workspace).consolidate(
-            session, self.provider, self.model,
+            session, provider, model,
             archive_all=archive_all, memory_window=self.memory_window,
         )
 
