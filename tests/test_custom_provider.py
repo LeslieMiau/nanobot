@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from nanobot.providers.custom_provider import CustomProvider
 
 
@@ -103,3 +107,100 @@ def test_parse_gemini_payload_with_function_call() -> None:
     assert out.usage["completion_tokens"] == 11
     assert out.tool_calls[0].name == "read_file"
     assert out.tool_calls[0].arguments["path"] == "README.md"
+
+
+@pytest.mark.asyncio
+async def test_chat_via_responses_tolerates_bad_content_encoding_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = CustomProvider(api_key="test", api_base="https://api.with7.cn/chatgpt/v1", default_model="dummy")
+    payload = {"status": "completed", "output_text": "ok-from-response", "output": [], "usage": {}}
+    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    captured_headers: dict[str, str] = {}
+
+    class _FakeResponse:
+        def __init__(self):
+            self.status_code = 200
+            self.headers = {"content-encoding": "deflate"}
+
+        async def aiter_raw(self):
+            yield raw
+
+    class _FakeStream:
+        async def __aenter__(self):
+            return _FakeResponse()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url, headers=None, params=None, json=None):
+            nonlocal captured_headers
+            captured_headers = dict(headers or {})
+            return _FakeStream()
+
+    monkeypatch.setattr("nanobot.providers.custom_provider.httpx.AsyncClient", _FakeClient)
+
+    out = await provider._chat_via_responses(
+        messages=[{"role": "user", "content": "hi"}],
+        tools=None,
+        model="gpt-5.4",
+        max_tokens=128,
+        reasoning_effort=None,
+    )
+
+    assert out.content == "ok-from-response"
+    assert captured_headers.get("Accept-Encoding") == "identity"
+
+
+@pytest.mark.asyncio
+async def test_chat_via_responses_non_200_returns_readable_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    provider = CustomProvider(api_key="test", api_base="https://api.with7.cn/chatgpt/v1", default_model="dummy")
+    payload = {"error": "upstream down"}
+    raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    class _FakeResponse:
+        def __init__(self):
+            self.status_code = 502
+            self.headers = {"content-encoding": "deflate"}
+
+        async def aiter_raw(self):
+            yield raw
+
+    class _FakeStream:
+        async def __aenter__(self):
+            return _FakeResponse()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url, headers=None, params=None, json=None):
+            return _FakeStream()
+
+    monkeypatch.setattr("nanobot.providers.custom_provider.httpx.AsyncClient", _FakeClient)
+
+    with pytest.raises(RuntimeError, match=r"HTTP 502: upstream down"):
+        await provider._chat_via_responses(
+            messages=[{"role": "user", "content": "hi"}],
+            tools=None,
+            model="gpt-5.4",
+            max_tokens=128,
+            reasoning_effort=None,
+        )

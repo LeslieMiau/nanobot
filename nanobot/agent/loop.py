@@ -1097,7 +1097,9 @@ class AgentLoop:
             coding_mode=coding_enabled,
         )
         if self.token_guard.enabled and not bypass_token_guard:
-            estimated = self._estimate_tokens(initial_messages)
+            # Guard should reflect this request's payload only; full history can be
+            # large and otherwise causes false positives on short follow-ups.
+            estimated = self._estimate_tokens(initial_messages[-1:])
             if estimated >= self.token_guard.threshold_tokens:
                 self._token_guard_pending[key] = msg.content
                 extra = ""

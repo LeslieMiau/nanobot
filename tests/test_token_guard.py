@@ -65,6 +65,23 @@ async def test_token_guard_does_not_block_normal_message(tmp_path: Path) -> None
 
 
 @pytest.mark.asyncio
+async def test_token_guard_ignores_history_size_for_short_follow_up(tmp_path: Path) -> None:
+    loop, provider = _make_loop(tmp_path, threshold=100)
+    session = loop.sessions.get_or_create("cli:direct")
+    for i in range(60):
+        session.messages.append({"role": "user", "content": f"history-user-{i} " + ("A" * 300)})
+        session.messages.append({"role": "assistant", "content": "history-assistant " + ("B" * 300)})
+
+    out = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="hi")
+    )
+
+    assert out is not None
+    assert out.content == "ok"
+    assert provider.calls == 1
+
+
+@pytest.mark.asyncio
 async def test_token_guard_blocks_large_message_until_confirmed(tmp_path: Path) -> None:
     loop, provider = _make_loop(tmp_path, threshold=10)
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="A" * 300)

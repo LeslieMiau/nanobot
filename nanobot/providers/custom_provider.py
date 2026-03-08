@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import uuid
+import zlib
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -204,6 +206,89 @@ class CustomProvider(LLMProvider):
         return candidates
 
     @staticmethod
+    def _try_parse_json(text: str) -> Any | None:
+        if not text:
+            return None
+        try:
+            return json.loads(text)
+        except Exception:
+            try:
+                return json_repair.loads(text)
+            except Exception:
+                return None
+
+    @classmethod
+    def _decode_json_body(cls, raw: bytes, content_encoding: str | None) -> tuple[Any | None, str]:
+        """Best-effort decode JSON body, tolerating bad/incorrect encoding headers."""
+        if not raw:
+            return None, ""
+
+        enc = (content_encoding or "").lower()
+        candidates: list[bytes] = [raw]
+
+        def _append(candidate: bytes) -> None:
+            if candidate not in candidates:
+                candidates.append(candidate)
+
+        def _try_decompress(func) -> None:
+            try:
+                _append(func(raw))
+            except Exception:
+                pass
+
+        if "gzip" in enc:
+            _try_decompress(gzip.decompress)
+            _try_decompress(lambda b: zlib.decompress(b, zlib.MAX_WBITS | 16))
+        if "deflate" in enc:
+            _try_decompress(zlib.decompress)
+            _try_decompress(lambda b: zlib.decompress(b, -zlib.MAX_WBITS))
+        if "gzip" not in enc and "deflate" not in enc:
+            _try_decompress(gzip.decompress)
+            _try_decompress(zlib.decompress)
+            _try_decompress(lambda b: zlib.decompress(b, -zlib.MAX_WBITS))
+
+        fallback_text = ""
+        for payload in candidates:
+            try:
+                text = payload.decode("utf-8")
+            except UnicodeDecodeError:
+                text = payload.decode("utf-8", errors="replace")
+            parsed = cls._try_parse_json(text)
+            if parsed is not None:
+                return parsed, text
+            if not fallback_text:
+                fallback_text = text
+        return None, fallback_text
+
+    async def _post_json_with_raw(
+        self,
+        *,
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        params: dict[str, Any] | None = None,
+    ) -> tuple[int, Any | None, str]:
+        req_headers = dict(headers)
+        req_headers.setdefault("Accept-Encoding", "identity")
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            async with client.stream(
+                "POST",
+                url,
+                headers=req_headers,
+                params=params,
+                json=body,
+            ) as response:
+                chunks: list[bytes] = []
+                async for chunk in response.aiter_raw():
+                    chunks.append(chunk)
+                raw = b"".join(chunks)
+                payload, text = self._decode_json_body(raw, response.headers.get("content-encoding"))
+                if not text:
+                    text = raw.decode("utf-8", errors="replace")
+                return response.status_code, payload, text
+
+    @staticmethod
     def _to_text(content: Any) -> str:
         if isinstance(content, str):
             return content
@@ -270,18 +355,15 @@ class CustomProvider(LLMProvider):
             "Authorization": f"Bearer {self.api_key or ''}",
             "Content-Type": "application/json",
         }
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(url, headers=headers, json=body)
-        if response.status_code != 200:
-            detail = response.text
-            try:
-                payload = response.json()
-                detail = payload.get("error") or payload
-            except Exception:
-                pass
-            raise RuntimeError(f"HTTP {response.status_code}: {detail}")
-
-        payload = response.json()
+        status_code, payload, raw_text = await self._post_json_with_raw(
+            url=url,
+            headers=headers,
+            body=body,
+        )
+        if status_code != 200:
+            raise RuntimeError(self._format_http_error(status_code, payload, raw_text))
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"HTTP {status_code}: Invalid JSON response: {raw_text[:300]}")
         return self._parse_responses(payload)
 
     async def _chat_via_anthropic(
@@ -314,12 +396,16 @@ class CustomProvider(LLMProvider):
             "anthropic-version": "2023-06-01",
             "Content-Type": "application/json",
         }
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(url, headers=headers, json=body)
-        if response.status_code != 200:
-            raise RuntimeError(self._format_http_error(response))
-
-        return self._parse_anthropic(response.json())
+        status_code, payload, raw_text = await self._post_json_with_raw(
+            url=url,
+            headers=headers,
+            body=body,
+        )
+        if status_code != 200:
+            raise RuntimeError(self._format_http_error(status_code, payload, raw_text))
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"HTTP {status_code}: Invalid JSON response: {raw_text[:300]}")
+        return self._parse_anthropic(payload)
 
     async def _chat_via_gemini(
         self,
@@ -349,26 +435,30 @@ class CustomProvider(LLMProvider):
         url = f"{self._gemini_base().rstrip('/')}/v1beta/models/{model_name}:generateContent"
         headers = {"Content-Type": "application/json"}
         params = {"key": self.api_key or ""}
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(url, headers=headers, params=params, json=body)
-        if response.status_code != 200:
-            raise RuntimeError(self._format_http_error(response))
-
-        return self._parse_gemini(response.json())
+        status_code, payload, raw_text = await self._post_json_with_raw(
+            url=url,
+            headers=headers,
+            body=body,
+            params=params,
+        )
+        if status_code != 200:
+            raise RuntimeError(self._format_http_error(status_code, payload, raw_text))
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"HTTP {status_code}: Invalid JSON response: {raw_text[:300]}")
+        return self._parse_gemini(payload)
 
     @staticmethod
-    def _format_http_error(response: httpx.Response) -> str:
-        detail: Any = response.text
-        try:
-            payload = response.json()
+    def _format_http_error(status_code: int, payload: Any, raw_text: str) -> str:
+        detail: Any = raw_text
+        if isinstance(payload, dict):
             err = payload.get("error")
             if isinstance(err, dict):
                 detail = err.get("message") or err.get("type") or err
             else:
                 detail = err or payload
-        except Exception:
-            pass
-        return f"HTTP {response.status_code}: {detail}"
+        elif payload is not None:
+            detail = payload
+        return f"HTTP {status_code}: {detail}"
 
     def _convert_messages_for_anthropic(
         self, messages: list[dict[str, Any]]
