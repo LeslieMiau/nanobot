@@ -350,7 +350,10 @@ class RepoSyncConfig(Base):
     push_remote: str = "origin"
     auto_push: bool = True
     allow_dirty_worktree: bool = False
-    cron_expr: str = "0 9 * * *"  # Every day at 09:00
+    watch_interval_s: int = 60
+    run_on_start: bool = True
+    # Legacy fields kept for backward compatibility (no longer used by gateway repo sync).
+    cron_expr: str = "0 9 * * *"
     tz: str = "Asia/Shanghai"
 
 

@@ -2,6 +2,9 @@
 
 import asyncio
 from pathlib import Path
+from typing import Awaitable, Callable
+
+from loguru import logger
 
 
 async def _run_git(repo: Path, *args: str) -> tuple[int, str, str]:
@@ -98,3 +101,90 @@ async def sync_fork_once(
         "Repo sync completed: "
         f"fast-forwarded {right_ahead} commit(s) and pushed to {push_remote}/{branch}."
     )
+
+
+class RepoSyncWatcher:
+    """Background watcher that syncs a fork when upstream changes are detected."""
+
+    def __init__(
+        self,
+        *,
+        repo_path: str,
+        branch: str = "main",
+        upstream_remote: str = "upstream",
+        upstream_url: str = "https://github.com/HKUDS/nanobot.git",
+        push_remote: str = "origin",
+        auto_push: bool = True,
+        allow_dirty_worktree: bool = False,
+        interval_s: float = 60.0,
+        run_on_start: bool = True,
+        sync_runner: Callable[..., Awaitable[str]] = sync_fork_once,
+    ) -> None:
+        self.repo_path = repo_path
+        self.branch = branch
+        self.upstream_remote = upstream_remote
+        self.upstream_url = upstream_url
+        self.push_remote = push_remote
+        self.auto_push = auto_push
+        self.allow_dirty_worktree = allow_dirty_worktree
+        self.interval_s = float(interval_s) if interval_s > 0 else 1.0
+        self.run_on_start = run_on_start
+        self._sync_runner = sync_runner
+
+        self._running = False
+        self._task: asyncio.Task | None = None
+        self._sync_lock = asyncio.Lock()
+
+    async def start(self) -> None:
+        """Start background watcher loop."""
+        if self._running:
+            logger.debug("Repo sync watcher already running")
+            return
+
+        self._running = True
+        self._task = asyncio.create_task(self._run_loop())
+        logger.info("Repo sync watcher started (every {}s)", self.interval_s)
+
+        if self.run_on_start:
+            await self.trigger_now()
+
+    def stop(self) -> None:
+        """Stop background watcher loop."""
+        self._running = False
+        if self._task:
+            self._task.cancel()
+            self._task = None
+
+    async def trigger_now(self) -> str:
+        """Run one sync check immediately."""
+        async with self._sync_lock:
+            result = await self._sync_runner(
+                repo_path=self.repo_path,
+                branch=self.branch,
+                upstream_remote=self.upstream_remote,
+                upstream_url=self.upstream_url,
+                push_remote=self.push_remote,
+                auto_push=self.auto_push,
+                allow_dirty_worktree=self.allow_dirty_worktree,
+            )
+
+        lowered = result.lower()
+        if "failed" in lowered:
+            logger.warning(result)
+        elif "already up to date" in lowered:
+            logger.debug(result)
+        else:
+            logger.info(result)
+        return result
+
+    async def _run_loop(self) -> None:
+        """Main watcher loop."""
+        while self._running:
+            try:
+                await asyncio.sleep(self.interval_s)
+                if self._running:
+                    await self.trigger_now()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Repo sync watcher error")
