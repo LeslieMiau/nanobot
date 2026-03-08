@@ -1,6 +1,7 @@
 """QQ channel implementation using botpy SDK."""
 
 import asyncio
+import time
 from collections import deque
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import QQConfig
+from nanobot.utils.helpers import split_message
 
 try:
     import botpy
@@ -23,6 +25,9 @@ except ImportError:
 
 if TYPE_CHECKING:
     from botpy.message import C2CMessage
+
+
+QQ_MAX_MESSAGE_LEN = 1900
 
 
 def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
@@ -101,18 +106,44 @@ class QQChannel(BaseChannel):
         if not self._client:
             logger.warning("QQ client not initialized")
             return
-        try:
-            msg_id = msg.metadata.get("message_id")
-            self._msg_seq += 1  # 递增序列号
-            await self._client.api.post_c2c_message(
-                openid=msg.chat_id,
-                msg_type=0,
-                content=msg.content,
-                msg_id=msg_id,
-                msg_seq=self._msg_seq,  # 添加序列号避免去重
+        if not msg.chat_id:
+            logger.warning("QQ chat_id missing, cannot send")
+            return
+
+        content = (msg.content or "").strip()
+        if msg.media:
+            logger.warning(
+                "QQ attachments are not supported yet, sending text only ({} ignored)",
+                len(msg.media),
             )
+        if not content:
+            logger.debug("Skip empty QQ outbound message for {}", msg.chat_id)
+            return
+
+        msg_id = self._resolve_msg_id(msg)
+        chunks = split_message(content, QQ_MAX_MESSAGE_LEN)
+        try:
+            for chunk in chunks:
+                await self._client.api.post_c2c_message(
+                    openid=msg.chat_id,
+                    msg_type=0,
+                    content=chunk,
+                    msg_id=msg_id,
+                    msg_seq=self._next_msg_seq(),
+                )
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
+
+    def _next_msg_seq(self) -> int:
+        self._msg_seq += 1
+        return self._msg_seq
+
+    def _resolve_msg_id(self, msg: OutboundMessage) -> str:
+        msg_id = str((msg.metadata or {}).get("message_id") or msg.reply_to or "").strip()
+        if msg_id:
+            return msg_id
+        # Fallback ID for proactive sends without source message metadata.
+        return f"nanobot-{int(time.time() * 1000)}-{self._msg_seq + 1}"
 
     async def _on_message(self, data: "C2CMessage") -> None:
         """Handle incoming message from QQ."""
@@ -136,4 +167,3 @@ class QQChannel(BaseChannel):
             )
         except Exception:
             logger.exception("Error handling QQ message")
-
