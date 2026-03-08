@@ -379,6 +379,19 @@ class WebToolsConfig(Base):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
+class ImageGenerationConfig(Base):
+    """Image generation tool configuration."""
+
+    enabled: bool = False
+    provider: str = "openai-compatible"
+    model: str = "gpt-image-1"
+    api_key: str = ""
+    base_url: str | None = None
+    default_size: str = "1024x1536"
+    default_aspect_ratio: str = "3:4"
+    default_style_preset: str = "xiaohongshu-card"
+
+
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
@@ -402,6 +415,7 @@ class ToolsConfig(Base):
     """Tools configuration."""
 
     web: WebToolsConfig = Field(default_factory=WebToolsConfig)
+    images: ImageGenerationConfig = Field(default_factory=ImageGenerationConfig)
     exec: ExecToolConfig = Field(default_factory=ExecToolConfig)
     restrict_to_workspace: bool = False  # If true, restrict all tool access to workspace directory
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)

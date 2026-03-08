@@ -179,3 +179,15 @@ async def test_model_command_reports_provider_switch_errors(tmp_path: Path) -> N
 
     assert out is not None
     assert out.content == "Model switch failed: Provider unavailable for gpt-5.3-codex"
+
+
+@pytest.mark.asyncio
+async def test_image_confirm_reports_no_pending_prompt(tmp_path: Path) -> None:
+    loop, _ = _make_loop(tmp_path)
+
+    out = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/image-confirm")
+    )
+
+    assert out is not None
+    assert out.content == "No pending image prompt to confirm."

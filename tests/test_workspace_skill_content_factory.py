@@ -20,5 +20,8 @@ def test_workspace_content_factory_skill_loads_content() -> None:
     content = loader.load_skill("content-factory")
 
     assert content is not None
+    assert "TradingCat" in content
     assert "content_queue/YYYY-MM-DD-slug.md" in content
-    assert 'cron_expr="0 9 * * *"' in content
+    assert "/image-confirm" in content
+    assert "Douyin" in content
+    assert "X adaptation" in content

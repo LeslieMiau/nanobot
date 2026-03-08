@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.tools.image_generate import ImageGenerateTool
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.tools.cron import CronTool
@@ -32,7 +33,14 @@ from nanobot.providers.registry import find_by_name
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, CodingConfig, ExecToolConfig, PersonaConfig, TokenGuardConfig
+    from nanobot.config.schema import (
+        ChannelsConfig,
+        CodingConfig,
+        ExecToolConfig,
+        ImageGenerationConfig,
+        PersonaConfig,
+        TokenGuardConfig,
+    )
     from nanobot.cron.service import CronService
 
 
@@ -78,6 +86,9 @@ class AgentLoop:
         "/restart": {"/restart", "restart", "重启", "重新启动"},
         "/model": {"/model", "model", "模型", "切换模型"},
         "/coding": {"/coding", "coding", "代码模式", "编码模式"},
+        "/image-confirm": {"/image-confirm", "image-confirm", "确认图片", "确认生图"},
+        "/image-edit": {"/image-edit", "image-edit", "修改图片", "修改提示词"},
+        "/image-skip": {"/image-skip", "image-skip", "跳过图片", "跳过生图"},
     }
     _TOKEN_GUARD_EXIT_ALIASES = {"exit", "quit", "/exit", "/quit", ":q", "退出", "退出吧", "结束"}
     _SHINCHAN_WELCOME = "哟～你来啦！我是 nanobot 小新版，今天也一起把事情搞定吧～"
@@ -122,6 +133,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        image_config: ImageGenerationConfig | None = None,
         persona_config: PersonaConfig | None = None,
         token_guard_config: TokenGuardConfig | None = None,
         coding_config: CodingConfig | None = None,
@@ -132,6 +144,7 @@ class AgentLoop:
         from nanobot.config.schema import CodingConfig, ExecToolConfig, TokenGuardConfig
         self.bus = bus
         self.channels_config = channels_config
+        self.image_config = image_config
         self.provider = provider
         self.provider_name = provider_name
         self.workspace = workspace
@@ -204,6 +217,14 @@ class AgentLoop:
         self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
+        if self.image_config:
+            self.tools.register(
+                ImageGenerateTool(
+                    workspace=self.workspace,
+                    config=self.image_config,
+                    stage_callback=self._stage_image_request,
+                )
+            )
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
@@ -239,15 +260,225 @@ class AgentLoop:
         coding_enabled: bool = False,
     ) -> None:
         """Update context for all tools that need routing info."""
-        for name in ("message", "spawn", "cron"):
+        for name in ("message", "spawn", "cron", "image_generate"):
             if tool := self.tools.get(name):
                 if hasattr(tool, "set_context"):
                     if name == "message":
                         tool.set_context(channel, chat_id, message_id)
                     elif name == "spawn":
                         tool.set_context(channel, chat_id, coding_enabled=coding_enabled)
+                    elif name == "image_generate":
+                        tool.set_context(channel, chat_id)
                     else:
                         tool.set_context(channel, chat_id)
+
+    @staticmethod
+    def _image_queue_key() -> str:
+        return "image_generation_queue"
+
+    def _get_image_queue(self, session: Session) -> dict[str, Any]:
+        queue = session.metadata.get(self._image_queue_key())
+        if not isinstance(queue, dict):
+            queue = {"items": []}
+            session.metadata[self._image_queue_key()] = queue
+        items = queue.get("items")
+        if not isinstance(items, list):
+            queue["items"] = []
+        return queue
+
+    @staticmethod
+    def _current_image_index(items: list[dict[str, Any]]) -> int | None:
+        for idx, item in enumerate(items):
+            if item.get("status") == "pending":
+                return idx
+        return None
+
+    def _format_image_preview(self, item: dict[str, Any], *, position: int, total: int) -> str:
+        title = item.get("title") or f"Image {position}/{total}"
+        platform = item.get("platform") or "generic"
+        role_name = item.get("role_name") or "TradingCat"
+        overlay_text = item.get("overlay_text") or "(none)"
+        output_path = item.get("output_path") or ""
+        aspect_ratio = item.get("aspect_ratio") or ""
+        size = item.get("size") or ""
+        return (
+            f"[Image prompt {position}/{total}] {title}\n"
+            f"Platform: {platform}\n"
+            f"Role: {role_name}\n"
+            f"Overlay text: {overlay_text}\n"
+            f"Aspect ratio: {aspect_ratio or '(default)'}\n"
+            f"Size: {size or '(default)'}\n"
+            f"Output path: `{output_path}`\n\n"
+            "Prompt:\n"
+            f"```text\n{item.get('prompt', '')}\n```\n\n"
+            "Reply `/image-confirm` to generate this image, "
+            "`/image-edit <feedback>` to revise the prompt, or `/image-skip` to skip it."
+        )
+
+    async def _stage_image_request(self, payload: dict[str, Any]) -> str:
+        channel = str(payload.get("channel") or "").strip()
+        chat_id = str(payload.get("chat_id") or "").strip()
+        if not channel or not chat_id:
+            return "Error: no active session context for image staging"
+
+        session = self.sessions.get_or_create(f"{channel}:{chat_id}")
+        queue = self._get_image_queue(session)
+        items: list[dict[str, Any]] = queue["items"]
+        item = {
+            "content_pack_id": payload.get("content_pack_id") or "",
+            "card_index": payload.get("card_index") or len(items) + 1,
+            "title": payload.get("title") or "",
+            "overlay_text": payload.get("overlay_text") or "",
+            "role_name": payload.get("role_name") or "TradingCat",
+            "platform": payload.get("platform") or "xiaohongshu",
+            "prompt": payload.get("prompt") or "",
+            "base_prompt": payload.get("prompt") or "",
+            "size": payload.get("size") or "",
+            "aspect_ratio": payload.get("aspect_ratio") or "",
+            "style_preset": payload.get("style_preset") or "",
+            "negative_prompt": payload.get("negative_prompt") or "",
+            "output_path": payload.get("output_path") or "",
+            "status": "pending",
+        }
+        items.append(item)
+        self.sessions.save(session)
+
+        current_idx = self._current_image_index(items)
+        if current_idx == len(items) - 1:
+            return self._format_image_preview(item, position=current_idx + 1, total=len(items))
+        staged_label = item["title"] or f"card {item['card_index']}"
+        return (
+            f"Staged image {len(items)}/{len(items)}: "
+            f"{staged_label}"
+        )
+
+    async def _handle_image_confirm(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+        queue = self._get_image_queue(session)
+        items: list[dict[str, Any]] = queue["items"]
+        idx = self._current_image_index(items)
+        if idx is None:
+            session.metadata.pop(self._image_queue_key(), None)
+            self.sessions.save(session)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="No pending image prompt to confirm.",
+            )
+
+        item = items[idx]
+        tool = self.tools.get("image_generate")
+        if tool is None:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Image generation tool is not available.",
+            )
+        result = await tool.execute(
+            action="generate",
+            prompt=item["prompt"],
+            output_path=item["output_path"],
+            size=item.get("size") or None,
+            aspect_ratio=item.get("aspect_ratio") or None,
+            style_preset=item.get("style_preset") or None,
+            negative_prompt=item.get("negative_prompt") or None,
+        )
+        if result.startswith("Error:"):
+            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=result)
+
+        payload = json.loads(result)
+        item["status"] = "generated"
+        item["generated_path"] = payload.get("file_path") or ""
+        item["model"] = payload.get("model") or ""
+        item["provider"] = payload.get("provider") or ""
+
+        next_idx = self._current_image_index(items)
+        if next_idx is None:
+            session.metadata.pop(self._image_queue_key(), None)
+            self.sessions.save(session)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    f"Generated image {idx + 1}/{len(items)}: `{payload.get('file_path', '')}`\n"
+                    "All staged images are processed."
+                ),
+            )
+
+        self.sessions.save(session)
+        next_item = items[next_idx]
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=(
+                f"Generated image {idx + 1}/{len(items)}: `{payload.get('file_path', '')}`\n\n"
+                + self._format_image_preview(next_item, position=next_idx + 1, total=len(items))
+            ),
+        )
+
+    def _handle_image_edit(self, msg: InboundMessage, session: Session, feedback: str) -> OutboundMessage:
+        queue = self._get_image_queue(session)
+        items: list[dict[str, Any]] = queue["items"]
+        idx = self._current_image_index(items)
+        if idx is None:
+            session.metadata.pop(self._image_queue_key(), None)
+            self.sessions.save(session)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="No pending image prompt to edit.",
+            )
+        if not feedback.strip():
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Usage: `/image-edit <feedback>`",
+            )
+
+        item = items[idx]
+        base_prompt = item.get("base_prompt") or item.get("prompt") or ""
+        item["base_prompt"] = base_prompt
+        item["prompt"] = f"{base_prompt}\n\nRevision request: {feedback.strip()}"
+        self.sessions.save(session)
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=self._format_image_preview(item, position=idx + 1, total=len(items)),
+        )
+
+    def _handle_image_skip(self, msg: InboundMessage, session: Session) -> OutboundMessage:
+        queue = self._get_image_queue(session)
+        items: list[dict[str, Any]] = queue["items"]
+        idx = self._current_image_index(items)
+        if idx is None:
+            session.metadata.pop(self._image_queue_key(), None)
+            self.sessions.save(session)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="No pending image prompt to skip.",
+            )
+
+        items[idx]["status"] = "skipped"
+        next_idx = self._current_image_index(items)
+        if next_idx is None:
+            session.metadata.pop(self._image_queue_key(), None)
+            self.sessions.save(session)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"Skipped image {idx + 1}/{len(items)}. No more staged images remain.",
+            )
+
+        self.sessions.save(session)
+        next_item = items[next_idx]
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=(
+                f"Skipped image {idx + 1}/{len(items)}.\n\n"
+                + self._format_image_preview(next_item, position=next_idx + 1, total=len(items))
+            ),
+        )
 
     @classmethod
     def _session_coding_mode(cls, session: Session) -> str:
@@ -1131,7 +1362,7 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/start — Show welcome message\n/new — Start a new conversation\n/model — Show or switch model\n/coding — Show or set coding mode\n/stop — Stop the current task\n/restart — Restart nanobot (gateway mode)\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/start — Show welcome message\n/new — Start a new conversation\n/model — Show or switch model\n/coding — Show or set coding mode\n/image-confirm — Generate the current staged image\n/image-edit <feedback> — Revise the current staged image prompt\n/image-skip — Skip the current staged image\n/stop — Stop the current task\n/restart — Restart nanobot (gateway mode)\n/help — Show available commands")
         if cmd == "/model":
             arg = cmd_arg.strip()
             if not arg:
@@ -1224,6 +1455,12 @@ class AgentLoop:
                 chat_id=msg.chat_id,
                 content=f"Coding mode set to: `{arg}`",
             )
+        if cmd == "/image-confirm":
+            return await self._handle_image_confirm(msg, session)
+        if cmd == "/image-edit":
+            return self._handle_image_edit(msg, session, cmd_arg)
+        if cmd == "/image-skip":
+            return self._handle_image_skip(msg, session)
 
         unconsolidated = len(session.messages) - session.last_consolidated
         if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
