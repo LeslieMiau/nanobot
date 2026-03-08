@@ -7,12 +7,14 @@ import pytest
 from nanobot.agent.loop import AgentLoop
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.providers.catalog import AvailableModel
 from nanobot.providers.base import LLMProvider, LLMResponse
 
 
 class _Provider(LLMProvider):
-    def __init__(self):
+    def __init__(self, label: str = "provider"):
         super().__init__(api_key=None, api_base=None)
+        self.label = label
         self.last_model: str | None = None
 
     async def chat(
@@ -25,7 +27,7 @@ class _Provider(LLMProvider):
         reasoning_effort=None,
     ) -> LLMResponse:
         self.last_model = model
-        return LLMResponse(content="ok")
+        return LLMResponse(content=f"{self.label}:{model}")
 
     def get_default_model(self) -> str:
         return "dummy"
@@ -36,9 +38,10 @@ def _make_loop(
     *,
     provider_name: str | None = None,
     provider_switcher=None,
+    available_models_provider=None,
 ) -> tuple[AgentLoop, _Provider]:
     bus = MessageBus()
-    provider = _Provider()
+    provider = _Provider("default")
     loop = AgentLoop(
         bus=bus,
         provider=provider,
@@ -47,6 +50,7 @@ def _make_loop(
         max_iterations=1,
         provider_name=provider_name,
         provider_switcher=provider_switcher,
+        available_models_provider=available_models_provider,
     )
     return loop, provider
 
@@ -79,7 +83,7 @@ async def test_model_command_switches_model_and_applies_to_chat(tmp_path: Path) 
     normal = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="hello")
     out = await loop._process_message(normal)
     assert out is not None
-    assert out.content == "ok"
+    assert out.content == "default:gpt-5.2"
     assert provider.last_model == "gpt-5.2"
 
 
@@ -179,6 +183,159 @@ async def test_model_command_reports_provider_switch_errors(tmp_path: Path) -> N
 
     assert out is not None
     assert out.content == "Model switch failed: Provider unavailable for gpt-5.3-codex"
+
+
+@pytest.mark.asyncio
+async def test_model_command_lists_available_models(tmp_path: Path) -> None:
+    def available_models_provider(_current_model: str | None, _current_provider: str | None):
+        return [
+            AvailableModel(model="anthropic/claude-opus-4-5", provider_name="anthropic"),
+            AvailableModel(model="gpt-5.4", provider_name="openai"),
+        ]
+
+    loop, _ = _make_loop(
+        tmp_path,
+        provider_name="custom",
+        available_models_provider=available_models_provider,
+    )
+
+    out = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/model list")
+    )
+
+    assert out is not None
+    assert "Available models:" in out.content
+    assert "1. `anthropic/claude-opus-4-5`" in out.content
+    assert "2. `gpt-5.4`" in out.content
+    assert "Current model: `dummy`" in out.content
+
+
+@pytest.mark.asyncio
+async def test_model_command_selects_model_by_index(tmp_path: Path) -> None:
+    def provider_switcher(requested_model: str | None):
+        if requested_model is None:
+            return _Provider("default"), "dummy", "custom"
+        return _Provider("switched"), requested_model, "openai"
+
+    def available_models_provider(_current_model: str | None, _current_provider: str | None):
+        return [
+            AvailableModel(model="anthropic/claude-opus-4-5", provider_name="anthropic"),
+            AvailableModel(model="gpt-5.4", provider_name="openai"),
+        ]
+
+    loop, _ = _make_loop(
+        tmp_path,
+        provider_name="custom",
+        provider_switcher=provider_switcher,
+        available_models_provider=available_models_provider,
+    )
+
+    switched = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/model 2")
+    )
+
+    assert switched is not None
+    assert "gpt-5.4" in switched.content
+    assert "provider: `openai`" in switched.content
+    assert loop.model == "gpt-5.4"
+
+
+@pytest.mark.asyncio
+async def test_model_command_switch_is_isolated_per_session(tmp_path: Path) -> None:
+    def provider_switcher(requested_model: str | None):
+        if requested_model is None:
+            return _Provider("default"), "dummy", "custom"
+        return _Provider("switched"), requested_model, "openai"
+
+    loop, _ = _make_loop(
+        tmp_path,
+        provider_name="custom",
+        provider_switcher=provider_switcher,
+    )
+
+    await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="chat-a", content="/model gpt-5.2")
+    )
+
+    out_a = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="chat-a", content="hello")
+    )
+    out_b = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="chat-b", content="hello")
+    )
+
+    assert out_a is not None
+    assert out_b is not None
+    assert out_a.content == "switched:gpt-5.2"
+    assert out_b.content == "default:dummy"
+
+
+@pytest.mark.asyncio
+async def test_model_command_reset_only_affects_current_session(tmp_path: Path) -> None:
+    def provider_switcher(requested_model: str | None):
+        if requested_model is None:
+            return _Provider("default"), "dummy", "custom"
+        return _Provider("switched"), requested_model, "openai"
+
+    loop, _ = _make_loop(
+        tmp_path,
+        provider_name="custom",
+        provider_switcher=provider_switcher,
+    )
+
+    await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="chat-a", content="/model gpt-5.2")
+    )
+    await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="chat-b", content="/model gemini-2.0")
+    )
+
+    reset = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="chat-a", content="/model reset")
+    )
+    out_a = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="chat-a", content="hello")
+    )
+    out_b = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="chat-b", content="hello")
+    )
+
+    assert reset is not None
+    assert "provider: `custom`" in reset.content
+    assert out_a is not None
+    assert out_b is not None
+    assert out_a.content == "default:dummy"
+    assert out_b.content == "switched:gemini-2.0"
+
+
+@pytest.mark.asyncio
+async def test_model_command_persists_session_selection_across_reloads(tmp_path: Path) -> None:
+    def provider_switcher(requested_model: str | None):
+        if requested_model is None:
+            return _Provider("default"), "dummy", "custom"
+        return _Provider("switched"), requested_model, "openai"
+
+    loop, _ = _make_loop(
+        tmp_path,
+        provider_name="custom",
+        provider_switcher=provider_switcher,
+    )
+
+    await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/model gpt-5.2")
+    )
+
+    reloaded_loop, _ = _make_loop(
+        tmp_path,
+        provider_name="custom",
+        provider_switcher=provider_switcher,
+    )
+    out = await reloaded_loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="hello")
+    )
+
+    assert out is not None
+    assert out.content == "switched:gpt-5.2"
 
 
 @pytest.mark.asyncio

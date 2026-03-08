@@ -288,6 +288,7 @@ def gateway(
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
+    from nanobot.providers.catalog import build_available_models
     from nanobot.providers.factory import build_runtime_provider
     from nanobot.repo_sync.service import RepoSyncWatcher
     from nanobot.session.manager import SessionManager
@@ -313,6 +314,16 @@ def gateway(
             default_provider_name=default_provider_name,
         )
         return runtime_provider, selection.model, selection.provider_name
+
+    def available_models_provider(current_model: str | None, current_provider: str | None):
+        return build_available_models(
+            config,
+            default_model=config.agents.defaults.model,
+            default_provider_name=default_provider_name,
+            current_model=current_model,
+            current_provider_name=current_provider,
+            coding_config=config.agents.defaults.coding,
+        )
 
     # Create cron service first (callback set after agent creation)
     cron_store_path = get_cron_dir() / "jobs.json"
@@ -351,6 +362,7 @@ def gateway(
         restart_callback=request_restart,
         provider_name=default_provider_name,
         provider_switcher=provider_switcher,
+        available_models_provider=available_models_provider,
     )
 
     # Set cron callback (needs agent)
@@ -562,6 +574,7 @@ def agent(
     from nanobot.bus.queue import MessageBus
     from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
+    from nanobot.providers.catalog import build_available_models
     from nanobot.providers.factory import build_runtime_provider
 
     config = _load_runtime_config(config, workspace)
@@ -579,6 +592,16 @@ def agent(
             default_provider_name=default_provider_name,
         )
         return runtime_provider, selection.model, selection.provider_name
+
+    def available_models_provider(current_model: str | None, current_provider: str | None):
+        return build_available_models(
+            config,
+            default_model=config.agents.defaults.model,
+            default_provider_name=default_provider_name,
+            current_model=current_model,
+            current_provider_name=current_provider,
+            coding_config=config.agents.defaults.coding,
+        )
 
     # Create cron service for tool usage (no callback needed for CLI unless running)
     cron_store_path = get_cron_dir() / "jobs.json"
@@ -612,6 +635,7 @@ def agent(
         coding_config=config.agents.defaults.coding,
         provider_name=default_provider_name,
         provider_switcher=provider_switcher,
+        available_models_provider=available_models_provider,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on

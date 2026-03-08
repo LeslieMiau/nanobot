@@ -29,6 +29,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.persona.engine import PersonaEngine
 from nanobot.providers.base import LLMProvider
+from nanobot.providers.catalog import AvailableModel
 from nanobot.providers.registry import find_by_name
 from nanobot.session.manager import Session, SessionManager
 
@@ -113,6 +114,7 @@ class AgentLoop:
         "cargo ", "go ", "make", "cmake", "docker ", "kubectl ", "mvn ", "gradle ", "bun ",
     )
     _CODING_SIDE_EFFECT_TOOLS = {"write_file", "edit_file", "exec", "spawn", "message", "cron"}
+    _MODEL_SELECTION_KEY = "model_selection"
 
     def __init__(
         self,
@@ -140,6 +142,7 @@ class AgentLoop:
         restart_callback: Callable[[], Awaitable[None]] | None = None,
         provider_name: str | None = None,
         provider_switcher: Callable[[str | None], tuple[LLMProvider, str, str | None]] | None = None,
+        available_models_provider: Callable[[str | None, str | None], list[AvailableModel]] | None = None,
     ):
         from nanobot.config.schema import CodingConfig, ExecToolConfig, TokenGuardConfig
         self.bus = bus
@@ -167,6 +170,7 @@ class AgentLoop:
         self.restrict_to_workspace = restrict_to_workspace
         self._restart_callback = restart_callback
         self._provider_switcher = provider_switcher
+        self._available_models_provider = available_models_provider
 
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
@@ -684,12 +688,37 @@ class AgentLoop:
         self.subagents.provider = provider
         self.subagents.model = model
 
+    def _session_model_selection(self, session: Session) -> tuple[str | None, str | None]:
+        raw = session.metadata.get(self._MODEL_SELECTION_KEY)
+        if not isinstance(raw, dict):
+            return None, None
+        model = str(raw.get("model") or "").strip() or None
+        provider_name = str(raw.get("provider_name") or "").strip() or None
+        return model, provider_name
+
+    def _persist_session_model_selection(
+        self,
+        session: Session,
+        *,
+        model: str,
+        provider_name: str | None,
+    ) -> None:
+        session.metadata[self._MODEL_SELECTION_KEY] = {
+            "model": model,
+            "provider_name": provider_name,
+        }
+        self.sessions.save(session)
+
+    def _clear_session_model_selection(self, session: Session) -> None:
+        session.metadata.pop(self._MODEL_SELECTION_KEY, None)
+        self.sessions.save(session)
+
+    def _effective_session_model(self, session: Session) -> tuple[str, str | None]:
+        model, provider_name = self._session_model_selection(session)
+        return model or self._default_model, provider_name or self._default_provider_name
+
     def _reset_model_provider(self) -> None:
         """Restore runtime model/provider to startup defaults."""
-        if self._provider_switcher:
-            provider, model, provider_name = self._provider_switcher(None)
-            self._apply_model_provider(provider, model, provider_name)
-            return
         self._apply_model_provider(self._default_provider, self._default_model, self._default_provider_name)
 
     def _switch_model_provider(self, requested_model: str) -> None:
@@ -700,6 +729,78 @@ class AgentLoop:
             return
         self.model = requested_model
         self.subagents.model = requested_model
+
+    def _restore_session_model_provider(self, session: Session) -> None:
+        """Restore runtime provider/model for the active session."""
+        selected_model, _ = self._session_model_selection(session)
+        if not selected_model:
+            self._reset_model_provider()
+            return
+        try:
+            self._switch_model_provider(selected_model)
+        except Exception as e:
+            logger.warning("Failed to restore session model {} for {}: {}", selected_model, session.key, e)
+            self._clear_session_model_selection(session)
+            self._reset_model_provider()
+
+    def _available_models_for_session(self, session: Session) -> list[AvailableModel]:
+        current_model, current_provider_name = self._effective_session_model(session)
+        options: list[AvailableModel] = []
+        seen: set[str] = set()
+
+        def add(model: str, provider_name: str | None = None, source: str | None = None) -> None:
+            normalized = str(model or "").strip()
+            if not normalized or normalized in seen:
+                return
+            seen.add(normalized)
+            options.append(AvailableModel(normalized, provider_name=provider_name, source=source))
+
+        if self._available_models_provider:
+            for option in self._available_models_provider(current_model, current_provider_name):
+                add(option.model, option.provider_name, option.source)
+
+        add(self._default_model, self._default_provider_name, "default")
+        add(current_model, current_provider_name, "current")
+        for model in self._coding_route_raw_models():
+            add(model, source="coding")
+        return options
+
+    def _format_available_models(self, session: Session) -> str:
+        current_model, current_provider_name = self._effective_session_model(session)
+        lines = [
+            f"Current model: `{current_model}`",
+            f"Current provider: `{current_provider_name or 'unknown'}`",
+            "",
+            "Available models:",
+        ]
+        for idx, option in enumerate(self._available_models_for_session(session), start=1):
+            details: list[str] = []
+            tags: list[str] = []
+            if option.provider_name:
+                details.append(f"provider: `{option.provider_name}`")
+            if option.model == current_model:
+                tags.append("current")
+            if option.model == self._default_model:
+                tags.append("default")
+            if option.source == "coding":
+                tags.append("coding")
+            if tags:
+                details.append(", ".join(tags))
+            suffix = f" ({'; '.join(details)})" if details else ""
+            lines.append(f"{idx}. `{option.model}`{suffix}")
+        lines.append("")
+        lines.append("Use `/model <name>` or `/model <number>` to switch, or `/model reset` to restore default.")
+        return "\n".join(lines)
+
+    def _resolve_model_selection_argument(self, session: Session, arg: str) -> str:
+        normalized = arg.strip()
+        if not normalized.isdigit():
+            return normalized
+        index = int(normalized)
+        options = self._available_models_for_session(session)
+        if index < 1 or index > len(options):
+            raise ValueError(f"Model index {index} is out of range. Use `/model list` to inspect available models.")
+        return options[index - 1].model
 
     def _coding_route_raw_models(self) -> list[str]:
         primary = str(getattr(self.coding_config, "primary_model", "")).strip()
@@ -1187,6 +1288,7 @@ class AgentLoop:
             logger.info("Processing system message from {}", msg.sender_id)
             key = f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
+            self._restore_session_model_provider(session)
             _, coding_enabled = self._resolve_coding_mode(session, msg.content)
             self._set_tool_context(
                 channel,
@@ -1227,6 +1329,7 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
+        self._restore_session_model_provider(session)
 
         # Slash commands
         cmd, cmd_arg = self._parse_user_command(msg.content)
@@ -1357,24 +1460,39 @@ class AgentLoop:
         if cmd == "/model":
             arg = cmd_arg.strip()
             if not arg:
+                current_model, current_provider_name = self._effective_session_model(session)
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
                     content=(
-                        f"Current model: `{self.model}`\n"
-                        f"Current provider: `{self.provider_name or 'unknown'}`\n"
-                        "Use `/model <name>` to switch, or `/model reset` to restore default."
+                        f"Current model: `{current_model}`\n"
+                        f"Current provider: `{current_provider_name or 'unknown'}`\n"
+                        "Use `/model list` to inspect choices, `/model <name>` or `/model <number>` "
+                        "to switch, or `/model reset` to restore default."
                     ),
+                )
+            if arg.lower() in {"list", "ls", "列表"}:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=self._format_available_models(session),
                 )
             if arg.lower() in {"reset", "default", "默认", "恢复默认"}:
                 self._reset_model_provider()
+                self._clear_session_model_selection(session)
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
                     content=f"Model reset to default: `{self.model}` (provider: `{self.provider_name or 'unknown'}`)",
                 )
             try:
-                self._switch_model_provider(arg)
+                requested_model = self._resolve_model_selection_argument(session, arg)
+                self._switch_model_provider(requested_model)
+                self._persist_session_model_selection(
+                    session,
+                    model=self.model,
+                    provider_name=self.provider_name,
+                )
             except Exception as e:
                 return OutboundMessage(
                     channel=msg.channel,
