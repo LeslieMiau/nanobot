@@ -20,16 +20,24 @@ def test_workspace_ai_news_digest_skill_loads_content() -> None:
     content = loader.load_skill("ai-news-digest")
 
     assert content is not None
-    assert "official announcements and RSS feeds (OpenAI, Anthropic, Google AI)" in content
-    assert 'cron_expr="0 8 * * *"' in content
-    assert "previous day 08:00 to the current day 08:00" in content
-    assert "first-hand sources over quantity" in content
-    assert "include only domain-relevant statements" in content
-    assert "Only include an item when you can identify a concrete underlying artifact" in content
-    assert "Treat X as a secondary heat signal" in content
-    assert "Do not treat `x.com/<account>` profile pages as concrete artifacts" in content
-    assert "Telegram formatting constraints (lightweight rich text)" in content
-    assert "## 本轮未纳入" in content
+    assert "# AI Builder Signal Radar" in content
+    assert "only answers 4 question types" in content
+    assert "Layer A: 每日必看" in content
+    assert "Layer B: 每周深读 / 深听" in content
+    assert "Layer C: 重大事件触发" in content
+    assert "Builder relevance: 30" in content
+    assert "Practicality: 20" in content
+    assert "`85+`: 必推" in content
+    assert "`70-84`: 候选" in content
+    assert "`<70`: 默认过滤" in content
+    assert "Module 1: Must Know" in content
+    assert "Module 2: Builder Takeaway" in content
+    assert "Module 3: One Deep Read / Listen" in content
+    assert "Module 4: Action Items" in content
+    assert "AI Builder Weekly Calibration" in content
+    assert "cron_expr=\"0 8 * * *\"" in content
+    assert "cron_expr=\"0 9 * * 6\"" in content
+    assert "Before creating a new schedule, list existing cron jobs first to avoid duplicates." in content
 
 
 def test_workspace_ai_news_digest_skill_references_sources_file() -> None:
@@ -43,13 +51,16 @@ def test_workspace_ai_news_digest_skill_references_sources_file() -> None:
     sources_content = sources_path.read_text(encoding="utf-8")
 
     assert "references/sources.md" in skill_content
-    assert "OpenAI" in sources_content
-    assert "Hacker News" in sources_content
-    assert "professional AI-domain posts" in sources_content
-    assert "previous day 08:00 to the current day 08:00" in sources_content
-    assert "GitHub Trending" in sources_content
-    assert "Treat Hacker News and GitHub Trending as heat signals only" in sources_content
-    assert "Recommended Test Sources (English-first)" in sources_content
-    assert "https://openai.com/news/rss.xml" in sources_content
-    assert "https://blog.google/rss/" in sources_content
-    assert "https://huggingface.co/blog/feed.xml" in sources_content
+    assert "Tier 1: Daily Must-Know" in sources_content
+    assert "Tier 2: Weekly Deep Reads / Listens" in sources_content
+    assert "Andrej Karpathy" in sources_content
+    assert "Simon Willison" in sources_content
+    assert "宝玉" in sources_content
+    assert "Latent Space" in sources_content
+    assert "OpenAI (official)" in sources_content
+    assert "Anthropic (official)" in sources_content
+    assert "Dwarkesh" in sources_content
+    assert "张小珺商业访谈录" in sources_content
+    assert "SemiAnalysis" in sources_content
+    assert "Major Event Trigger Watchlist" in sources_content
+    assert "Noise Filter Baseline" in sources_content

@@ -1,119 +1,175 @@
 ---
 name: ai-news-digest
-description: Track the latest important AI news from official AI labs and community signals, with X as a secondary hotness signal; produce a concise daily digest and schedule it for 08:00 Asia/Shanghai when asked.
+description: Curate high-signal AI Builder intelligence for programmers and AI product builders. Use when users want daily must-know builder signals, weekly deep reads/listens, workflow-impact analysis, noise filtering, or actionable experiments for AI coding and agentic product development.
 ---
 
-# AI News Digest
+# AI Builder Signal Radar
 
-Use this skill when the user asks for latest AI news, an AI morning briefing, a daily AI digest, or wants updates from specific AI creators or official labs.
+Use this skill when the user wants a high-signal digest for AI builders, not generic AI news.
 
-## Source List
+The skill only answers 4 question types:
+1. 今天有哪些真正值得看的 AI builder 信号
+2. 哪些内容会影响编码工作流 / agent workflow / 产品设计
+3. 哪些深度访谈值得列入每周精读/精听
+4. 哪些内容应该直接过滤，避免信息过载
 
-Read [references/sources.md](references/sources.md) to get the current subscription list. Treat that file as the source registry for named people, official lab channels, and community-signal feeds.
+Read `references/sources.md` as the source registry.
 
-## Workflow
+## Audience
 
-1. Gather items in the reporting window, not just the calendar day. For the default morning digest at 08:00 Asia/Shanghai, the window is from the previous day 08:00 to the current day 08:00.
-2. Prefer high-quality first-hand sources over quantity. Official blogs/newsrooms/research pages and RSS feeds outrank social signals. Original papers, repos, release notes, and original articles outrank reposts, summaries, and aggregator commentary.
-3. Prefer items published within the active reporting window. If an item was published earlier, include it only when it is clearly trending inside the current reporting window on Hacker News or the named X accounts, and label it as `旧文本时段热议`.
-4. Verify with primary sources first:
-- Official blog/newsroom/research posts and RSS entries
-- Original paper/repository/release note pages
-- Official YouTube channel uploads or release videos
-5. Use Hacker News and GitHub Trending to detect what the technical community is amplifying today, but do not treat either signal page as the source of truth. When they point to a third-party article, repository, or project page, cite the original target first and the signal page second.
-6. Keep only important items. Ignore repetitive engagement bait, generic opinions, reposts, screenshots of posts, and minor product chatter without substance.
-7. Only include an item when you can identify a concrete underlying artifact: a post, article, paper, release note, video, repository, or official announcement. Do not treat a category page, homepage shell, error page, or generic directory page as a valid item.
-8. If a claim cannot be verified from a source you can fetch, say so explicitly instead of guessing.
-9. When a source is blocked, empty, or too generic to extract concrete items, report that source as unavailable for this run instead of inventing a summary.
-10. When the user asks to add or remove a subscription source, update `references/sources.md` instead of hardcoding the source list into this file.
-11. For named people, include only domain-relevant statements. Ignore their posts about politics, lifestyle, personal chatter, memes, sports, or any other non-AI/non-technical topic unless the user explicitly asks for broader coverage.
-12. Treat X as a secondary heat signal, not as primary truth. Do not treat `x.com/<account>` profile pages as concrete artifacts. Only use concrete post URLs, and whenever possible back them with official release/paper/repo links.
+Default audience:
+- 程序员
+- AI 产品构建者
+- Agent workflow practitioners
+- 关注 AI engineering、agentic workflow、产品化与极客实践的高级用户
 
-Priority order for source trust and extraction stability:
-1. Official announcements and RSS feeds from labs
-2. Original artifacts (paper, repository, official release page)
-3. Community hotness signals (Hacker News, GitHub Trending)
-4. X signals (secondary only)
+## Core Principles
 
-## Importance Filter
+1. 宁缺毋滥：每天只给少量高价值内容，不做全网罗列。
+2. Builder 优先：工作流、工程实践、产品形态、agentic coding 升权；纯 benchmark 和泛新闻降权。
+3. 分层阅读：固定为每日必看、每周深读、重大事件触发。
+4. 决策辅助：每条内容必须回答价值、启发、行动与是否纳入工作流。
 
-Include an item only if both conditions hold:
-- It is hot inside the current reporting window, or it is explicitly marked `旧文本时段热议`
-- It satisfies at least one of the importance conditions below
+## Signal Layers
 
-Importance conditions:
-- New model, product, benchmark, API, pricing, policy, funding, or org change
-- Credible forward-looking comment from one of the named people that shifts expectations
-- Strong community signal on Hacker News around an AI technical release, paper, or tool
-- Security, safety, legal, or platform change likely to affect builders or users
+### Layer A: 每日必看
 
-For named people, `credible forward-looking comment` means comments about AI research, models, tooling, product direction, engineering practice, safety, regulation, or the AI industry. Do not include off-topic personal commentary.
+Track core builder signals from Tier 1 sources and prioritize first-hand artifacts.
 
-Prefer 3 to 5 items total. Fewer is better than padding. If there are fewer than 3 genuinely important items, return fewer items and explicitly say `今天重要新内容偏少`.
+### Layer B: 每周深读 / 深听
 
-## Output Format
+Pick only high-depth interviews or long reads with decision value for builders.
 
-Use this structure:
+### Layer C: 重大事件触发
 
-```markdown
-# 今日 AI 重要资讯
+Trigger extra briefing only when one of these happens:
+- OpenAI / Anthropic / Google / Meta 发布重大模型或 agent 能力
+- Codex / Claude Code / IDE agent workflow 出现关键升级
+- AI infra 成本、模型价格、能力边界出现明显变化
+- 关键深访直接影响下一阶段 AI coding / AI 产品范式判断
 
-## 1. 标题
-- 来源: source name
-- 时间: absolute date/time with timezone if available
-- 统计窗口: absolute start and end time for this digest
-- 要点: 1 to 2 sentences on what happened
-- 为什么重要: 1 sentence on impact
-- 链接: direct source URL
-- 热度归因: why this counts as hot today, for example HN front page / official same-day release / named-account same-day post
+## Scoring Model (100)
 
-## 2. 标题
-...
+Score every candidate before pushing:
+- Builder relevance: 30
+- Practicality: 20
+- Originality: 15
+- Depth: 15
+- Workflow impact: 10
+- Product impact: 10
 
-## 今日结论
-- 1 to 3 bullets on the biggest pattern across today's items
-```
+Boost signals:
+- 一手经验
+- 深度技术或产品拆解
+- 可直接落地
+- 能改变判断框架
+- 明显影响 AI coding / agent workflow
 
-Rules:
-- Write in Chinese unless the user asks otherwise.
-- Use absolute dates like `2026-03-07 08:00 CST`, not "today" or "yesterday".
-- For scheduled morning digests, make the reporting window explicit, for example `统计窗口: 2026-03-07 08:00 CST -> 2026-03-08 08:00 CST`.
-- Include direct source links for every item.
-- Separate facts from inference. Label inference as `判断`.
-- Do not pad the briefing with older items just to reach a quota.
-- Prefer the original source link over mirrors, summaries, or social reposts.
-- If a source fetch only returns a homepage shell, category heading, access error, or empty page, exclude it from item generation and note it under availability when relevant.
-- Telegram formatting constraints (lightweight rich text): keep headings, bullets, bold text, and links only. Do not use tables or code blocks. Keep one item field per line in the fixed order shown above.
+Penalty signals:
+- 纯快讯
+- 二手转述
+- 广告感强
+- 无操作性
+- 与 builder 目标弱相关
 
-## Source Availability
+Push thresholds:
+- `85+`: 必推
+- `70-84`: 候选
+- `<70`: 默认过滤
 
-If important sources are unavailable in a run, add a short section before `今日结论`:
+## Hard Filters
 
-```markdown
-## 本轮未纳入
-- OpenAI Site updates: 403，今天未能稳定抓到具体条目
-- X accounts: 当前抓取结果是占位错误页，未纳入正文
-```
+Default-filter these categories unless the user explicitly asks:
+- 泛 AI 新闻站碎片快讯
+- 纯融资新闻
+- 无实操价值的 prompt 技巧合集
+- 仅 benchmark 排行且无工程含义
+- 与 builder 无关的通用 AI 热门话题
+- 重复转述官方公告的二手报道
 
-This section is for transparency, not filler. Include it only when it materially explains why the digest is short.
+## Daily Output Contract
+
+Output exactly 4 modules.
+
+### Module 1: Must Know
+
+Return 1 to 3 items.
+Each item fields:
+- 标题
+- 来源
+- 类型: `工作流` / `产品` / `平台` / `访谈`
+- 3 行摘要
+- 为什么重要
+- 是否建议立刻阅读
+
+### Module 2: Builder Takeaway
+
+Fields:
+- 对编码工作流的影响
+- 对 agent 设计的影响
+- 对产品设计的影响
+- 对你当前工具链的建议
+
+### Module 3: One Deep Read / Listen
+
+Return exactly 1 item.
+Fields:
+- 推荐理由
+- 建议阅读场景
+- 读完后该记住什么
+
+### Module 4: Action Items
+
+Return at most 3 directly executable actions.
+Examples:
+- 试一个新的 Codex workflow
+- 调整 agent prompt 分层
+- 把一种评估方式加入现有项目
+
+## Weekly Output Contract
+
+Title:
+- `AI Builder Weekly Calibration`
+
+Sections:
+1. 本周最重要的 5 个 builder 信号
+2. 本周最值得精读的 2 个深访
+3. 本周最值得尝试的 3 个工具或工作流变化
+4. 本周应该忽略的噪音主题
+5. 下周值得跟踪的 3 个观察点
+
+## Writing Rules
+
+- 默认中文输出，必要术语可中英混排。
+- Use absolute dates and timezone, for example `2026-03-08 08:00 CST`.
+- Separate facts from inference and label inference as `判断`.
+- Prefer direct links to first-hand artifacts.
+- If a source is unavailable or only shell content, mark it in `本轮未纳入` instead of guessing.
 
 ## Tooling Notes
 
-- Prefer `web_search` to discover the latest relevant source URLs.
-- Prefer `web_fetch` on the final source URLs you cite.
-- For X-heavy topics, search by account name plus topic, but treat X as signal-only and resolve to an official source whenever possible.
-- For official labs, check both blog/newsroom and YouTube when launches may have video demos.
-- For Hacker News and GitHub Trending, use them as same-day prioritization signals and then resolve to the original target URL before writing the digest.
+- Use `web_search` for discovery and `web_fetch` for source verification.
+- Treat X as a secondary signal and prefer official post / paper / repo / release pages.
+- Resolve community hotness pages to original targets before writing.
 
-## Daily 08:00 Delivery
+## Scheduling Defaults (Asia/Shanghai)
 
-If the user asks to receive this automatically every morning, schedule it with `cron` using Asia/Shanghai time:
+If user asks for automation, suggest these two jobs:
 
 ```python
 cron(
     action="add",
-    message="Use the ai-news-digest skill to compile important AI news in the reporting window from the previous day 08:00 to the current day 08:00 Asia/Shanghai time. Prioritize official announcements and RSS feeds (OpenAI, Anthropic, Google AI) and original artifacts (papers/repos/release notes) over social chatter. Treat Hacker News and GitHub Trending as heat signals only; cite original targets first. Keep X as a secondary signal only, never use profile pages as concrete items, and include X only when backed by a concrete post or first-hand artifact. Prefer items published inside the window; include older items only when clearly trending in-window and label them 旧文本时段热议. If a source is blocked, empty, or shell-only, note it in 本轮未纳入 instead of inventing content. Send a concise Chinese briefing with explicit window, absolute timestamps, hotness attribution, and Telegram-friendly lightweight rich text (no tables, no code blocks).",
+    message="Use ai-news-digest to generate the AI Builder Signal Radar daily digest. Focus on high-signal builder content, score candidates with the defined model, include exactly 4 modules (Must Know, Builder Takeaway, One Deep Read / Listen, Action Items), and filter low-signal generic news.",
     cron_expr="0 8 * * *",
+    tz="Asia/Shanghai",
+)
+```
+
+```python
+cron(
+    action="add",
+    message="Use ai-news-digest to generate AI Builder Weekly Calibration with 5 key signals, 2 deep interviews, 3 experiments, noise to ignore, and 3 watchpoints for next week.",
+    cron_expr="0 9 * * 6",
     tz="Asia/Shanghai",
 )
 ```
