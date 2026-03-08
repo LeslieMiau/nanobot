@@ -256,6 +256,43 @@ class WebFetchTool(Tool):
         return None
 
     @staticmethod
+    def _extract_youtube_channel_id(path: str) -> str | None:
+        """Extract a YouTube channel ID from a canonical /channel/<id> path."""
+        match = re.match(r"^/channel/([A-Za-z0-9_-]+)(?:/|$)", path)
+        if not match:
+            return None
+        return match.group(1)
+
+    @staticmethod
+    def _reader_fallback_url(url: str) -> str:
+        """Build a public reader mirror URL for a login-gated page."""
+        parsed = urlparse(url)
+        suffix = f"{parsed.netloc}{parsed.path}"
+        if parsed.query:
+            suffix += f"?{parsed.query}"
+        return f"https://r.jina.ai/http://{suffix}"
+
+    @classmethod
+    def _fallback_candidates(cls, url: str) -> list[tuple[str, str]]:
+        """Return fallback sources for pages that often require login or JS hydration."""
+        parsed = urlparse(url)
+        host = parsed.netloc.lower()
+        path = parsed.path or "/"
+        candidates: list[tuple[str, str]] = []
+
+        if host.endswith("youtube.com"):
+            channel_id = cls._extract_youtube_channel_id(path)
+            if channel_id:
+                candidates.append(
+                    ("youtube-rss", f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}")
+                )
+            candidates.append(("reader", cls._reader_fallback_url(url)))
+        elif host.endswith("x.com"):
+            candidates.append(("reader", cls._reader_fallback_url(url)))
+
+        return candidates
+
+    @staticmethod
     def _detect_unusable_page(url: str, raw_html: str, text: str) -> str | None:
         """Return a human-readable reason when the page is a known unusable shell."""
         parsed = urlparse(url)
@@ -266,7 +303,12 @@ class WebFetchTool(Tool):
         if host.endswith("x.com") and "something went wrong, but don’t fret" in normalized:
             return "x.com returned a placeholder error page instead of concrete post content"
 
-        if host.endswith("youtube.com") and "/@" in path:
+        if host.endswith("youtube.com") and (
+            "/@" in path
+            or path.startswith("/channel/")
+            or path.startswith("/user/")
+            or path.startswith("/c/")
+        ):
             has_watch_links = "/watch?v=" in raw_html
             generic_shell = "youtube 的運作方式" in text or "YouTube 的運作方式" in text or "news center" in normalized
             if not has_watch_links and generic_shell:
@@ -280,9 +322,48 @@ class WebFetchTool(Tool):
 
         return None
 
-    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
+    def _extract_response(
+        self,
+        response: httpx.Response,
+        extract_mode: str,
+    ) -> tuple[str | None, str | None, str | None]:
+        """Extract normalized content from an HTTP response."""
         from readability import Document
 
+        ctype = response.headers.get("content-type", "")
+        final_url = str(response.url)
+
+        if "application/json" in ctype:
+            return json.dumps(response.json(), indent=2, ensure_ascii=False), "json", None
+
+        if "xml" in ctype or response.text.lstrip().startswith(("<?xml", "<rss", "<feed")):
+            extracted = _extract_rss_atom_items(response.text)
+            if not extracted:
+                return None, None, "RSS/Atom feed returned no extractable entries"
+            return extracted, "rss-list", None
+
+        if "text/html" in ctype or response.text[:256].lower().startswith(("<!doctype", "<html")):
+            specialized = self._site_specific_extract(final_url, response.text)
+            if specialized:
+                text, extractor = specialized
+            else:
+                doc = Document(response.text)
+                content = (
+                    self._to_markdown(doc.summary())
+                    if extract_mode == "markdown"
+                    else _strip_tags(doc.summary())
+                )
+                text = f"# {doc.title()}\n\n{content}" if doc.title() else content
+                extractor = "readability"
+
+            unusable_reason = self._detect_unusable_page(final_url, response.text, text)
+            if unusable_reason:
+                return None, None, unusable_reason
+            return text, extractor, None
+
+        return response.text, "raw", None
+
+    async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
         max_chars = maxChars or self.max_chars
         is_valid, error_msg = _validate_url(url)
         if not is_valid:
@@ -298,52 +379,69 @@ class WebFetchTool(Tool):
             ) as client:
                 r = await client.get(url, headers={"User-Agent": USER_AGENT})
                 r.raise_for_status()
+                text, extractor, error = self._extract_response(r, extractMode)
 
-            ctype = r.headers.get("content-type", "")
+                if error:
+                    attempts: list[dict[str, str]] = []
+                    for strategy, fallback_url in self._fallback_candidates(str(r.url)):
+                        attempts.append({"strategy": strategy, "url": fallback_url})
+                        try:
+                            fallback_response = await client.get(
+                                fallback_url,
+                                headers={"User-Agent": USER_AGENT},
+                            )
+                            fallback_response.raise_for_status()
+                            fallback_text, fallback_extractor, fallback_error = self._extract_response(
+                                fallback_response,
+                                extractMode,
+                            )
+                            if fallback_error or not fallback_text or not fallback_extractor:
+                                continue
 
-            if "application/json" in ctype:
-                text, extractor = json.dumps(r.json(), indent=2, ensure_ascii=False), "json"
-            elif "xml" in ctype or r.text.lstrip().startswith(("<?xml", "<rss", "<feed")):
-                extracted = _extract_rss_atom_items(r.text)
-                if not extracted:
-                    return json.dumps(
-                        {
-                            "error": "RSS/Atom feed returned no extractable entries",
-                            "url": url,
-                            "finalUrl": str(r.url),
-                            "status": r.status_code,
-                        },
-                        ensure_ascii=False,
-                    )
-                text, extractor = extracted, "rss-list"
-            elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
-                specialized = self._site_specific_extract(str(r.url), r.text)
-                if specialized:
-                    text, extractor = specialized
-                else:
-                    doc = Document(r.text)
-                    content = self._to_markdown(doc.summary()) if extractMode == "markdown" else _strip_tags(doc.summary())
-                    text = f"# {doc.title()}\n\n{content}" if doc.title() else content
-                    extractor = "readability"
-                    unusable_reason = self._detect_unusable_page(str(r.url), r.text, text)
-                    if unusable_reason:
+                            text = fallback_text
+                            extractor = f"{strategy}-fallback"
+                            r = fallback_response
+                            break
+                        except Exception as fallback_exc:
+                            logger.warning(
+                                "WebFetch fallback {} failed for {}: {}",
+                                strategy,
+                                fallback_url,
+                                fallback_exc,
+                            )
+                    else:
                         return json.dumps(
                             {
-                                "error": unusable_reason,
+                                "error": error,
                                 "url": url,
                                 "finalUrl": str(r.url),
                                 "status": r.status_code,
+                                "attemptedFallbacks": attempts,
                             },
                             ensure_ascii=False,
                         )
-            else:
-                text, extractor = r.text, "raw"
+                else:
+                    assert text is not None
+                    assert extractor is not None
 
             truncated = len(text) > max_chars
-            if truncated: text = text[:max_chars]
+            if truncated:
+                text = text[:max_chars]
 
-            return json.dumps({"url": url, "finalUrl": str(r.url), "status": r.status_code,
-                              "extractor": extractor, "truncated": truncated, "length": len(text), "text": text}, ensure_ascii=False)
+            payload: dict[str, Any] = {
+                "url": url,
+                "finalUrl": str(r.url),
+                "status": r.status_code,
+                "extractor": extractor,
+                "truncated": truncated,
+                "length": len(text),
+                "text": text,
+            }
+            if str(r.url) != url and extractor.endswith("-fallback"):
+                payload["usedFallback"] = True
+                payload["fallbackUrl"] = str(r.url)
+
+            return json.dumps(payload, ensure_ascii=False)
         except httpx.ProxyError as e:
             logger.error("WebFetch proxy error for {}: {}", url, e)
             return json.dumps({"error": f"Proxy error: {e}", "url": url}, ensure_ascii=False)

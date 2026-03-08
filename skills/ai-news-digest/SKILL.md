@@ -149,7 +149,9 @@ Sections:
 ## Tooling Notes
 
 - Use `web_search` for discovery and `web_fetch` for source verification.
+- For YouTube channel URLs, prefer public RSS/Atom feeds (`feeds/videos.xml?channel_id=...`) or the podcast/site page when available.
 - Treat X as a secondary signal and prefer official post / paper / repo / release pages.
+- If X or YouTube returns only a shell page, use a public fallback source or mark it in `本轮未纳入`; do not infer missing content from the shell page.
 - Resolve community hotness pages to original targets before writing.
 
 ## Scheduling Defaults (Asia/Shanghai)

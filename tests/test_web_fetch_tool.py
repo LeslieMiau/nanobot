@@ -129,3 +129,160 @@ def test_web_fetch_flags_youtube_channel_shell_pages() -> None:
     )
 
     assert reason == "YouTube channel page returned a generic shell without concrete videos"
+
+
+def test_web_fetch_builds_fallback_candidates_for_x_status_pages() -> None:
+    candidates = WebFetchTool._fallback_candidates("https://x.com/karpathy/status/123")
+
+    assert candidates == [("reader", "https://r.jina.ai/http://x.com/karpathy/status/123")]
+
+
+def test_web_fetch_builds_rss_then_reader_fallbacks_for_youtube_channel_pages() -> None:
+    candidates = WebFetchTool._fallback_candidates("https://www.youtube.com/channel/UC123ABC/videos")
+
+    assert candidates == [
+        ("youtube-rss", "https://www.youtube.com/feeds/videos.xml?channel_id=UC123ABC"),
+        ("reader", "https://r.jina.ai/http://www.youtube.com/channel/UC123ABC/videos"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_falls_back_to_reader_for_x_placeholder_pages(monkeypatch) -> None:
+    class _FakeResponse:
+        def __init__(self, url: str, headers: dict[str, str], text: str, status_code: int = 200):
+            self.url = url
+            self.headers = headers
+            self.text = text
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url: str, headers: dict[str, str]):  # noqa: ARG002
+            if url == "https://x.com/karpathy/status/123":
+                return _FakeResponse(
+                    url,
+                    {"content-type": "text/html"},
+                    "<html><head><title>X</title></head><body>Something went wrong, but don’t fret — let’s give it another shot.</body></html>",
+                )
+            if url == "https://r.jina.ai/http://x.com/karpathy/status/123":
+                return _FakeResponse(
+                    url,
+                    {"content-type": "text/plain"},
+                    "# Karpathy post\n\nTesting-time compute is becoming product surface area.",
+                )
+            raise AssertionError(f"unexpected url: {url}")
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda *args, **kwargs: _FakeClient())
+
+    tool = WebFetchTool()
+    result = await tool.execute("https://x.com/karpathy/status/123")
+    payload = json.loads(result)
+
+    assert payload["extractor"] == "reader-fallback"
+    assert payload["usedFallback"] is True
+    assert payload["fallbackUrl"] == "https://r.jina.ai/http://x.com/karpathy/status/123"
+    assert "Testing-time compute" in payload["text"]
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_falls_back_to_youtube_rss_for_channel_pages(monkeypatch) -> None:
+    class _FakeResponse:
+        def __init__(self, url: str, headers: dict[str, str], text: str, status_code: int = 200):
+            self.url = url
+            self.headers = headers
+            self.text = text
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url: str, headers: dict[str, str]):  # noqa: ARG002
+            if url == "https://www.youtube.com/channel/UC123ABC/videos":
+                return _FakeResponse(
+                    url,
+                    {"content-type": "text/html"},
+                    "<html><body>簡介新聞中心版權聯絡我們創作者刊登廣告開發人員條款私隱政策及安全YouTube 的運作方式</body></html>",
+                )
+            if url == "https://www.youtube.com/feeds/videos.xml?channel_id=UC123ABC":
+                return _FakeResponse(
+                    url,
+                    {"content-type": "application/atom+xml"},
+                    """<?xml version="1.0" encoding="UTF-8"?>
+                    <feed xmlns="http://www.w3.org/2005/Atom">
+                      <title>YouTube</title>
+                      <entry>
+                        <title>Agent update</title>
+                        <link rel="alternate" href="https://www.youtube.com/watch?v=abc123" />
+                        <updated>2026-03-08T01:00:00+00:00</updated>
+                      </entry>
+                    </feed>""",
+                )
+            raise AssertionError(f"unexpected url: {url}")
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda *args, **kwargs: _FakeClient())
+
+    tool = WebFetchTool()
+    result = await tool.execute("https://www.youtube.com/channel/UC123ABC/videos")
+    payload = json.loads(result)
+
+    assert payload["extractor"] == "youtube-rss-fallback"
+    assert payload["usedFallback"] is True
+    assert payload["fallbackUrl"] == "https://www.youtube.com/feeds/videos.xml?channel_id=UC123ABC"
+    assert "[Agent update](https://www.youtube.com/watch?v=abc123)" in payload["text"]
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_returns_original_error_when_all_fallbacks_fail(monkeypatch) -> None:
+    class _FakeResponse:
+        def __init__(self, url: str, headers: dict[str, str], text: str, status_code: int = 200):
+            self.url = url
+            self.headers = headers
+            self.text = text
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url: str, headers: dict[str, str]):  # noqa: ARG002
+            if url == "https://x.com/karpathy":
+                return _FakeResponse(
+                    url,
+                    {"content-type": "text/html"},
+                    "<html><body>Something went wrong, but don’t fret — let’s give it another shot.</body></html>",
+                )
+            if url == "https://r.jina.ai/http://x.com/karpathy":
+                return _FakeResponse(url, {"content-type": "text/plain"}, "")
+            raise AssertionError(f"unexpected url: {url}")
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda *args, **kwargs: _FakeClient())
+
+    tool = WebFetchTool()
+    result = await tool.execute("https://x.com/karpathy")
+    payload = json.loads(result)
+
+    assert payload["error"] == "x.com returned a placeholder error page instead of concrete post content"
+    assert payload["attemptedFallbacks"] == [
+        {"strategy": "reader", "url": "https://r.jina.ai/http://x.com/karpathy"}
+    ]
