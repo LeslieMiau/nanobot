@@ -16,9 +16,9 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
 from nanobot.config.schema import TelegramConfig
-from nanobot.utils.helpers import split_message
 
 TELEGRAM_MAX_MESSAGE_LEN = 4000  # Telegram message character limit
+_MD_LINK_RE = re.compile(r"\[[^\]\n]+\]\([^)]+\)")
 
 
 def _strip_md(s: str) -> str:
@@ -60,6 +60,57 @@ def _render_table_box(table_lines: list[str]) -> str:
     for row in rows[1:]:
         out.append(dr(row))
     return '\n'.join(out)
+
+
+def _split_markdown_for_telegram(content: str, max_len: int = TELEGRAM_MAX_MESSAGE_LEN) -> list[str]:
+    """
+    Split markdown text for Telegram while avoiding cuts inside markdown links.
+    """
+    if not content:
+        return []
+    if len(content) <= max_len:
+        return [content]
+
+    link_ranges = [(m.start(), m.end()) for m in _MD_LINK_RE.finditer(content)]
+    chunks: list[str] = []
+    cursor = 0
+    total_len = len(content)
+
+    def _inside_link(pos: int) -> bool:
+        return any(start < pos < end for start, end in link_ranges)
+
+    while cursor < total_len:
+        end = min(cursor + max_len, total_len)
+        if end >= total_len:
+            chunks.append(content[cursor:])
+            break
+
+        split_at = 0
+        for pos in range(end, cursor, -1):
+            if content[pos - 1] not in ("\n", " "):
+                continue
+            if _inside_link(pos):
+                continue
+            split_at = pos
+            break
+
+        if split_at == 0:
+            if _inside_link(end):
+                for start, stop in link_ranges:
+                    if start < end < stop and start > cursor:
+                        split_at = start
+                        break
+            if split_at == 0:
+                split_at = end
+
+        chunk = content[cursor:split_at].rstrip()
+        if chunk:
+            chunks.append(chunk)
+        cursor = split_at
+        while cursor < total_len and content[cursor] in (" ", "\n"):
+            cursor += 1
+
+    return chunks
 
 
 def _markdown_to_telegram_html(text: str) -> str:
@@ -106,8 +157,8 @@ def _markdown_to_telegram_html(text: str) -> str:
 
     text = re.sub(r'`([^`]+)`', save_inline_code, text)
 
-    # 3. Headers # Title -> just the title text
-    text = re.sub(r'^#{1,6}\s+(.+)$', r'\1', text, flags=re.MULTILINE)
+    # 3. Headers # Title -> markdown bold title
+    text = re.sub(r'^#{1,6}\s+(.+)$', r'**\1**', text, flags=re.MULTILINE)
 
     # 4. Blockquotes > text -> just the text (before HTML escaping)
     text = re.sub(r'^>\s*(.*)$', r'\1', text, flags=re.MULTILINE)
@@ -116,7 +167,12 @@ def _markdown_to_telegram_html(text: str) -> str:
     text = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
     # 6. Links [text](url) - must be before bold/italic to handle nested cases
-    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', text)
+    def _link_sub(match: re.Match) -> str:
+        label = match.group(1)
+        url = match.group(2).strip().replace('"', "%22")
+        return f'<a href="{url}">{label}</a>'
+
+    text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _link_sub, text)
 
     # 7. Bold **text** or __text__
     text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
@@ -328,7 +384,7 @@ class TelegramChannel(BaseChannel):
         if msg.content and msg.content != "[empty message]":
             is_progress = msg.metadata.get("_progress", False)
 
-            for chunk in split_message(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
+            for chunk in _split_markdown_for_telegram(msg.content, TELEGRAM_MAX_MESSAGE_LEN):
                 # Final response: simulate streaming via draft, then persist
                 if not is_progress:
                     await self._send_with_streaming(chat_id, chunk, reply_params)

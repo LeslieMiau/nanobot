@@ -5,28 +5,28 @@ Update this file when adding or removing subscriptions. Keep entries first-hand 
 ## Named People on X
 
 - Andrej Karpathy
-  - X: https://x.com/karpathy
+  - X (signal only): https://x.com/karpathy
 - 宝玉
-  - X: https://x.com/dotey
+  - X (signal only): https://x.com/dotey
 - Sam Altman
-  - X: https://x.com/sama
+  - X (signal only): https://x.com/sama
 
 ## Official Labs
 
 - OpenAI
-  - X: https://x.com/OpenAI
+  - X (signal only): https://x.com/OpenAI
   - YouTube: https://www.youtube.com/@OpenAI
-  - Site updates: https://openai.com/index/
+  - News RSS: https://openai.com/news/rss.xml
+  - Site updates: https://openai.com/news
 - Anthropic
-  - X: https://x.com/AnthropicAI
-  - Claude blog: https://claude.com/blog
+  - X (signal only): https://x.com/AnthropicAI
   - Newsroom: https://www.anthropic.com/news
-  - Engineering: https://www.anthropic.com/engineering
   - Research: https://www.anthropic.com/research
 - Gemini / Google AI
-  - X: https://x.com/GoogleAI
+  - X (signal only): https://x.com/GoogleAI
   - YouTube: https://www.youtube.com/@Google
-  - Google AI blog: https://blog.google/technology/ai/
+  - Google Blog RSS: https://blog.google/rss/
+  - Google AI topic page: https://blog.google/technology/ai/
 
 ## Community Signal
 
@@ -35,6 +35,20 @@ Update this file when adding or removing subscriptions. Keep entries first-hand 
   - Newest: https://news.ycombinator.com/newest
 - GitHub Trending
   - Daily: https://github.com/trending?since=daily
+- arXiv
+  - cs.AI RSS: https://export.arxiv.org/rss/cs.AI
+
+## Recommended Test Sources (English-first)
+
+Use this set when validating the daily digest pipeline end-to-end:
+
+- OpenAI News RSS: https://openai.com/news/rss.xml
+- Anthropic News: https://www.anthropic.com/news
+- Anthropic Research: https://www.anthropic.com/research
+- Google Blog RSS: https://blog.google/rss/
+- Hacker News Front Page: https://news.ycombinator.com/
+- GitHub Trending Daily: https://github.com/trending?since=daily
+- arXiv cs.AI RSS: https://export.arxiv.org/rss/cs.AI
 
 ## Maintenance Rules
 
@@ -42,5 +56,6 @@ Update this file when adding or removing subscriptions. Keep entries first-hand 
 - Add a source only if it regularly produces first-hand AI information.
 - Remove low-signal feeds instead of letting the list grow without bound.
 - For named people, read selectively: only keep their professional AI-domain posts, not general chatter.
+- Treat X as a secondary heat signal; do not treat `x.com/<account>` profile pages as concrete artifacts.
 - Evaluate hotness inside the active digest window. For the default morning run, that means the previous day 08:00 to the current day 08:00 Asia/Shanghai.
 - Treat Hacker News and GitHub Trending as heat signals only. If an item comes from them, cite the original project page, paper, blog post, or repository before citing the signal page.

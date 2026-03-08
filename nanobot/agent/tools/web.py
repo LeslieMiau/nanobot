@@ -6,6 +6,7 @@ import os
 import re
 from typing import Any
 from urllib.parse import urlparse
+from xml.etree import ElementTree
 
 import httpx
 from loguru import logger
@@ -59,7 +60,7 @@ def _extract_github_trending_items(html_text: str, max_items: int = 10) -> str |
     items = []
     seen: set[str] = set()
     for href, repo_html in pattern.findall(html_text):
-        repo_name = _normalize(_strip_tags(repo_html)).replace(" / ", "/").replace(" ", "")
+        repo_name = re.sub(r"\s+", "", _strip_tags(repo_html))
         if not repo_name or href in seen:
             continue
         seen.add(href)
@@ -69,6 +70,76 @@ def _extract_github_trending_items(html_text: str, max_items: int = 10) -> str |
     if not items:
         return None
     return "# Trending repositories on GitHub today\n\n" + "\n".join(items)
+
+
+def _extract_rss_atom_items(feed_text: str, max_items: int = 10) -> str | None:
+    """Extract concrete entries from RSS/Atom feeds."""
+    try:
+        root = ElementTree.fromstring(feed_text)
+    except ElementTree.ParseError:
+        return None
+
+    items: list[str] = []
+    feed_title = ""
+    root_tag = root.tag.lower()
+    is_atom = root_tag.endswith("feed")
+
+    if is_atom:
+        feed_title = _normalize((root.findtext("{*}title") or "").strip())
+        for entry in root.findall("{*}entry"):
+            title = _normalize((entry.findtext("{*}title") or "").strip())
+            link = ""
+            for link_node in entry.findall("{*}link"):
+                href = (link_node.attrib.get("href") or "").strip()
+                rel = (link_node.attrib.get("rel") or "").strip().lower()
+                if href and (not rel or rel == "alternate"):
+                    link = href
+                    break
+            if not link:
+                link = (entry.findtext("{*}id") or "").strip()
+            published = (
+                (entry.findtext("{*}updated") or entry.findtext("{*}published") or "").strip()
+            )
+            if not title or not link:
+                continue
+            line = f"- [{title}]({link})"
+            if published:
+                line += f" ({published})"
+            items.append(line)
+            if len(items) >= max_items:
+                break
+    else:
+        channel = root.find("{*}channel")
+        node = channel if channel is not None else root
+        feed_title = _normalize((node.findtext("{*}title") or "").strip())
+        for item in node.findall("{*}item"):
+            title = _normalize((item.findtext("{*}title") or "").strip())
+            link = (item.findtext("{*}link") or "").strip()
+            if not link:
+                link_node = item.find("{*}link")
+                if link_node is not None:
+                    link = (link_node.attrib.get("href") or "").strip()
+            published = (
+                (
+                    item.findtext("{*}pubDate")
+                    or item.findtext("{*}date")
+                    or item.findtext("{*}updated")
+                    or ""
+                ).strip()
+            )
+            if not title or not link:
+                continue
+            line = f"- [{title}]({link})"
+            if published:
+                line += f" ({published})"
+            items.append(line)
+            if len(items) >= max_items:
+                break
+
+    if not items:
+        return None
+    heading = feed_title or "RSS/Atom Feed"
+    return f"# {heading}\n\n" + "\n".join(items)
 
 
 def _validate_url(url: str) -> tuple[bool, str]:
@@ -232,6 +303,19 @@ class WebFetchTool(Tool):
 
             if "application/json" in ctype:
                 text, extractor = json.dumps(r.json(), indent=2, ensure_ascii=False), "json"
+            elif "xml" in ctype or r.text.lstrip().startswith(("<?xml", "<rss", "<feed")):
+                extracted = _extract_rss_atom_items(r.text)
+                if not extracted:
+                    return json.dumps(
+                        {
+                            "error": "RSS/Atom feed returned no extractable entries",
+                            "url": url,
+                            "finalUrl": str(r.url),
+                            "status": r.status_code,
+                        },
+                        ensure_ascii=False,
+                    )
+                text, extractor = extracted, "rss-list"
             elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
                 specialized = self._site_specific_extract(str(r.url), r.text)
                 if specialized:

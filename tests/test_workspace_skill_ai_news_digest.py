@@ -20,12 +20,15 @@ def test_workspace_ai_news_digest_skill_loads_content() -> None:
     content = loader.load_skill("ai-news-digest")
 
     assert content is not None
-    assert "Andrej Karpathy" in content
+    assert "official announcements and RSS feeds (OpenAI, Anthropic, Google AI)" in content
     assert 'cron_expr="0 8 * * *"' in content
     assert "previous day 08:00 to the current day 08:00" in content
     assert "first-hand sources over quantity" in content
     assert "include only domain-relevant statements" in content
     assert "Only include an item when you can identify a concrete underlying artifact" in content
+    assert "Treat X as a secondary heat signal" in content
+    assert "Do not treat `x.com/<account>` profile pages as concrete artifacts" in content
+    assert "Telegram formatting constraints (lightweight rich text)" in content
     assert "## 本轮未纳入" in content
 
 
@@ -46,3 +49,7 @@ def test_workspace_ai_news_digest_skill_references_sources_file() -> None:
     assert "previous day 08:00 to the current day 08:00" in sources_content
     assert "GitHub Trending" in sources_content
     assert "Treat Hacker News and GitHub Trending as heat signals only" in sources_content
+    assert "Recommended Test Sources (English-first)" in sources_content
+    assert "https://openai.com/news/rss.xml" in sources_content
+    assert "https://blog.google/rss/" in sources_content
+    assert "https://export.arxiv.org/rss/cs.AI" in sources_content
