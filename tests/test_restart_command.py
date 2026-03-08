@@ -137,6 +137,63 @@ async def test_restart_alias_works_in_run_loop_while_token_guard_pending(tmp_pat
 
 
 @pytest.mark.asyncio
+async def test_restart_has_highest_priority_while_session_task_is_running(tmp_path: Path) -> None:
+    cb = AsyncMock()
+    bus = MessageBus()
+    loop = AgentLoop(
+        bus=bus,
+        provider=_Provider(),
+        workspace=tmp_path,
+        model="dummy",
+        restart_callback=cb,
+    )
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+    release = asyncio.Event()
+    original_process = loop._process_message
+
+    async def blocking_process(msg, **kwargs):
+        if msg.content == "work":
+            started.set()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+        return await original_process(msg, **kwargs)
+
+    loop._process_message = blocking_process
+    run_task = asyncio.create_task(loop.run())
+    try:
+        await bus.publish_inbound(
+            InboundMessage(
+                channel="telegram",
+                sender_id="6460709699",
+                chat_id="6460709699",
+                content="work",
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=2.0)
+
+        await bus.publish_inbound(
+            InboundMessage(
+                channel="telegram",
+                sender_id="6460709699",
+                chat_id="6460709699",
+                content="/restart",
+            )
+        )
+        restarted = await asyncio.wait_for(bus.consume_outbound(), timeout=2.0)
+        cb.assert_awaited_once()
+        assert "我是 nanobot 小新版" in restarted.content
+        await asyncio.wait_for(cancelled.wait(), timeout=2.0)
+    finally:
+        release.set()
+        loop.stop()
+        await asyncio.wait_for(run_task, timeout=2.0)
+
+
+@pytest.mark.asyncio
 async def test_start_command_returns_shinchan_welcome(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path)
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/start")

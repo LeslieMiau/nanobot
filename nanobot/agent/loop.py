@@ -1226,7 +1226,7 @@ class AgentLoop:
         return normalized
 
     async def run(self) -> None:
-        """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
+        """Run the agent loop, prioritizing stop/restart over normal message dispatch."""
         self._running = True
         await self._connect_mcp()
         logger.info("Agent loop started")
@@ -1238,28 +1238,57 @@ class AgentLoop:
                 continue
 
             cmd, _ = self._parse_user_command(msg.content)
-            if cmd == "/stop":
+            if cmd == "/restart":
+                await self._handle_restart(msg)
+            elif cmd == "/stop":
                 await self._handle_stop(msg)
             else:
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
                 task.add_done_callback(lambda t, k=msg.session_key: self._active_tasks.get(k, []) and self._active_tasks[k].remove(t) if t in self._active_tasks.get(k, []) else None)
 
+    async def _cancel_session_tasks(self, session_key: str, *, wait: bool) -> int:
+        """Cancel active tasks and subagents for a session."""
+        tasks = self._active_tasks.pop(session_key, [])
+        cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
+        if wait:
+            for t in tasks:
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+        sub_cancelled = await self.subagents.cancel_by_session(session_key)
+        return cancelled + sub_cancelled
+
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
-        tasks = self._active_tasks.pop(msg.session_key, [])
-        cancelled = sum(1 for t in tasks if not t.done() and t.cancel())
-        for t in tasks:
-            try:
-                await t
-            except (asyncio.CancelledError, Exception):
-                pass
-        sub_cancelled = await self.subagents.cancel_by_session(msg.session_key)
-        total = cancelled + sub_cancelled
+        total = await self._cancel_session_tasks(msg.session_key, wait=True)
         content = f"⏹ Stopped {total} task(s)." if total else "No active task to stop."
         await self.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
         ))
+
+    async def _handle_restart(self, msg: InboundMessage, *, publish: bool = True) -> OutboundMessage:
+        """Handle restart with highest priority and best-effort task cancellation."""
+        self._token_guard_pending.pop(msg.session_key, None)
+        self._plan_guard_pending.pop(msg.session_key, None)
+        if not self._restart_callback:
+            out = OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Restart is not available in this mode.",
+            )
+        else:
+            await self._cancel_session_tasks(msg.session_key, wait=False)
+            await self._restart_callback()
+            out = OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"{self._SHINCHAN_WELCOME}\n我先转一圈，马上重启回来喔～",
+            )
+        if publish:
+            await self.bus.publish_outbound(out)
+        return out
 
     async def _dispatch(self, msg: InboundMessage) -> None:
         """Process a message under the global lock."""
@@ -1432,20 +1461,7 @@ class AgentLoop:
                 content="Canceled pending task.",
             )
         if cmd == "/restart":
-            self._token_guard_pending.pop(key, None)
-            self._plan_guard_pending.pop(key, None)
-            if not self._restart_callback:
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="Restart is not available in this mode.",
-                )
-            await self._restart_callback()
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=f"{self._SHINCHAN_WELCOME}\n我先转一圈，马上重启回来喔～",
-            )
+            return await self._handle_restart(msg, publish=False)
         if cmd == "/start":
             return OutboundMessage(
                 channel=msg.channel,
