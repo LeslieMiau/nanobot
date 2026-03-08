@@ -35,8 +35,8 @@ Update this file when adding or removing subscriptions. Keep entries first-hand 
   - Newest: https://news.ycombinator.com/newest
 - GitHub Trending
   - Daily: https://github.com/trending?since=daily
-- arXiv
-  - cs.AI RSS: https://export.arxiv.org/rss/cs.AI
+- Hugging Face
+  - Blog Feed: https://huggingface.co/blog/feed.xml
 
 ## Recommended Test Sources (English-first)
 
@@ -48,7 +48,7 @@ Use this set when validating the daily digest pipeline end-to-end:
 - Google Blog RSS: https://blog.google/rss/
 - Hacker News Front Page: https://news.ycombinator.com/
 - GitHub Trending Daily: https://github.com/trending?since=daily
-- arXiv cs.AI RSS: https://export.arxiv.org/rss/cs.AI
+- Hugging Face Blog Feed: https://huggingface.co/blog/feed.xml
 
 ## Maintenance Rules
 

@@ -52,4 +52,4 @@ def test_workspace_ai_news_digest_skill_references_sources_file() -> None:
     assert "Recommended Test Sources (English-first)" in sources_content
     assert "https://openai.com/news/rss.xml" in sources_content
     assert "https://blog.google/rss/" in sources_content
-    assert "https://export.arxiv.org/rss/cs.AI" in sources_content
+    assert "https://huggingface.co/blog/feed.xml" in sources_content
