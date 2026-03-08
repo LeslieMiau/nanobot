@@ -35,9 +35,9 @@ def get_logs_dir() -> Path:
 
 
 def get_workspace_path(workspace: str | None = None) -> Path:
-    """Resolve and ensure the agent workspace path."""
+    """Resolve the agent workspace path without creating it."""
     path = Path(workspace).expanduser() if workspace else Path.home() / ".nanobot" / "workspace"
-    return ensure_dir(path)
+    return path
 
 
 def get_cli_history_path() -> Path:
