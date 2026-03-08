@@ -6,6 +6,7 @@ Update this file when adding or removing subscriptions. Keep entries first-hand,
 
 ### Andrej Karpathy
 - X (signal): https://x.com/karpathy
+- RSSHub mirror (unstable, signal-only): https://rsshub.app/twitter/user/karpathy
 
 ### Simon Willison
 - Blog: https://simonwillison.net/
@@ -14,6 +15,7 @@ Update this file when adding or removing subscriptions. Keep entries first-hand,
 
 ### 宝玉
 - X (signal): https://x.com/dotey
+- RSSHub mirror (unstable, signal-only): https://rsshub.app/twitter/user/dotey
 - Blog: https://baoyu.io/
 
 ### Latent Space
@@ -36,6 +38,7 @@ Update this file when adding or removing subscriptions. Keep entries first-hand,
 ### Dwarkesh
 - Podcast: https://www.dwarkesh.com/podcast
 - YouTube: https://www.youtube.com/@dwarkeshpatel
+- YouTube RSSHub: https://rsshub.app/youtube/user/@dwarkeshpatel
 
 ### 张小珺商业访谈录
 - WeChat archive (signal): https://mp.weixin.qq.com/
@@ -44,6 +47,7 @@ Update this file when adding or removing subscriptions. Keep entries first-hand,
 ### Latent Space Podcast
 - Podcast home: https://www.latent.space/podcast
 - YouTube (signal): https://www.youtube.com/@LatentSpaceTV
+- YouTube RSSHub: https://rsshub.app/youtube/user/@LatentSpaceTV
 
 ### SemiAnalysis
 - Site: https://semianalysis.com/
@@ -69,6 +73,8 @@ Default-filter:
 ## Maintenance Rules
 
 - Prefer first-hand sources over aggregators.
+- For YouTube, prefer official RSS/Atom when channel ID is known; otherwise use RSSHub handle routes before scraping channel shell pages.
+- Do not rely on RSSHub Twitter/X routes as a primary scheduled source; keep them signal-only because auth and stability vary by instance.
 - Prioritize builder relevance, practicality, and workflow/product impact.
 - Keep Tier 1 small and high signal; remove noisy feeds proactively.
 - Treat X as signal-only and resolve to primary artifacts before citing.

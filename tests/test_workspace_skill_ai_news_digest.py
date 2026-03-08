@@ -62,5 +62,8 @@ def test_workspace_ai_news_digest_skill_references_sources_file() -> None:
     assert "Dwarkesh" in sources_content
     assert "张小珺商业访谈录" in sources_content
     assert "SemiAnalysis" in sources_content
+    assert "https://rsshub.app/youtube/user/@dwarkeshpatel" in sources_content
+    assert "https://rsshub.app/youtube/user/@LatentSpaceTV" in sources_content
+    assert "Do not rely on RSSHub Twitter/X routes as a primary scheduled source" in sources_content
     assert "Major Event Trigger Watchlist" in sources_content
     assert "Noise Filter Baseline" in sources_content

@@ -149,8 +149,9 @@ Sections:
 ## Tooling Notes
 
 - Use `web_search` for discovery and `web_fetch` for source verification.
-- For YouTube channel URLs, prefer public RSS/Atom feeds (`feeds/videos.xml?channel_id=...`) or the podcast/site page when available.
+- For YouTube channel URLs, prefer public RSS/Atom feeds (`feeds/videos.xml?channel_id=...`); if channel ID is unknown, RSSHub handle routes are acceptable before trying the channel shell page.
 - Treat X as a secondary signal and prefer official post / paper / repo / release pages.
+- Do not treat RSSHub Twitter/X mirrors as a primary cron source; they are fallback signal only.
 - If X or YouTube returns only a shell page, use a public fallback source or mark it in `本轮未纳入`; do not infer missing content from the shell page.
 - Resolve community hotness pages to original targets before writing.
 
