@@ -146,6 +146,20 @@ def test_web_fetch_builds_rss_then_reader_fallbacks_for_youtube_channel_pages() 
     ]
 
 
+def test_web_fetch_builds_youtube_rss_fallback_from_handle_page_html() -> None:
+    html = '<link rel="alternate" type="application/rss+xml" title="RSS" href="https://www.youtube.com/feeds/videos.xml?channel_id=UCvi5jNRoRVm436TVAXet1kQ">'
+
+    candidates = WebFetchTool._fallback_candidates(
+        "https://www.youtube.com/@LatentSpaceTV/videos",
+        html,
+    )
+
+    assert candidates == [
+        ("youtube-rss", "https://www.youtube.com/feeds/videos.xml?channel_id=UCvi5jNRoRVm436TVAXet1kQ"),
+        ("reader", "https://r.jina.ai/http://www.youtube.com/@LatentSpaceTV/videos"),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_web_fetch_falls_back_to_reader_for_x_placeholder_pages(monkeypatch) -> None:
     class _FakeResponse:
@@ -190,6 +204,36 @@ async def test_web_fetch_falls_back_to_reader_for_x_placeholder_pages(monkeypatc
     assert payload["usedFallback"] is True
     assert payload["fallbackUrl"] == "https://r.jina.ai/http://x.com/karpathy/status/123"
     assert "Testing-time compute" in payload["text"]
+
+
+def test_web_fetch_flags_reader_shell_for_missing_x_post() -> None:
+    text = (
+        "Title: X\n\nDon’t miss what’s happening\n\nLog in\n\nSign up\n\n"
+        "Hmm...this page doesn’t exist. Try searching for something else."
+    )
+
+    reason = WebFetchTool._detect_unusable_page(
+        "https://r.jina.ai/http://x.com/karpathy/status/123",
+        text,
+        text,
+    )
+
+    assert reason == "x.com reader fallback returned a login or missing-page shell"
+
+
+def test_web_fetch_flags_live_youtube_shell_pages_in_multiple_locales() -> None:
+    text = (
+        "# Latent Space TV - YouTube\n\n概要 プレスルーム 著作権 クリエイター向け "
+        "開発者向け 利用規約 ポリシーとセキュリティ"
+    )
+
+    reason = WebFetchTool._detect_unusable_page(
+        "https://www.youtube.com/@LatentSpaceTV/videos",
+        "<html><body></body></html>",
+        text,
+    )
+
+    assert reason == "YouTube channel page returned a generic shell without concrete videos"
 
 
 @pytest.mark.asyncio
@@ -243,6 +287,67 @@ async def test_web_fetch_falls_back_to_youtube_rss_for_channel_pages(monkeypatch
     assert payload["extractor"] == "youtube-rss-fallback"
     assert payload["usedFallback"] is True
     assert payload["fallbackUrl"] == "https://www.youtube.com/feeds/videos.xml?channel_id=UC123ABC"
+    assert "[Agent update](https://www.youtube.com/watch?v=abc123)" in payload["text"]
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_falls_back_to_youtube_rss_for_handle_pages_using_html_metadata(monkeypatch) -> None:
+    class _FakeResponse:
+        def __init__(self, url: str, headers: dict[str, str], text: str, status_code: int = 200):
+            self.url = url
+            self.headers = headers
+            self.text = text
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url: str, headers: dict[str, str]):  # noqa: ARG002
+            if url == "https://www.youtube.com/@LatentSpaceTV/videos":
+                return _FakeResponse(
+                    url,
+                    {"content-type": "text/html"},
+                    """
+                    <html><head>
+                      <link rel="alternate" type="application/rss+xml" title="RSS"
+                        href="https://www.youtube.com/feeds/videos.xml?channel_id=UCvi5jNRoRVm436TVAXet1kQ">
+                    </head><body>
+                      概要 プレスルーム 著作権 クリエイター向け 開発者向け 利用規約 ポリシーとセキュリティ
+                    </body></html>
+                    """,
+                )
+            if url == "https://www.youtube.com/feeds/videos.xml?channel_id=UCvi5jNRoRVm436TVAXet1kQ":
+                return _FakeResponse(
+                    url,
+                    {"content-type": "application/atom+xml"},
+                    """<?xml version="1.0" encoding="UTF-8"?>
+                    <feed xmlns="http://www.w3.org/2005/Atom">
+                      <title>YouTube</title>
+                      <entry>
+                        <title>Agent update</title>
+                        <link rel="alternate" href="https://www.youtube.com/watch?v=abc123" />
+                        <updated>2026-03-08T01:00:00+00:00</updated>
+                      </entry>
+                    </feed>""",
+                )
+            raise AssertionError(f"unexpected url: {url}")
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda *args, **kwargs: _FakeClient())
+
+    tool = WebFetchTool()
+    result = await tool.execute("https://www.youtube.com/@LatentSpaceTV/videos")
+    payload = json.loads(result)
+
+    assert payload["extractor"] == "youtube-rss-fallback"
+    assert payload["usedFallback"] is True
+    assert payload["fallbackUrl"] == "https://www.youtube.com/feeds/videos.xml?channel_id=UCvi5jNRoRVm436TVAXet1kQ"
     assert "[Agent update](https://www.youtube.com/watch?v=abc123)" in payload["text"]
 
 

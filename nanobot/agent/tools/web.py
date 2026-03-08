@@ -264,6 +264,21 @@ class WebFetchTool(Tool):
         return match.group(1)
 
     @staticmethod
+    def _extract_youtube_channel_id_from_html(raw_html: str) -> str | None:
+        """Extract a YouTube channel ID from page HTML metadata."""
+        patterns = (
+            r'feeds/videos\.xml\?channel_id=([A-Za-z0-9_-]+)',
+            r'"externalId":"([A-Za-z0-9_-]+)"',
+            r'"browseId":"(UC[A-Za-z0-9_-]+)"',
+            r'www\.youtube\.com/channel/([A-Za-z0-9_-]+)',
+        )
+        for pattern in patterns:
+            match = re.search(pattern, raw_html)
+            if match:
+                return html.unescape(match.group(1))
+        return None
+
+    @staticmethod
     def _reader_fallback_url(url: str) -> str:
         """Build a public reader mirror URL for a login-gated page."""
         parsed = urlparse(url)
@@ -272,8 +287,19 @@ class WebFetchTool(Tool):
             suffix += f"?{parsed.query}"
         return f"https://r.jina.ai/http://{suffix}"
 
+    @staticmethod
+    def _reader_source_url(url: str) -> str | None:
+        """Recover the source URL from a r.jina.ai reader mirror URL."""
+        parsed = urlparse(url)
+        if not parsed.netloc.lower().endswith("r.jina.ai"):
+            return None
+        candidate = parsed.path.lstrip("/")
+        if candidate.startswith(("http://", "https://")):
+            return candidate
+        return None
+
     @classmethod
-    def _fallback_candidates(cls, url: str) -> list[tuple[str, str]]:
+    def _fallback_candidates(cls, url: str, raw_html: str = "") -> list[tuple[str, str]]:
         """Return fallback sources for pages that often require login or JS hydration."""
         parsed = urlparse(url)
         host = parsed.netloc.lower()
@@ -281,7 +307,7 @@ class WebFetchTool(Tool):
         candidates: list[tuple[str, str]] = []
 
         if host.endswith("youtube.com"):
-            channel_id = cls._extract_youtube_channel_id(path)
+            channel_id = cls._extract_youtube_channel_id(path) or cls._extract_youtube_channel_id_from_html(raw_html)
             if channel_id:
                 candidates.append(
                     ("youtube-rss", f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}")
@@ -299,9 +325,27 @@ class WebFetchTool(Tool):
         host = parsed.netloc.lower()
         path = parsed.path or "/"
         normalized = _normalize(text).lower()
+        source_url = WebFetchTool._reader_source_url(url)
 
-        if host.endswith("x.com") and "something went wrong, but don’t fret" in normalized:
-            return "x.com returned a placeholder error page instead of concrete post content"
+        if source_url:
+            source_parsed = urlparse(source_url)
+            host = source_parsed.netloc.lower()
+            path = source_parsed.path or "/"
+
+        if host.endswith("x.com"):
+            if "something went wrong, but don’t fret" in normalized:
+                return "x.com returned a placeholder error page instead of concrete post content"
+            x_shell_markers = (
+                "don’t miss what’s happening",
+                "don't miss what's happening",
+                "hmm...this page doesn’t exist",
+                "hmm...this page doesn't exist",
+                "join x today",
+                "log in",
+                "sign up",
+            )
+            if sum(marker in normalized for marker in x_shell_markers) >= 2:
+                return "x.com reader fallback returned a login or missing-page shell"
 
         if host.endswith("youtube.com") and (
             "/@" in path
@@ -309,9 +353,38 @@ class WebFetchTool(Tool):
             or path.startswith("/user/")
             or path.startswith("/c/")
         ):
-            has_watch_links = "/watch?v=" in raw_html
-            generic_shell = "youtube 的運作方式" in text or "YouTube 的運作方式" in text or "news center" in normalized
-            if not has_watch_links and generic_shell:
+            has_visible_watch_links = "/watch?v=" in text or "watch?v=" in normalized
+            generic_shell_markers = (
+                "youtube 的運作方式",
+                "how youtube works",
+                "news center",
+                "pressroom",
+                "copyright",
+                "privacy",
+                "terms",
+                "creators",
+                "developers",
+                "policy and safety",
+                "policies and safety",
+                "プレスルーム",
+                "著作権",
+                "クリエイター向け",
+                "開発者向け",
+                "利用規約",
+                "ポリシーとセキュリティ",
+                "概要",
+                "簡介",
+                "新聞中心",
+                "版權",
+                "聯絡我們",
+                "創作者",
+                "刊登廣告",
+                "開發人員",
+                "條款",
+                "私隱",
+                "政策及安全",
+            )
+            if not has_visible_watch_links and sum(marker in normalized for marker in generic_shell_markers) >= 3:
                 return "YouTube channel page returned a generic shell without concrete videos"
 
         if host.endswith("news.ycombinator.com") and normalized == "# hacker news":
@@ -334,7 +407,11 @@ class WebFetchTool(Tool):
         final_url = str(response.url)
 
         if "application/json" in ctype:
-            return json.dumps(response.json(), indent=2, ensure_ascii=False), "json", None
+            text = json.dumps(response.json(), indent=2, ensure_ascii=False)
+            unusable_reason = self._detect_unusable_page(final_url, response.text, text)
+            if unusable_reason:
+                return None, None, unusable_reason
+            return text, "json", None
 
         if "xml" in ctype or response.text.lstrip().startswith(("<?xml", "<rss", "<feed")):
             extracted = _extract_rss_atom_items(response.text)
@@ -361,6 +438,9 @@ class WebFetchTool(Tool):
                 return None, None, unusable_reason
             return text, extractor, None
 
+        unusable_reason = self._detect_unusable_page(final_url, response.text, response.text)
+        if unusable_reason:
+            return None, None, unusable_reason
         return response.text, "raw", None
 
     async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
@@ -383,7 +463,7 @@ class WebFetchTool(Tool):
 
                 if error:
                     attempts: list[dict[str, str]] = []
-                    for strategy, fallback_url in self._fallback_candidates(str(r.url)):
+                    for strategy, fallback_url in self._fallback_candidates(str(r.url), r.text):
                         attempts.append({"strategy": strategy, "url": fallback_url})
                         try:
                             fallback_response = await client.get(
