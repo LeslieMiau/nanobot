@@ -25,6 +25,8 @@ def test_workspace_ai_news_digest_skill_loads_content() -> None:
     assert "previous day 08:00 to the current day 08:00" in content
     assert "first-hand sources over quantity" in content
     assert "include only domain-relevant statements" in content
+    assert "Only include an item when you can identify a concrete underlying artifact" in content
+    assert "## 本轮未纳入" in content
 
 
 def test_workspace_ai_news_digest_skill_references_sources_file() -> None:
@@ -42,3 +44,5 @@ def test_workspace_ai_news_digest_skill_references_sources_file() -> None:
     assert "Hacker News" in sources_content
     assert "professional AI-domain posts" in sources_content
     assert "previous day 08:00 to the current day 08:00" in sources_content
+    assert "GitHub Trending" in sources_content
+    assert "Treat Hacker News and GitHub Trending as heat signals only" in sources_content

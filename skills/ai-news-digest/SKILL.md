@@ -20,11 +20,13 @@ Read [references/sources.md](references/sources.md) to get the current subscript
 - Official blog posts
 - Official YouTube channel uploads or release videos
 - Original X posts from the listed accounts
-5. Use Hacker News to detect what the technical community is amplifying today, but do not treat HN discussion alone as the source of truth. When HN links to a third-party article, cite the original article first and HN second.
+5. Use Hacker News and GitHub Trending to detect what the technical community is amplifying today, but do not treat either signal page as the source of truth. When they point to a third-party article, repository, or project page, cite the original target first and the signal page second.
 6. Keep only important items. Ignore repetitive engagement bait, generic opinions, reposts, screenshots of posts, and minor product chatter without substance.
-7. If a claim cannot be verified from a source you can fetch, say so explicitly instead of guessing.
-8. When the user asks to add or remove a subscription source, update `references/sources.md` instead of hardcoding the source list into this file.
-9. For named people, include only domain-relevant statements. Ignore their posts about politics, lifestyle, personal chatter, memes, sports, or any other non-AI/non-technical topic unless the user explicitly asks for broader coverage.
+7. Only include an item when you can identify a concrete underlying artifact: a post, article, paper, release note, video, repository, or official announcement. Do not treat a category page, homepage shell, error page, or generic directory page as a valid item.
+8. If a claim cannot be verified from a source you can fetch, say so explicitly instead of guessing.
+9. When a source is blocked, empty, or too generic to extract concrete items, report that source as unavailable for this run instead of inventing a summary.
+10. When the user asks to add or remove a subscription source, update `references/sources.md` instead of hardcoding the source list into this file.
+11. For named people, include only domain-relevant statements. Ignore their posts about politics, lifestyle, personal chatter, memes, sports, or any other non-AI/non-technical topic unless the user explicitly asks for broader coverage.
 
 ## Importance Filter
 
@@ -73,14 +75,27 @@ Rules:
 - Separate facts from inference. Label inference as `判断`.
 - Do not pad the briefing with older items just to reach a quota.
 - Prefer the original source link over mirrors, summaries, or social reposts.
+- If a source fetch only returns a homepage shell, category heading, access error, or empty page, exclude it from item generation and note it under availability when relevant.
+
+## Source Availability
+
+If important sources are unavailable in a run, add a short section before `今日结论`:
+
+```markdown
+## 本轮未纳入
+- OpenAI Site updates: 403，今天未能稳定抓到具体条目
+- X accounts: 当前抓取结果是占位错误页，未纳入正文
+```
+
+This section is for transparency, not filler. Include it only when it materially explains why the digest is short.
 
 ## Tooling Notes
 
 - Prefer `web_search` to discover the latest relevant source URLs.
 - Prefer `web_fetch` on the final source URLs you cite.
 - For X-heavy topics, search by account name plus topic instead of relying on memory.
-- For official labs, check both blog and YouTube when launches may have video demos.
-- For Hacker News, focus on front-page AI items and use it as a same-day prioritization signal.
+- For official labs, check both blog/newsroom and YouTube when launches may have video demos.
+- For Hacker News and GitHub Trending, use them as same-day prioritization signals and then resolve to the original target URL before writing the digest.
 
 ## Daily 08:00 Delivery
 
@@ -89,7 +104,7 @@ If the user asks to receive this automatically every morning, schedule it with `
 ```python
 cron(
     action="add",
-    message="Use the ai-news-digest skill to compile the hot AI articles and posts in the reporting window from the previous day 08:00 to the current day 08:00 Asia/Shanghai time from Andrej Karpathy, 宝玉, Sam Altman, official OpenAI/Anthropic/Gemini X+YouTube+blogs, and Hacker News hot topics. Prioritize high-quality first-hand sources over quantity. Prefer items published inside that window; include older items only if they are clearly trending inside the same window and label them 旧文本时段热议. Send a concise Chinese briefing with the explicit reporting window, original source links, absolute timestamps, hotness attribution, and a short final takeaway.",
+    message="Use the ai-news-digest skill to compile the hot AI articles and posts in the reporting window from the previous day 08:00 to the current day 08:00 Asia/Shanghai time from Andrej Karpathy, 宝玉, Sam Altman, official OpenAI/Anthropic/Gemini channels, Hacker News hot topics, and GitHub Trending daily. Prioritize high-quality first-hand sources over quantity. Only include concrete underlying artifacts such as posts, articles, papers, videos, release notes, repositories, or official announcements. Treat Hacker News and GitHub Trending as heat signals only, and cite the original target first. Prefer items published inside that window; include older items only if they are clearly trending inside the same window and label them 旧文本时段热议. If a source is blocked, empty, or only returns a directory shell, note that source as unavailable instead of inventing content. Send a concise Chinese briefing with the explicit reporting window, original source links, absolute timestamps, hotness attribution, and a short final takeaway.",
     cron_expr="0 8 * * *",
     tz="Asia/Shanghai",
 )
