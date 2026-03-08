@@ -31,6 +31,46 @@ def _normalize(text: str) -> str:
     return re.sub(r'\n{3,}', '\n\n', text).strip()
 
 
+def _extract_hn_items(html_text: str, max_items: int = 10) -> str | None:
+    """Extract concrete post entries from Hacker News HTML."""
+    pattern = re.compile(
+        r'<span class="titleline">\s*<a href="([^"]+)".*?>(.*?)</a>',
+        re.IGNORECASE | re.DOTALL,
+    )
+    items = []
+    for href, title_html in pattern.findall(html_text):
+        title = _normalize(_strip_tags(title_html))
+        if not title:
+            continue
+        items.append(f"- [{title}]({html.unescape(href)})")
+        if len(items) >= max_items:
+            break
+    if not items:
+        return None
+    return "# Hacker News\n\n" + "\n".join(items)
+
+
+def _extract_github_trending_items(html_text: str, max_items: int = 10) -> str | None:
+    """Extract concrete repository entries from GitHub Trending HTML."""
+    pattern = re.compile(
+        r'<h2[^>]*>\s*<a[^>]*href="(/[^"/\s]+/[^"/\s]+)"[^>]*>(.*?)</a>',
+        re.IGNORECASE | re.DOTALL,
+    )
+    items = []
+    seen: set[str] = set()
+    for href, repo_html in pattern.findall(html_text):
+        repo_name = _normalize(_strip_tags(repo_html)).replace(" / ", "/").replace(" ", "")
+        if not repo_name or href in seen:
+            continue
+        seen.add(href)
+        items.append(f"- [{repo_name}](https://github.com{href})")
+        if len(items) >= max_items:
+            break
+    if not items:
+        return None
+    return "# Trending repositories on GitHub today\n\n" + "\n".join(items)
+
+
 def _validate_url(url: str) -> tuple[bool, str]:
     """Validate URL: must be http(s) with valid domain."""
     try:
@@ -125,6 +165,50 @@ class WebFetchTool(Tool):
         self.max_chars = max_chars
         self.proxy = proxy
 
+    @staticmethod
+    def _site_specific_extract(url: str, raw_html: str) -> tuple[str, str] | None:
+        """Extract structured content for sites where Readability performs poorly."""
+        parsed = urlparse(url)
+        host = parsed.netloc.lower()
+        path = parsed.path or "/"
+
+        if host.endswith("news.ycombinator.com"):
+            extracted = _extract_hn_items(raw_html)
+            if extracted:
+                return extracted, "hn-list"
+
+        if host.endswith("github.com") and path == "/trending":
+            extracted = _extract_github_trending_items(raw_html)
+            if extracted:
+                return extracted, "github-trending"
+
+        return None
+
+    @staticmethod
+    def _detect_unusable_page(url: str, raw_html: str, text: str) -> str | None:
+        """Return a human-readable reason when the page is a known unusable shell."""
+        parsed = urlparse(url)
+        host = parsed.netloc.lower()
+        path = parsed.path or "/"
+        normalized = _normalize(text).lower()
+
+        if host.endswith("x.com") and "something went wrong, but don’t fret" in normalized:
+            return "x.com returned a placeholder error page instead of concrete post content"
+
+        if host.endswith("youtube.com") and "/@" in path:
+            has_watch_links = "/watch?v=" in raw_html
+            generic_shell = "youtube 的運作方式" in text or "YouTube 的運作方式" in text or "news center" in normalized
+            if not has_watch_links and generic_shell:
+                return "YouTube channel page returned a generic shell without concrete videos"
+
+        if host.endswith("news.ycombinator.com") and normalized == "# hacker news":
+            return "Hacker News page returned no extractable post entries"
+
+        if host.endswith("github.com") and path == "/trending" and "see what the github community is most excited about today" in normalized:
+            return "GitHub Trending page returned only the directory shell without repository entries"
+
+        return None
+
     async def execute(self, url: str, extractMode: str = "markdown", maxChars: int | None = None, **kwargs: Any) -> str:
         from readability import Document
 
@@ -149,10 +233,25 @@ class WebFetchTool(Tool):
             if "application/json" in ctype:
                 text, extractor = json.dumps(r.json(), indent=2, ensure_ascii=False), "json"
             elif "text/html" in ctype or r.text[:256].lower().startswith(("<!doctype", "<html")):
-                doc = Document(r.text)
-                content = self._to_markdown(doc.summary()) if extractMode == "markdown" else _strip_tags(doc.summary())
-                text = f"# {doc.title()}\n\n{content}" if doc.title() else content
-                extractor = "readability"
+                specialized = self._site_specific_extract(str(r.url), r.text)
+                if specialized:
+                    text, extractor = specialized
+                else:
+                    doc = Document(r.text)
+                    content = self._to_markdown(doc.summary()) if extractMode == "markdown" else _strip_tags(doc.summary())
+                    text = f"# {doc.title()}\n\n{content}" if doc.title() else content
+                    extractor = "readability"
+                    unusable_reason = self._detect_unusable_page(str(r.url), r.text, text)
+                    if unusable_reason:
+                        return json.dumps(
+                            {
+                                "error": unusable_reason,
+                                "url": url,
+                                "finalUrl": str(r.url),
+                                "status": r.status_code,
+                            },
+                            ensure_ascii=False,
+                        )
             else:
                 text, extractor = r.text, "raw"
 
