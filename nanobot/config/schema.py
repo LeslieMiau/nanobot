@@ -251,9 +251,11 @@ class TokenGuardConfig(Base):
     """Token guard for large requests."""
 
     enabled: bool = True
-    threshold_tokens: int = 24_000
-    confirm_command: str = "/confirm"
-    cancel_command: str = "/cancel"
+    default_mode: Literal["on", "off", "strict", "relaxed"] = "on"
+    default_budget_k: int = 20
+    threshold_tokens: int = 24_000  # Deprecated: legacy threshold guard.
+    confirm_command: str = "/confirm"  # Deprecated: legacy token-guard confirm command.
+    cancel_command: str = "/cancel"  # Deprecated: legacy token-guard cancel command.
 
 
 class CodingConfig(Base):

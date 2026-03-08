@@ -82,6 +82,7 @@ async def test_restart_alias_in_chinese_calls_callback(tmp_path: Path) -> None:
 async def test_restart_alias_works_in_run_loop_while_token_guard_pending(tmp_path: Path) -> None:
     cb = AsyncMock()
     bus = MessageBus()
+    session_key = "telegram:6460709699"
     loop = AgentLoop(
         bus=bus,
         provider=_Provider(),
@@ -90,11 +91,14 @@ async def test_restart_alias_works_in_run_loop_while_token_guard_pending(tmp_pat
         restart_callback=cb,
         token_guard_config=TokenGuardConfig(
             enabled=True,
-            threshold_tokens=10,
-            confirm_command="/confirm",
-            cancel_command="/cancel",
+            default_mode="on",
+            default_budget_k=20,
         ),
     )
+    session = loop.sessions.get_or_create(session_key)
+    for i in range(24):
+        session.messages.append({"role": "user", "content": f"history-user-{i} " + ("A" * 500)})
+        session.messages.append({"role": "assistant", "content": "history-assistant " + ("B" * 500)})
     run_task = asyncio.create_task(loop.run())
     try:
         await bus.publish_inbound(
@@ -102,11 +106,11 @@ async def test_restart_alias_works_in_run_loop_while_token_guard_pending(tmp_pat
                 channel="telegram",
                 sender_id="6460709699",
                 chat_id="6460709699",
-                content="A" * 300,
+                content="请 repo-wide 搜索、读取、修改并测试整个项目，然后给我 exhaustive report。" + ("A" * 7000),
             )
         )
         blocked = await asyncio.wait_for(bus.consume_outbound(), timeout=2.0)
-        assert "Token Guard" in blocked.content
+        assert "⚠️ Token Guard 拦截" in blocked.content
 
         await bus.publish_inbound(
             InboundMessage(
@@ -120,17 +124,7 @@ async def test_restart_alias_works_in_run_loop_while_token_guard_pending(tmp_pat
         cb.assert_awaited_once()
         assert "我是 nanobot 小新版" in restarted.content
         assert "重启回来" in restarted.content
-
-        await bus.publish_inbound(
-            InboundMessage(
-                channel="telegram",
-                sender_id="6460709699",
-                chat_id="6460709699",
-                content="/confirm",
-            )
-        )
-        cleared = await asyncio.wait_for(bus.consume_outbound(), timeout=2.0)
-        assert cleared.content == "No pending large task or coding plan to confirm."
+        assert loop.sessions.get_or_create(session_key).metadata["token_guard"]["pending_message"] is None
     finally:
         loop.stop()
         await asyncio.wait_for(run_task, timeout=2.0)

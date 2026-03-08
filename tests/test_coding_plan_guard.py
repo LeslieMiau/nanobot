@@ -122,7 +122,8 @@ async def test_small_coding_request_skips_plan_guard(tmp_path: Path) -> None:
     )
 
     assert out is not None
-    assert out.content == "fixed"
+    assert out.content.startswith("fixed")
+    assert "Token Guard：原始体量" in out.content
     assert provider.calls == 1
 
 
