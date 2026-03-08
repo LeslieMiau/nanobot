@@ -306,7 +306,17 @@ def gateway(
     default_provider_name = config.get_provider_name(config.agents.defaults.model)
     session_manager = SessionManager(config.workspace_path)
 
-    def provider_switcher(requested_model: str | None):
+    def provider_switcher(requested_model: str | None, requested_provider_name: str | None = None):
+        if requested_provider_name:
+            from nanobot.providers.factory import create_provider
+
+            model = requested_model or config.agents.defaults.model
+            runtime_provider = create_provider(
+                config,
+                model=model,
+                provider_name=requested_provider_name,
+            )
+            return runtime_provider, model, requested_provider_name
         runtime_provider, selection = build_runtime_provider(
             config,
             requested_model,
@@ -584,7 +594,17 @@ def agent(
     provider = _make_provider(config)
     default_provider_name = config.get_provider_name(config.agents.defaults.model)
 
-    def provider_switcher(requested_model: str | None):
+    def provider_switcher(requested_model: str | None, requested_provider_name: str | None = None):
+        if requested_provider_name:
+            from nanobot.providers.factory import create_provider
+
+            model = requested_model or config.agents.defaults.model
+            runtime_provider = create_provider(
+                config,
+                model=model,
+                provider_name=requested_provider_name,
+            )
+            return runtime_provider, model, requested_provider_name
         runtime_provider, selection = build_runtime_provider(
             config,
             requested_model,

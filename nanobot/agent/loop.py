@@ -141,7 +141,7 @@ class AgentLoop:
         coding_config: CodingConfig | None = None,
         restart_callback: Callable[[], Awaitable[None]] | None = None,
         provider_name: str | None = None,
-        provider_switcher: Callable[[str | None], tuple[LLMProvider, str, str | None]] | None = None,
+        provider_switcher: Callable[[str | None, str | None], tuple[LLMProvider, str, str | None]] | None = None,
         available_models_provider: Callable[[str | None, str | None], list[AvailableModel]] | None = None,
     ):
         from nanobot.config.schema import CodingConfig, ExecToolConfig, TokenGuardConfig
@@ -721,23 +721,39 @@ class AgentLoop:
         """Restore runtime model/provider to startup defaults."""
         self._apply_model_provider(self._default_provider, self._default_model, self._default_provider_name)
 
-    def _switch_model_provider(self, requested_model: str) -> None:
+    def _invoke_provider_switcher(
+        self,
+        requested_model: str | None,
+        provider_name: str | None = None,
+    ) -> tuple[LLMProvider, str, str | None]:
+        if self._provider_switcher is None:
+            raise RuntimeError("provider switcher not configured")
+        try:
+            return self._provider_switcher(requested_model, provider_name)
+        except TypeError:
+            return self._provider_switcher(requested_model)
+
+    def _switch_model_provider(self, requested_model: str, provider_name: str | None = None) -> None:
         """Switch runtime model/provider for subsequent turns."""
         if self._provider_switcher:
-            provider, model, provider_name = self._provider_switcher(requested_model)
-            self._apply_model_provider(provider, model, provider_name)
+            provider, model, resolved_provider_name = self._invoke_provider_switcher(
+                requested_model,
+                provider_name,
+            )
+            self._apply_model_provider(provider, model, resolved_provider_name)
             return
         self.model = requested_model
+        self.provider_name = provider_name
         self.subagents.model = requested_model
 
     def _restore_session_model_provider(self, session: Session) -> None:
         """Restore runtime provider/model for the active session."""
-        selected_model, _ = self._session_model_selection(session)
+        selected_model, selected_provider_name = self._session_model_selection(session)
         if not selected_model:
             self._reset_model_provider()
             return
         try:
-            self._switch_model_provider(selected_model)
+            self._switch_model_provider(selected_model, provider_name=selected_provider_name)
         except Exception as e:
             logger.warning("Failed to restore session model {} for {}: {}", selected_model, session.key, e)
             self._clear_session_model_selection(session)
@@ -792,15 +808,16 @@ class AgentLoop:
         lines.append("Use `/model <name>` or `/model <number>` to switch, or `/model reset` to restore default.")
         return "\n".join(lines)
 
-    def _resolve_model_selection_argument(self, session: Session, arg: str) -> str:
+    def _resolve_model_selection_argument(self, session: Session, arg: str) -> tuple[str, str | None]:
         normalized = arg.strip()
         if not normalized.isdigit():
-            return normalized
+            return normalized, None
         index = int(normalized)
         options = self._available_models_for_session(session)
         if index < 1 or index > len(options):
             raise ValueError(f"Model index {index} is out of range. Use `/model list` to inspect available models.")
-        return options[index - 1].model
+        option = options[index - 1]
+        return option.model, option.provider_name
 
     def _coding_route_raw_models(self) -> list[str]:
         primary = str(getattr(self.coding_config, "primary_model", "")).strip()
@@ -1486,8 +1503,8 @@ class AgentLoop:
                     content=f"Model reset to default: `{self.model}` (provider: `{self.provider_name or 'unknown'}`)",
                 )
             try:
-                requested_model = self._resolve_model_selection_argument(session, arg)
-                self._switch_model_provider(requested_model)
+                requested_model, requested_provider_name = self._resolve_model_selection_argument(session, arg)
+                self._switch_model_provider(requested_model, provider_name=requested_provider_name)
                 self._persist_session_model_selection(
                     session,
                     model=self.model,

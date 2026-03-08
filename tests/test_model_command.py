@@ -212,10 +212,13 @@ async def test_model_command_lists_available_models(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_model_command_selects_model_by_index(tmp_path: Path) -> None:
-    def provider_switcher(requested_model: str | None):
+    switch_calls: list[tuple[str | None, str | None]] = []
+
+    def provider_switcher(requested_model: str | None, requested_provider_name: str | None = None):
+        switch_calls.append((requested_model, requested_provider_name))
         if requested_model is None:
             return _Provider("default"), "dummy", "custom"
-        return _Provider("switched"), requested_model, "openai"
+        return _Provider("switched"), requested_model, requested_provider_name or "openai"
 
     def available_models_provider(_current_model: str | None, _current_provider: str | None):
         return [
@@ -238,6 +241,39 @@ async def test_model_command_selects_model_by_index(tmp_path: Path) -> None:
     assert "gpt-5.4" in switched.content
     assert "provider: `openai`" in switched.content
     assert loop.model == "gpt-5.4"
+    assert switch_calls == [("gpt-5.4", "openai")]
+
+
+@pytest.mark.asyncio
+async def test_model_command_index_selection_uses_listed_provider_binding(tmp_path: Path) -> None:
+    switch_calls: list[tuple[str | None, str | None]] = []
+
+    def provider_switcher(requested_model: str | None, requested_provider_name: str | None = None):
+        switch_calls.append((requested_model, requested_provider_name))
+        if requested_model is None:
+            return _Provider("default"), "dummy", "custom"
+        return _Provider("switched"), requested_model, requested_provider_name or "custom"
+
+    def available_models_provider(_current_model: str | None, _current_provider: str | None):
+        return [
+            AvailableModel(model="deepseek/deepseek-chat", provider_name="aicodewith"),
+        ]
+
+    loop, _ = _make_loop(
+        tmp_path,
+        provider_name="custom",
+        provider_switcher=provider_switcher,
+        available_models_provider=available_models_provider,
+    )
+
+    switched = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/model 1")
+    )
+
+    assert switched is not None
+    assert "deepseek/deepseek-chat" in switched.content
+    assert "provider: `aicodewith`" in switched.content
+    assert switch_calls == [("deepseek/deepseek-chat", "aicodewith")]
 
 
 @pytest.mark.asyncio
