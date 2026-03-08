@@ -17,6 +17,13 @@ def test_persona_defaults_are_backward_compatible() -> None:
     assert coding.require_plan_for_large_changes is True
     assert coding.enforce_read_before_write is True
     assert coding.require_verification_after_edits is True
+    assert coding.primary_model == "gpt-5.4"
+    assert coding.fallback_models == [
+        "github-copilot/gpt-5.3-codex",
+        "anthropic/claude-opus-4-5",
+        "anthropic/claude-sonnet-4-5",
+    ]
+    assert coding.model_fail_cooldown_seconds == 600
 
 
 def test_persona_legacy_language_maps_to_script() -> None:
@@ -70,3 +77,10 @@ def test_coding_defaults_are_backward_compatible_when_missing_from_input() -> No
     assert coding.require_plan_for_large_changes is True
     assert coding.enforce_read_before_write is True
     assert coding.require_verification_after_edits is True
+    assert coding.primary_model == "gpt-5.4"
+    assert coding.fallback_models == [
+        "github-copilot/gpt-5.3-codex",
+        "anthropic/claude-opus-4-5",
+        "anthropic/claude-sonnet-4-5",
+    ]
+    assert coding.model_fail_cooldown_seconds == 600

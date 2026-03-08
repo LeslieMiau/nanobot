@@ -528,12 +528,23 @@ def agent(
     from nanobot.bus.queue import MessageBus
     from nanobot.config.loader import get_data_dir, load_config
     from nanobot.cron.service import CronService
+    from nanobot.providers.factory import build_runtime_provider
 
     config = load_config()
     sync_workspace_templates(config.workspace_path)
 
     bus = MessageBus()
     provider = _make_provider(config)
+    default_provider_name = config.get_provider_name(config.agents.defaults.model)
+
+    def provider_switcher(requested_model: str | None):
+        runtime_provider, selection = build_runtime_provider(
+            config,
+            requested_model,
+            default_model=config.agents.defaults.model,
+            default_provider_name=default_provider_name,
+        )
+        return runtime_provider, selection.model, selection.provider_name
 
     # Create cron service for tool usage (no callback needed for CLI unless running)
     cron_store_path = get_data_dir() / "cron" / "jobs.json"
@@ -564,6 +575,8 @@ def agent(
         persona_config=config.agents.defaults.persona,
         token_guard_config=config.agents.defaults.token_guard,
         coding_config=config.agents.defaults.coding,
+        provider_name=default_provider_name,
+        provider_switcher=provider_switcher,
     )
 
     # Show spinner when logs are off (no output to miss); skip when logs are on

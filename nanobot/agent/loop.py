@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 import weakref
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, field
@@ -27,6 +28,7 @@ from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.persona.engine import PersonaEngine
 from nanobot.providers.base import LLMProvider
+from nanobot.providers.registry import find_by_name
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -43,6 +45,16 @@ class _TurnExecutionState:
     edit_generation: int = 0
     verification_generation: int = 0
     verification_prompted: bool = False
+
+
+@dataclass(frozen=True)
+class _CodingRouteCandidate:
+    source_model: str
+    normalized_model: str
+    provider: LLMProvider
+    model: str
+    provider_name: str | None
+    normalization_note: str | None = None
 
 
 class AgentLoop:
@@ -89,6 +101,7 @@ class AgentLoop:
         "git ", "pytest", "npm ", "pnpm ", "yarn ", "uv ", "python ", "pip ",
         "cargo ", "go ", "make", "cmake", "docker ", "kubectl ", "mvn ", "gradle ", "bun ",
     )
+    _CODING_SIDE_EFFECT_TOOLS = {"write_file", "edit_file", "exec", "spawn", "message", "cron"}
 
     def __init__(
         self,
@@ -171,6 +184,9 @@ class AgentLoop:
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._token_guard_pending: dict[str, str] = {}  # session_key -> pending user message
         self._plan_guard_pending: dict[str, str] = {}  # session_key -> pending large coding request
+        self._coding_model_cooldowns: dict[str, float] = {}
+        self._last_coding_route_resolved: list[str] = []
+        self._last_coding_route_skipped: list[str] = []
         self._processing_lock = asyncio.Lock()
         self._register_default_tools()
 
@@ -454,6 +470,108 @@ class AgentLoop:
         self.model = requested_model
         self.subagents.model = requested_model
 
+    def _coding_route_raw_models(self) -> list[str]:
+        primary = str(getattr(self.coding_config, "primary_model", "")).strip()
+        fallbacks = list(getattr(self.coding_config, "fallback_models", []) or [])
+        ordered = [primary, *(str(m).strip() for m in fallbacks)]
+        return [m for m in ordered if m]
+
+    @staticmethod
+    def _normalize_coding_model_name(model_name: str) -> tuple[str | None, str | None]:
+        model = model_name.strip()
+        if not model:
+            return None, "empty model name"
+
+        if "/" in model:
+            prefix = model.split("/", 1)[0].lower().replace("-", "_")
+            if not find_by_name(prefix):
+                return None, f"unknown provider prefix `{prefix}`"
+            return model, None
+
+        lowered = model.lower()
+        if "codex" in lowered:
+            return f"github-copilot/{model}", "normalized bare codex model to github-copilot prefix"
+        if lowered.startswith("claude"):
+            return f"anthropic/{model}", "normalized bare claude model to anthropic prefix"
+        return model, None
+
+    def _coding_model_cooldown_remaining(self, normalized_model: str) -> int:
+        until = self._coding_model_cooldowns.get(normalized_model, 0.0)
+        if until <= 0.0:
+            return 0
+        remaining = int(until - time.monotonic())
+        return remaining if remaining > 0 else 0
+
+    def _mark_coding_model_failure(self, normalized_model: str) -> None:
+        cooldown = max(0, int(getattr(self.coding_config, "model_fail_cooldown_seconds", 0)))
+        if cooldown <= 0:
+            self._coding_model_cooldowns.pop(normalized_model, None)
+            return
+        self._coding_model_cooldowns[normalized_model] = time.monotonic() + cooldown
+
+    def _resolve_coding_route_candidates(self) -> tuple[list[_CodingRouteCandidate], list[str], list[str]]:
+        candidates: list[_CodingRouteCandidate] = []
+        resolved_lines: list[str] = []
+        skipped_lines: list[str] = []
+        seen_models: set[str] = set()
+
+        for source_model in self._coding_route_raw_models():
+            normalized_model, normalization_note = self._normalize_coding_model_name(source_model)
+            if not normalized_model:
+                skipped_lines.append(f"- `{source_model}`: invalid ({normalization_note})")
+                continue
+            if normalized_model in seen_models:
+                continue
+            seen_models.add(normalized_model)
+
+            if remaining := self._coding_model_cooldown_remaining(normalized_model):
+                skipped_lines.append(
+                    f"- `{source_model}` -> `{normalized_model}`: cooling down ({remaining}s remaining)"
+                )
+                continue
+
+            if self._provider_switcher:
+                try:
+                    provider, model, provider_name = self._provider_switcher(normalized_model)
+                except Exception as e:
+                    skipped_lines.append(
+                        f"- `{source_model}` -> `{normalized_model}`: unavailable ({e})"
+                    )
+                    continue
+            elif normalized_model == self.model:
+                provider = self.provider
+                model = self.model
+                provider_name = self.provider_name
+            else:
+                skipped_lines.append(
+                    f"- `{source_model}` -> `{normalized_model}`: unavailable (provider switcher not configured)"
+                )
+                continue
+
+            candidate = _CodingRouteCandidate(
+                source_model=source_model,
+                normalized_model=normalized_model,
+                provider=provider,
+                model=model,
+                provider_name=provider_name,
+                normalization_note=normalization_note,
+            )
+            candidates.append(candidate)
+            note = f"; {normalization_note}" if normalization_note else ""
+            resolved_lines.append(
+                f"- `{source_model}` -> `{candidate.model}` (provider: `{candidate.provider_name or 'unknown'}`{note})"
+            )
+
+        self._last_coding_route_resolved = list(resolved_lines)
+        self._last_coding_route_skipped = list(skipped_lines)
+        return candidates, resolved_lines, skipped_lines
+
+    @classmethod
+    def _has_tool_side_effects(cls, turn_state: _TurnExecutionState, tools_used: list[str]) -> bool:
+        if turn_state.files_edited or turn_state.commands_run:
+            return True
+        return any(name in cls._CODING_SIDE_EFFECT_TOOLS for name in tools_used)
+
     def _track_path(self, raw_path: Any) -> str | None:
         if not isinstance(raw_path, str) or not raw_path.strip():
             return None
@@ -561,14 +679,24 @@ class AgentLoop:
         tools_used: list[str] = []
         temperature = self.temperature if temperature_override is None else temperature_override
         turn_state = _TurnExecutionState()
+        route_candidates: list[_CodingRouteCandidate] = []
+        route_index = 0
+        active_provider = self.provider
+        active_model = self.model
+
+        if coding_enabled:
+            route_candidates, _, _ = self._resolve_coding_route_candidates()
+            if route_candidates:
+                active_provider = route_candidates[0].provider
+                active_model = route_candidates[0].model
 
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await self.provider.chat(
+            response = await active_provider.chat(
                 messages=messages,
                 tools=self.tools.get_definitions(),
-                model=self.model,
+                model=active_model,
                 temperature=temperature,
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
@@ -628,6 +756,29 @@ class AgentLoop:
                 # Don't persist error responses to session history — they can
                 # poison the context and cause permanent 400 loops (#1303).
                 if response.finish_reason == "error":
+                    if (
+                        coding_enabled
+                        and route_candidates
+                        and route_index < len(route_candidates) - 1
+                        and not self._has_tool_side_effects(turn_state, tools_used)
+                    ):
+                        failed = route_candidates[route_index]
+                        self._mark_coding_model_failure(failed.normalized_model)
+                        route_index += 1
+                        retry = route_candidates[route_index]
+                        active_provider = retry.provider
+                        active_model = retry.model
+                        logger.warning(
+                            "Coding model failed ({}), retrying with {}",
+                            failed.normalized_model,
+                            retry.normalized_model,
+                        )
+                        if on_progress:
+                            await on_progress(
+                                f"[Coding route] `{failed.normalized_model}` failed; retrying with "
+                                f"`{retry.normalized_model}`."
+                            )
+                        continue
                     logger.error("LLM returned error: {}", (clean or "")[:200])
                     final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
@@ -1031,6 +1182,16 @@ class AgentLoop:
                     if setting == "off"
                     else "auto-detected per request"
                 )
+                route_candidates, route_resolved, route_skipped = self._resolve_coding_route_candidates()
+                fallback_models = getattr(self.coding_config, "fallback_models", []) or []
+                fallback_block = (
+                    "\n".join(f"- `{model}`" for model in fallback_models)
+                    if fallback_models
+                    else "- (none)"
+                )
+                resolved_block = "\n".join(route_resolved) if route_resolved else "- (none)"
+                skipped_block = "\n".join(route_skipped) if route_skipped else "- (none)"
+                route_active = "yes" if route_candidates else "no"
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
@@ -1039,6 +1200,14 @@ class AgentLoop:
                         f"Auto-detect: `{self.coding_config.auto_detect}`\n"
                         f"Workspace looks like repo: `{workspace_repo}`\n"
                         f"Current behavior: {active_desc}\n"
+                        f"Coding primary model: `{self.coding_config.primary_model}`\n"
+                        f"Coding model route active: `{route_active}`\n"
+                        "Coding fallback models:\n"
+                        f"{fallback_block}\n"
+                        "Resolved coding candidates:\n"
+                        f"{resolved_block}\n"
+                        "Skipped coding candidates:\n"
+                        f"{skipped_block}\n"
                         "Use `/coding on`, `/coding off`, or `/coding auto`."
                     ),
                 )

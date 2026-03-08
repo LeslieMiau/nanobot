@@ -265,6 +265,15 @@ class CodingConfig(Base):
     require_plan_for_large_changes: bool = True
     enforce_read_before_write: bool = True
     require_verification_after_edits: bool = True
+    primary_model: str = "gpt-5.4"
+    fallback_models: list[str] = Field(
+        default_factory=lambda: [
+            "github-copilot/gpt-5.3-codex",
+            "anthropic/claude-opus-4-5",
+            "anthropic/claude-sonnet-4-5",
+        ]
+    )
+    model_fail_cooldown_seconds: int = 600
 
 
 class AgentDefaults(Base):
