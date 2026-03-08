@@ -15,16 +15,17 @@ from nanobot.utils.helpers import split_message
 
 try:
     import botpy
-    from botpy.message import C2CMessage
+    from botpy.message import C2CMessage, GroupMessage
 
     QQ_AVAILABLE = True
 except ImportError:
     QQ_AVAILABLE = False
     botpy = None
     C2CMessage = None
+    GroupMessage = None
 
 if TYPE_CHECKING:
-    from botpy.message import C2CMessage
+    from botpy.message import C2CMessage, GroupMessage
 
 
 QQ_MAX_MESSAGE_LEN = 1900
@@ -43,10 +44,13 @@ def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
             logger.info("QQ bot ready: {}", self.robot.name)
 
         async def on_c2c_message_create(self, message: "C2CMessage"):
-            await channel._on_message(message)
+            await channel._on_message(message, is_group=False)
+
+        async def on_group_at_message_create(self, message: "GroupMessage"):
+            await channel._on_message(message, is_group=True)
 
         async def on_direct_message_create(self, message):
-            await channel._on_message(message)
+            await channel._on_message(message, is_group=False)
 
     return _Bot
 
@@ -62,6 +66,7 @@ class QQChannel(BaseChannel):
         self._client: "botpy.Client | None" = None
         self._processed_ids: deque = deque(maxlen=1000)
         self._msg_seq: int = 1  # 消息序列号，避免被 QQ API 去重
+        self._chat_type_cache: dict[str, str] = {}
 
     async def start(self) -> None:
         """Start the QQ bot."""
@@ -76,8 +81,7 @@ class QQChannel(BaseChannel):
         self._running = True
         BotClass = _make_bot_class(self)
         self._client = BotClass()
-
-        logger.info("QQ bot started (C2C private message)")
+        logger.info("QQ bot started (C2C & Group supported)")
         await self._run_bot()
 
     async def _run_bot(self) -> None:
@@ -120,17 +124,28 @@ class QQChannel(BaseChannel):
             logger.debug("Skip empty QQ outbound message for {}", msg.chat_id)
             return
 
+        msg_type = self._chat_type_cache.get(msg.chat_id, "c2c")
         msg_id = self._resolve_msg_id(msg)
         chunks = split_message(content, QQ_MAX_MESSAGE_LEN)
         try:
             for chunk in chunks:
-                await self._client.api.post_c2c_message(
-                    openid=msg.chat_id,
-                    msg_type=0,
-                    content=chunk,
-                    msg_id=msg_id,
-                    msg_seq=self._next_msg_seq(),
-                )
+                msg_seq = self._next_msg_seq()
+                if msg_type == "group":
+                    await self._client.api.post_group_message(
+                        group_openid=msg.chat_id,
+                        msg_type=0,
+                        content=chunk,
+                        msg_id=msg_id,
+                        msg_seq=msg_seq,
+                    )
+                else:
+                    await self._client.api.post_c2c_message(
+                        openid=msg.chat_id,
+                        msg_type=0,
+                        content=chunk,
+                        msg_id=msg_id,
+                        msg_seq=msg_seq,
+                    )
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
 
@@ -145,7 +160,7 @@ class QQChannel(BaseChannel):
         # Fallback ID for proactive sends without source message metadata.
         return f"nanobot-{int(time.time() * 1000)}-{self._msg_seq + 1}"
 
-    async def _on_message(self, data: "C2CMessage") -> None:
+    async def _on_message(self, data: "C2CMessage | GroupMessage", is_group: bool = False) -> None:
         """Handle incoming message from QQ."""
         try:
             # Dedup by message ID
@@ -153,15 +168,22 @@ class QQChannel(BaseChannel):
                 return
             self._processed_ids.append(data.id)
 
-            author = data.author
-            user_id = str(getattr(author, 'id', None) or getattr(author, 'user_openid', 'unknown'))
             content = (data.content or "").strip()
             if not content:
                 return
 
+            if is_group:
+                chat_id = data.group_openid
+                user_id = data.author.member_openid
+                self._chat_type_cache[chat_id] = "group"
+            else:
+                chat_id = str(getattr(data.author, 'id', None) or getattr(data.author, 'user_openid', 'unknown'))
+                user_id = chat_id
+                self._chat_type_cache[chat_id] = "c2c"
+
             await self._handle_message(
                 sender_id=user_id,
-                chat_id=user_id,
+                chat_id=chat_id,
                 content=content,
                 metadata={"message_id": data.id},
             )
