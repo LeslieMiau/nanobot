@@ -6,7 +6,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from nanobot.cli.commands import app
+from nanobot.cli.commands import (
+    _build_heartbeat_execution_message,
+    _should_deliver_heartbeat_response,
+    app,
+)
 from nanobot.config.schema import Config
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
@@ -139,6 +143,26 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+def test_build_heartbeat_execution_message_includes_summary_file_and_noop_rule():
+    prompt = _build_heartbeat_execution_message(
+        "daily brief might be due",
+        "## Active Tasks\n- [ ] check something",
+    )
+
+    assert "Phase 1 summary:" in prompt
+    assert "daily brief might be due" in prompt
+    assert "Full HEARTBEAT.md:" in prompt
+    assert "## Active Tasks" in prompt
+    assert "return exactly NOOP and nothing else" in prompt
+
+
+def test_should_deliver_heartbeat_response_filters_noop_and_empty():
+    assert _should_deliver_heartbeat_response(None) is False
+    assert _should_deliver_heartbeat_response("") is False
+    assert _should_deliver_heartbeat_response("  NOOP  ") is False
+    assert _should_deliver_heartbeat_response("completed heartbeat task") is True
 
 
 def test_config_forced_aicodewith_provider_uses_default_gateway_base():

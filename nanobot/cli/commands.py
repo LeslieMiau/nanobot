@@ -243,6 +243,31 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     return loaded
 
 
+def _build_heartbeat_execution_message(tasks_summary: str, heartbeat_content: str) -> str:
+    """Build the phase 2 heartbeat prompt for the full agent loop."""
+    summary = tasks_summary.strip() if tasks_summary.strip() else "(empty)"
+    content = heartbeat_content.strip() if heartbeat_content.strip() else "(missing)"
+    return (
+        "You are executing heartbeat tasks.\n"
+        "Use the current local time from the runtime context.\n"
+        "Re-evaluate the full HEARTBEAT.md below before acting.\n"
+        "Check any referenced marker or output files before execution.\n"
+        "Execute only tasks that are actually due right now.\n"
+        "If no task is due right now, return exactly NOOP and nothing else.\n\n"
+        "Phase 1 summary:\n"
+        f"{summary}\n\n"
+        "Full HEARTBEAT.md:\n"
+        f"{content}"
+    )
+
+
+def _should_deliver_heartbeat_response(response: str | None) -> bool:
+    """Return True only when the heartbeat result should be delivered to the user."""
+    if not response:
+        return False
+    return response.strip().upper() != "NOOP"
+
+
 # ============================================================================
 # Gateway / Server
 # ============================================================================
@@ -404,12 +429,20 @@ def gateway(
     async def on_heartbeat_execute(tasks: str) -> str:
         """Phase 2: execute heartbeat tasks through the full agent loop."""
         channel, chat_id = _pick_heartbeat_target()
+        heartbeat_content = ""
+        heartbeat_file = config.workspace_path / "HEARTBEAT.md"
+        if heartbeat_file.exists():
+            try:
+                heartbeat_content = heartbeat_file.read_text(encoding="utf-8")
+            except Exception:
+                heartbeat_content = ""
+        prompt = _build_heartbeat_execution_message(tasks, heartbeat_content)
 
         async def _silent(*_args, **_kwargs):
             pass
 
         return await agent.process_direct(
-            tasks,
+            prompt,
             session_key="heartbeat",
             channel=channel,
             chat_id=chat_id,
@@ -419,6 +452,8 @@ def gateway(
     async def on_heartbeat_notify(response: str) -> None:
         """Deliver a heartbeat response to the user's channel."""
         from nanobot.bus.events import OutboundMessage
+        if not _should_deliver_heartbeat_response(response):
+            return
         channel, chat_id = _pick_heartbeat_target()
         if channel == "cli":
             return  # No external channel available to deliver to

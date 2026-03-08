@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from nanobot.heartbeat.service import HeartbeatService
+from nanobot.heartbeat.service import HeartbeatDecisionError, HeartbeatService
 from nanobot.providers.base import LLMResponse, ToolCallRequest
 
 
@@ -39,8 +39,29 @@ async def test_start_is_idempotent(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_decide_returns_skip_when_no_tool_call(tmp_path) -> None:
-    provider = DummyProvider([LLMResponse(content="no tool call", tool_calls=[])])
+async def test_build_decision_messages_includes_current_time_context(tmp_path, monkeypatch) -> None:
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=DummyProvider([]),
+        model="openai/gpt-4o-mini",
+    )
+    monkeypatch.setattr(
+        service,
+        "_current_time_context",
+        lambda: "Current local time: 2026-03-08 09:00:00 (CST, UTC+08:00)",
+    )
+
+    messages = service._build_decision_messages("heartbeat content")
+
+    assert messages[1]["content"].startswith(
+        "Current local time: 2026-03-08 09:00:00 (CST, UTC+08:00)"
+    )
+    assert "should run now" in messages[1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_decide_returns_skip_when_no_tool_call_and_empty_content(tmp_path) -> None:
+    provider = DummyProvider([LLMResponse(content="", tool_calls=[])])
     service = HeartbeatService(
         workspace=tmp_path,
         provider=provider,
@@ -50,6 +71,19 @@ async def test_decide_returns_skip_when_no_tool_call(tmp_path) -> None:
     action, tasks = await service._decide("heartbeat content")
     assert action == "skip"
     assert tasks == ""
+
+
+@pytest.mark.asyncio
+async def test_decide_raises_when_provider_returns_plain_text(tmp_path) -> None:
+    provider = DummyProvider([LLMResponse(content="Error: backend unavailable", tool_calls=[])])
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+    )
+
+    with pytest.raises(HeartbeatDecisionError):
+        await service._decide("heartbeat content")
 
 
 @pytest.mark.asyncio
