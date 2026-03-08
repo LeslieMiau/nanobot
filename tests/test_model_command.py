@@ -231,6 +231,26 @@ def test_build_available_models_skips_speculative_gateway_catalog_entries() -> N
     )
 
 
+def test_build_available_models_filters_unauthenticated_github_copilot(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = Config()
+    config.agents.defaults.model = "gpt-5.4"
+    config.providers.openai.api_key = "test-key"
+
+    monkeypatch.setattr(
+        "nanobot.providers.factory._github_copilot_is_authenticated",
+        lambda: False,
+    )
+
+    models = build_available_models(
+        config,
+        default_model=config.agents.defaults.model,
+        default_provider_name="openai",
+        coding_config=config.agents.defaults.coding,
+    )
+
+    assert not any(model.provider_name == "github_copilot" for model in models)
+
+
 @pytest.mark.asyncio
 async def test_model_command_selects_model_by_index(tmp_path: Path) -> None:
     switch_calls: list[tuple[str | None, str | None]] = []

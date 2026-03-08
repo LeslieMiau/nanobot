@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -87,6 +88,37 @@ class TestHandleStop:
         assert all(e.is_set() for e in events)
         out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
         assert "2 task" in out.content
+
+    @pytest.mark.asyncio
+    async def test_stop_returns_without_waiting_for_stubborn_task(self):
+        from nanobot.bus.events import InboundMessage
+
+        loop, bus = _make_loop()
+        cancelled = asyncio.Event()
+        release = asyncio.Event()
+
+        async def stubborn_task():
+            try:
+                await asyncio.sleep(60)
+            except asyncio.CancelledError:
+                cancelled.set()
+                await release.wait()
+                raise
+
+        task = asyncio.create_task(stubborn_task())
+        await asyncio.sleep(0)
+        loop._active_tasks["test:c1"] = [task]
+
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="/stop")
+        await asyncio.wait_for(loop._handle_stop(msg), timeout=0.2)
+
+        assert cancelled.is_set()
+        out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        assert "stopped" in out.content.lower()
+
+        release.set()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 class TestDispatch:

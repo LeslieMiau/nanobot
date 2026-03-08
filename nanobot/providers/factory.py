@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 
 from nanobot.config.schema import Config
 from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
@@ -28,6 +32,7 @@ def create_provider(config: Config, model: str | None = None, provider_name: str
     model = model or config.agents.defaults.model
     provider_name = provider_name or config.get_provider_name(model)
     p = getattr(config.providers, provider_name, None) if provider_name else None
+    _ensure_provider_ready(provider_name)
 
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         return OpenAICodexProvider(default_model=model)
@@ -146,3 +151,50 @@ def _match_provider_by_model_name(model: str) -> str | None:
         if any(_kw_matches(kw) for kw in spec.keywords):
             return spec.name
     return None
+
+
+def _ensure_provider_ready(provider_name: str | None) -> None:
+    """Raise when a provider is configured but not currently usable."""
+    if provider_name != "github_copilot":
+        return
+    if _github_copilot_is_authenticated():
+        return
+    raise ProviderConfigError(
+        "Provider `github_copilot` is not authenticated. "
+        "Run `nanobot login github_copilot` first."
+    )
+
+
+def _github_copilot_is_authenticated() -> bool:
+    """Return True when GitHub Copilot can refresh or reuse a local token."""
+    token_dir = Path(
+        os.getenv(
+            "GITHUB_COPILOT_TOKEN_DIR",
+            str(Path.home() / ".config" / "litellm" / "github_copilot"),
+        )
+    )
+    access_token_file = token_dir / os.getenv("GITHUB_COPILOT_ACCESS_TOKEN_FILE", "access-token")
+    api_key_file = token_dir / os.getenv("GITHUB_COPILOT_API_KEY_FILE", "api-key.json")
+
+    if access_token_file.is_file():
+        try:
+            if access_token_file.read_text().strip():
+                return True
+        except OSError:
+            pass
+
+    if not api_key_file.is_file():
+        return False
+    try:
+        api_key_info = json.loads(api_key_file.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    token = str(api_key_info.get("token") or "").strip()
+    expires_at = api_key_info.get("expires_at")
+    if not token:
+        return False
+    try:
+        return float(expires_at or 0) > datetime.now().timestamp()
+    except (TypeError, ValueError):
+        return False

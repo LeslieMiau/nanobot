@@ -1262,7 +1262,8 @@ class AgentLoop:
 
     async def _handle_stop(self, msg: InboundMessage) -> None:
         """Cancel all active tasks and subagents for the session."""
-        total = await self._cancel_session_tasks(msg.session_key, wait=True)
+        total = await self._cancel_session_tasks(msg.session_key, wait=False)
+        await asyncio.sleep(0)
         content = f"⏹ Stopped {total} task(s)." if total else "No active task to stop."
         await self.bus.publish_outbound(OutboundMessage(
             channel=msg.channel, chat_id=msg.chat_id, content=content,
