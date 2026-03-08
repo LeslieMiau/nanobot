@@ -1,9 +1,12 @@
 """CLI commands for nanobot."""
 
 import asyncio
+import fcntl
 import os
+import re
 import select
 import signal
+import subprocess
 import sys
 from pathlib import Path
 
@@ -48,6 +51,82 @@ EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 
 _PROMPT_SESSION: PromptSession | None = None
 _SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
+
+
+class _GatewayInstanceLock:
+    """Best-effort single-instance lock for gateway mode."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self._fh = None
+
+    def acquire(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = self.path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError("gateway lock is already held") from exc
+        self._fh.seek(0)
+        self._fh.truncate()
+        self._fh.write(str(os.getpid()))
+        self._fh.flush()
+
+    def release(self) -> None:
+        if not self._fh:
+            return
+        try:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        self._fh.close()
+        self._fh = None
+
+
+def _gateway_lock_path() -> Path:
+    from nanobot.config.loader import get_config_path
+
+    return get_config_path().parent / "gateway.lock"
+
+
+def _looks_like_gateway_command(command: str) -> bool:
+    lowered = command.lower()
+    return bool(
+        re.search(r"(^|\s)(?:\S*/)?nanobot(?:\.py)?\s+gateway(?:\s|$)", lowered)
+        or re.search(
+            r"(^|\s)(?:\S*/)?python(?:\d+(?:\.\d+)*)?\s+-m\s+nanobot(?:\.cli\.commands)?\s+gateway(?:\s|$)",
+            lowered,
+        )
+    )
+
+
+def _find_other_gateway_processes() -> list[tuple[int, str]]:
+    """Find other local nanobot gateway processes by scanning the process table."""
+    try:
+        result = subprocess.run(
+            ["ps", "-ax", "-o", "pid=,command="],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except Exception:
+        return []
+
+    current_pid = os.getpid()
+    matches: list[tuple[int, str]] = []
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2 or not parts[0].isdigit():
+            continue
+        pid = int(parts[0])
+        command = parts[1].strip()
+        if pid == current_pid or not _looks_like_gateway_command(command):
+            continue
+        matches.append((pid, command))
+    return matches
 
 
 def _flush_pending_tty_input() -> None:
@@ -298,267 +377,281 @@ def gateway(
         logging.basicConfig(level=logging.DEBUG)
 
     config = _load_runtime_config(config, workspace)
+    if others := _find_other_gateway_processes():
+        console.print("[red]Another nanobot gateway instance is already running.[/red]")
+        for pid, command in others:
+            console.print(f"  PID {pid}: {command}")
+        raise typer.Exit(1)
+    instance_lock = _GatewayInstanceLock(_gateway_lock_path())
+    try:
+        instance_lock.acquire()
+    except RuntimeError:
+        console.print("[red]Another nanobot gateway instance already holds the gateway lock.[/red]")
+        raise typer.Exit(1)
+    try:
+        console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
+        sync_workspace_templates(config.workspace_path)
+        bus = MessageBus()
+        provider = _make_provider(config)
+        default_provider_name = config.get_provider_name(config.agents.defaults.model)
+        session_manager = SessionManager(config.workspace_path)
 
-    console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
-    sync_workspace_templates(config.workspace_path)
-    bus = MessageBus()
-    provider = _make_provider(config)
-    default_provider_name = config.get_provider_name(config.agents.defaults.model)
-    session_manager = SessionManager(config.workspace_path)
+        def provider_switcher(requested_model: str | None, requested_provider_name: str | None = None):
+            if requested_provider_name:
+                from nanobot.providers.factory import create_provider
 
-    def provider_switcher(requested_model: str | None, requested_provider_name: str | None = None):
-        if requested_provider_name:
-            from nanobot.providers.factory import create_provider
-
-            model = requested_model or config.agents.defaults.model
-            runtime_provider = create_provider(
-                config,
-                model=model,
-                provider_name=requested_provider_name,
-            )
-            return runtime_provider, model, requested_provider_name
-        runtime_provider, selection = build_runtime_provider(
-            config,
-            requested_model,
-            default_model=config.agents.defaults.model,
-            default_provider_name=default_provider_name,
-        )
-        return runtime_provider, selection.model, selection.provider_name
-
-    def available_models_provider(current_model: str | None, current_provider: str | None):
-        return build_available_models(
-            config,
-            default_model=config.agents.defaults.model,
-            default_provider_name=default_provider_name,
-            current_model=current_model,
-            current_provider_name=current_provider,
-            coding_config=config.agents.defaults.coding,
-        )
-
-    # Create cron service first (callback set after agent creation)
-    cron_store_path = get_cron_dir() / "jobs.json"
-    cron = CronService(cron_store_path)
-    repo_sync_cfg = config.gateway.repo_sync
-    legacy_repo_sync_marker = "__repo_sync__::"
-    restart_requested = False
-
-    async def request_restart() -> None:
-        nonlocal restart_requested
-        restart_requested = True
-
-    # Create agent with cron service
-    agent = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        temperature=config.agents.defaults.temperature,
-        max_tokens=config.agents.defaults.max_tokens,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        memory_window=config.agents.defaults.memory_window,
-        reasoning_effort=config.agents.defaults.reasoning_effort,
-        brave_api_key=config.tools.web.search.api_key or None,
-        web_proxy=config.tools.web.proxy or None,
-        exec_config=config.tools.exec,
-        cron_service=cron,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-        session_manager=session_manager,
-        mcp_servers=config.tools.mcp_servers,
-        channels_config=config.channels,
-        image_config=config.tools.images,
-        persona_config=config.agents.defaults.persona,
-        token_guard_config=config.agents.defaults.token_guard,
-        coding_config=config.agents.defaults.coding,
-        restart_callback=request_restart,
-        provider_name=default_provider_name,
-        provider_switcher=provider_switcher,
-        available_models_provider=available_models_provider,
-    )
-
-    # Set cron callback (needs agent)
-    async def on_cron_job(job: CronJob) -> str | None:
-        """Execute a cron job through the agent."""
-        from nanobot.agent.tools.cron import CronTool
-        from nanobot.agent.tools.message import MessageTool
-        reminder_note = (
-            "[Scheduled Task] Timer finished.\n\n"
-            f"Task '{job.name}' has been triggered.\n"
-            f"Scheduled instruction: {job.payload.message}"
-        )
-
-        # Prevent the agent from scheduling new cron jobs during execution
-        cron_tool = agent.tools.get("cron")
-        cron_token = None
-        if isinstance(cron_tool, CronTool):
-            cron_token = cron_tool.set_cron_context(True)
-        try:
-            response = await agent.process_direct(
-                reminder_note,
-                session_key=f"cron:{job.id}",
-                channel=job.payload.channel or "cli",
-                chat_id=job.payload.to or "direct",
-            )
-        finally:
-            if isinstance(cron_tool, CronTool) and cron_token is not None:
-                cron_tool.reset_cron_context(cron_token)
-
-        message_tool = agent.tools.get("message")
-        if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-            return response
-
-        if job.payload.deliver and job.payload.to and response:
-            from nanobot.bus.events import OutboundMessage
-            await bus.publish_outbound(OutboundMessage(
-                channel=job.payload.channel or "cli",
-                chat_id=job.payload.to,
-                content=response
-            ))
-        return response
-    cron.on_job = on_cron_job
-
-    # Repo sync no longer uses cron jobs; clean up legacy scheduled markers.
-    legacy_repo_jobs = [
-        j for j in cron.list_jobs(include_disabled=True)
-        if j.payload.message.startswith(legacy_repo_sync_marker)
-    ]
-    if legacy_repo_jobs:
-        for job in legacy_repo_jobs:
-            cron.remove_job(job.id)
-        console.print(
-            f"[green]✓[/green] Removed {len(legacy_repo_jobs)} legacy repo sync cron job(s)"
-        )
-
-    # Create channel manager
-    channels = ChannelManager(config, bus)
-
-    def _pick_heartbeat_target() -> tuple[str, str]:
-        """Pick a routable channel/chat target for heartbeat-triggered messages."""
-        enabled = set(channels.enabled_channels)
-        # Prefer the most recently updated non-internal session on an enabled channel.
-        for item in session_manager.list_sessions():
-            key = item.get("key") or ""
-            if ":" not in key:
-                continue
-            channel, chat_id = key.split(":", 1)
-            if channel in {"cli", "system"}:
-                continue
-            if channel in enabled and chat_id:
-                return channel, chat_id
-        # Fallback keeps prior behavior but remains explicit.
-        return "cli", "direct"
-
-    # Create heartbeat service
-    async def on_heartbeat_execute(tasks: str) -> str:
-        """Phase 2: execute heartbeat tasks through the full agent loop."""
-        channel, chat_id = _pick_heartbeat_target()
-        heartbeat_content = ""
-        heartbeat_file = config.workspace_path / "HEARTBEAT.md"
-        if heartbeat_file.exists():
-            try:
-                heartbeat_content = heartbeat_file.read_text(encoding="utf-8")
-            except Exception:
-                heartbeat_content = ""
-        prompt = _build_heartbeat_execution_message(tasks, heartbeat_content)
-
-        async def _silent(*_args, **_kwargs):
-            pass
-
-        return await agent.process_direct(
-            prompt,
-            session_key="heartbeat",
-            channel=channel,
-            chat_id=chat_id,
-            on_progress=_silent,
-        )
-
-    async def on_heartbeat_notify(response: str) -> None:
-        """Deliver a heartbeat response to the user's channel."""
-        from nanobot.bus.events import OutboundMessage
-        if not _should_deliver_heartbeat_response(response):
-            return
-        channel, chat_id = _pick_heartbeat_target()
-        if channel == "cli":
-            return  # No external channel available to deliver to
-        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
-
-    hb_cfg = config.gateway.heartbeat
-    heartbeat = HeartbeatService(
-        workspace=config.workspace_path,
-        provider=provider,
-        model=agent.model,
-        on_execute=on_heartbeat_execute,
-        on_notify=on_heartbeat_notify,
-        interval_s=hb_cfg.interval_s,
-        enabled=hb_cfg.enabled,
-    )
-    repo_sync_watcher: RepoSyncWatcher | None = None
-    if repo_sync_cfg.enabled:
-        repo_sync_watcher = RepoSyncWatcher(
-            repo_path=repo_sync_cfg.repo_path,
-            branch=repo_sync_cfg.branch,
-            upstream_remote=repo_sync_cfg.upstream_remote,
-            upstream_url=repo_sync_cfg.upstream_url,
-            push_remote=repo_sync_cfg.push_remote,
-            auto_push=repo_sync_cfg.auto_push,
-            allow_dirty_worktree=repo_sync_cfg.allow_dirty_worktree,
-            interval_s=repo_sync_cfg.watch_interval_s,
-            run_on_start=repo_sync_cfg.run_on_start,
-        )
-
-    if channels.enabled_channels:
-        console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
-    else:
-        console.print("[yellow]Warning: No channels enabled[/yellow]")
-
-    cron_status = cron.status()
-    if cron_status["jobs"] > 0:
-        console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
-    if repo_sync_watcher:
-        console.print(f"[green]✓[/green] Repo sync watcher: every {repo_sync_cfg.watch_interval_s}s")
-
-    console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
-
-    async def run():
-        agent_task: asyncio.Task | None = None
-        channels_task: asyncio.Task | None = None
-        try:
-            await cron.start()
-            await heartbeat.start()
-            if repo_sync_watcher:
-                await repo_sync_watcher.start()
-            agent_task = asyncio.create_task(agent.run())
-            channels_task = asyncio.create_task(channels.start_all())
-            while True:
-                if restart_requested:
-                    await asyncio.sleep(0.2)  # best-effort: let restart acknowledgement flush
-                    break
-                done, _ = await asyncio.wait(
-                    {agent_task, channels_task},
-                    timeout=0.5,
-                    return_when=asyncio.FIRST_COMPLETED,
+                model = requested_model or config.agents.defaults.model
+                runtime_provider = create_provider(
+                    config,
+                    model=model,
+                    provider_name=requested_provider_name,
                 )
-                if done:
-                    break
-        except KeyboardInterrupt:
-            console.print("\nShutting down...")
-        finally:
-            if agent_task and not agent_task.done():
-                agent.stop()
-                agent_task.cancel()
-            if channels_task and not channels_task.done():
-                channels_task.cancel()
-            await asyncio.gather(*(t for t in (agent_task, channels_task) if t), return_exceptions=True)
-            await agent.close_mcp()
-            heartbeat.stop()
-            if repo_sync_watcher:
-                repo_sync_watcher.stop()
-            cron.stop()
-            agent.stop()
-            await channels.stop_all()
+                return runtime_provider, model, requested_provider_name
+            runtime_provider, selection = build_runtime_provider(
+                config,
+                requested_model,
+                default_model=config.agents.defaults.model,
+                default_provider_name=default_provider_name,
+            )
+            return runtime_provider, selection.model, selection.provider_name
 
-    asyncio.run(run())
-    if restart_requested:
-        os.execv(sys.executable, [sys.executable, "-m", "nanobot", *sys.argv[1:]])
+        def available_models_provider(current_model: str | None, current_provider: str | None):
+            return build_available_models(
+                config,
+                default_model=config.agents.defaults.model,
+                default_provider_name=default_provider_name,
+                current_model=current_model,
+                current_provider_name=current_provider,
+                coding_config=config.agents.defaults.coding,
+            )
+
+        # Create cron service first (callback set after agent creation)
+        cron_store_path = get_cron_dir() / "jobs.json"
+        cron = CronService(cron_store_path)
+        repo_sync_cfg = config.gateway.repo_sync
+        legacy_repo_sync_marker = "__repo_sync__::"
+        restart_requested = False
+
+        async def request_restart() -> None:
+            nonlocal restart_requested
+            restart_requested = True
+
+        # Create agent with cron service
+        agent = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=config.workspace_path,
+            model=config.agents.defaults.model,
+            temperature=config.agents.defaults.temperature,
+            max_tokens=config.agents.defaults.max_tokens,
+            max_iterations=config.agents.defaults.max_tool_iterations,
+            memory_window=config.agents.defaults.memory_window,
+            reasoning_effort=config.agents.defaults.reasoning_effort,
+            brave_api_key=config.tools.web.search.api_key or None,
+            web_proxy=config.tools.web.proxy or None,
+            exec_config=config.tools.exec,
+            cron_service=cron,
+            restrict_to_workspace=config.tools.restrict_to_workspace,
+            session_manager=session_manager,
+            mcp_servers=config.tools.mcp_servers,
+            channels_config=config.channels,
+            image_config=config.tools.images,
+            persona_config=config.agents.defaults.persona,
+            token_guard_config=config.agents.defaults.token_guard,
+            coding_config=config.agents.defaults.coding,
+            restart_callback=request_restart,
+            provider_name=default_provider_name,
+            provider_switcher=provider_switcher,
+            available_models_provider=available_models_provider,
+        )
+
+        # Set cron callback (needs agent)
+        async def on_cron_job(job: CronJob) -> str | None:
+            """Execute a cron job through the agent."""
+            from nanobot.agent.tools.cron import CronTool
+            from nanobot.agent.tools.message import MessageTool
+            reminder_note = (
+                "[Scheduled Task] Timer finished.\n\n"
+                f"Task '{job.name}' has been triggered.\n"
+                f"Scheduled instruction: {job.payload.message}"
+            )
+
+            # Prevent the agent from scheduling new cron jobs during execution
+            cron_tool = agent.tools.get("cron")
+            cron_token = None
+            if isinstance(cron_tool, CronTool):
+                cron_token = cron_tool.set_cron_context(True)
+            try:
+                response = await agent.process_direct(
+                    reminder_note,
+                    session_key=f"cron:{job.id}",
+                    channel=job.payload.channel or "cli",
+                    chat_id=job.payload.to or "direct",
+                )
+            finally:
+                if isinstance(cron_tool, CronTool) and cron_token is not None:
+                    cron_tool.reset_cron_context(cron_token)
+
+            message_tool = agent.tools.get("message")
+            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+                return response
+
+            if job.payload.deliver and job.payload.to and response:
+                from nanobot.bus.events import OutboundMessage
+                await bus.publish_outbound(OutboundMessage(
+                    channel=job.payload.channel or "cli",
+                    chat_id=job.payload.to,
+                    content=response
+                ))
+            return response
+        cron.on_job = on_cron_job
+
+        # Repo sync no longer uses cron jobs; clean up legacy scheduled markers.
+        legacy_repo_jobs = [
+            j for j in cron.list_jobs(include_disabled=True)
+            if j.payload.message.startswith(legacy_repo_sync_marker)
+        ]
+        if legacy_repo_jobs:
+            for job in legacy_repo_jobs:
+                cron.remove_job(job.id)
+            console.print(
+                f"[green]✓[/green] Removed {len(legacy_repo_jobs)} legacy repo sync cron job(s)"
+            )
+
+        # Create channel manager
+        channels = ChannelManager(config, bus)
+
+        def _pick_heartbeat_target() -> tuple[str, str]:
+            """Pick a routable channel/chat target for heartbeat-triggered messages."""
+            enabled = set(channels.enabled_channels)
+            # Prefer the most recently updated non-internal session on an enabled channel.
+            for item in session_manager.list_sessions():
+                key = item.get("key") or ""
+                if ":" not in key:
+                    continue
+                channel, chat_id = key.split(":", 1)
+                if channel in {"cli", "system"}:
+                    continue
+                if channel in enabled and chat_id:
+                    return channel, chat_id
+            # Fallback keeps prior behavior but remains explicit.
+            return "cli", "direct"
+
+        # Create heartbeat service
+        async def on_heartbeat_execute(tasks: str) -> str:
+            """Phase 2: execute heartbeat tasks through the full agent loop."""
+            channel, chat_id = _pick_heartbeat_target()
+            heartbeat_content = ""
+            heartbeat_file = config.workspace_path / "HEARTBEAT.md"
+            if heartbeat_file.exists():
+                try:
+                    heartbeat_content = heartbeat_file.read_text(encoding="utf-8")
+                except Exception:
+                    heartbeat_content = ""
+            prompt = _build_heartbeat_execution_message(tasks, heartbeat_content)
+
+            async def _silent(*_args, **_kwargs):
+                pass
+
+            return await agent.process_direct(
+                prompt,
+                session_key="heartbeat",
+                channel=channel,
+                chat_id=chat_id,
+                on_progress=_silent,
+            )
+
+        async def on_heartbeat_notify(response: str) -> None:
+            """Deliver a heartbeat response to the user's channel."""
+            from nanobot.bus.events import OutboundMessage
+            if not _should_deliver_heartbeat_response(response):
+                return
+            channel, chat_id = _pick_heartbeat_target()
+            if channel == "cli":
+                return  # No external channel available to deliver to
+            await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+
+        hb_cfg = config.gateway.heartbeat
+        heartbeat = HeartbeatService(
+            workspace=config.workspace_path,
+            provider=provider,
+            model=agent.model,
+            on_execute=on_heartbeat_execute,
+            on_notify=on_heartbeat_notify,
+            interval_s=hb_cfg.interval_s,
+            enabled=hb_cfg.enabled,
+        )
+        repo_sync_watcher: RepoSyncWatcher | None = None
+        if repo_sync_cfg.enabled:
+            repo_sync_watcher = RepoSyncWatcher(
+                repo_path=repo_sync_cfg.repo_path,
+                branch=repo_sync_cfg.branch,
+                upstream_remote=repo_sync_cfg.upstream_remote,
+                upstream_url=repo_sync_cfg.upstream_url,
+                push_remote=repo_sync_cfg.push_remote,
+                auto_push=repo_sync_cfg.auto_push,
+                allow_dirty_worktree=repo_sync_cfg.allow_dirty_worktree,
+                interval_s=repo_sync_cfg.watch_interval_s,
+                run_on_start=repo_sync_cfg.run_on_start,
+            )
+
+        if channels.enabled_channels:
+            console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
+        else:
+            console.print("[yellow]Warning: No channels enabled[/yellow]")
+
+        cron_status = cron.status()
+        if cron_status["jobs"] > 0:
+            console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
+        if repo_sync_watcher:
+            console.print(f"[green]✓[/green] Repo sync watcher: every {repo_sync_cfg.watch_interval_s}s")
+
+        console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
+
+        async def run():
+            agent_task: asyncio.Task | None = None
+            channels_task: asyncio.Task | None = None
+            try:
+                await cron.start()
+                await heartbeat.start()
+                if repo_sync_watcher:
+                    await repo_sync_watcher.start()
+                agent_task = asyncio.create_task(agent.run())
+                channels_task = asyncio.create_task(channels.start_all())
+                while True:
+                    if restart_requested:
+                        await asyncio.sleep(0.2)  # best-effort: let restart acknowledgement flush
+                        break
+                    done, _ = await asyncio.wait(
+                        {agent_task, channels_task},
+                        timeout=0.5,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if done:
+                        break
+            except KeyboardInterrupt:
+                console.print("\nShutting down...")
+            finally:
+                if agent_task and not agent_task.done():
+                    agent.stop()
+                    agent_task.cancel()
+                if channels_task and not channels_task.done():
+                    channels_task.cancel()
+                await asyncio.gather(*(t for t in (agent_task, channels_task) if t), return_exceptions=True)
+                await agent.close_mcp()
+                heartbeat.stop()
+                if repo_sync_watcher:
+                    repo_sync_watcher.stop()
+                cron.stop()
+                agent.stop()
+                await channels.stop_all()
+
+        asyncio.run(run())
+        if restart_requested:
+            instance_lock.release()
+            os.execv(sys.executable, [sys.executable, "-m", "nanobot", *sys.argv[1:]])
+    finally:
+        instance_lock.release()
 
 
 

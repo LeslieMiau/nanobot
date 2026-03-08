@@ -410,6 +410,38 @@ def test_gateway_uses_config_directory_for_cron_store(monkeypatch, tmp_path: Pat
     assert seen["cron_store"] == config_file.parent / "cron" / "jobs.json"
 
 
+def test_gateway_refuses_start_when_other_gateway_process_exists(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    make_provider_called = False
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._find_other_gateway_processes",
+        lambda: [(4242, "python -m nanobot gateway --config /tmp/nanobot.json")],
+    )
+
+    def _unexpected_make_provider(_config):
+        nonlocal make_provider_called
+        make_provider_called = True
+        return object()
+
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", _unexpected_make_provider)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert result.exit_code == 1
+    assert "Another nanobot gateway instance is already running" in result.stdout
+    assert "4242" in result.stdout
+    assert make_provider_called is False
+
+
 def test_gateway_starts_repo_sync_watcher_without_installing_cron_job(
     monkeypatch, tmp_path: Path
 ) -> None:

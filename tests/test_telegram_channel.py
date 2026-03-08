@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import pytest
+from telegram.error import Conflict
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
@@ -23,9 +24,14 @@ class _FakeHTTPXRequest:
 class _FakeUpdater:
     def __init__(self, on_start_polling) -> None:
         self._on_start_polling = on_start_polling
+        self.poll_kwargs = None
 
     async def start_polling(self, **kwargs) -> None:
+        self.poll_kwargs = kwargs
         self._on_start_polling()
+
+    async def stop(self) -> None:
+        return None
 
 
 class _FakeBot:
@@ -59,6 +65,12 @@ class _FakeApp:
         pass
 
     async def start(self) -> None:
+        pass
+
+    async def stop(self) -> None:
+        pass
+
+    async def shutdown(self) -> None:
         pass
 
 
@@ -116,6 +128,39 @@ async def test_start_uses_request_proxy_without_builder_proxy(monkeypatch) -> No
     assert _FakeHTTPXRequest.instances[0].kwargs["proxy"] == config.proxy
     assert builder.request_value is _FakeHTTPXRequest.instances[0]
     assert builder.get_updates_request_value is _FakeHTTPXRequest.instances[0]
+
+
+@pytest.mark.asyncio
+async def test_start_stops_and_raises_on_polling_conflict(monkeypatch) -> None:
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"])
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+
+    class _ConflictUpdater(_FakeUpdater):
+        async def start_polling(self, **kwargs) -> None:
+            self.poll_kwargs = kwargs
+            if error_callback := kwargs.get("error_callback"):
+                error_callback(Conflict("another getUpdates request is active"))
+
+        async def stop(self) -> None:
+            return None
+
+    class _ConflictApp(_FakeApp):
+        def __init__(self) -> None:
+            super().__init__(lambda: None)
+            self.updater = _ConflictUpdater(lambda: None)
+
+    app = _ConflictApp()
+    builder = _FakeBuilder(app)
+
+    monkeypatch.setattr("nanobot.channels.telegram.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.Application",
+        SimpleNamespace(builder=lambda: builder),
+    )
+
+    with pytest.raises(RuntimeError, match="another bot instance is already running"):
+        await channel.start()
 
 
 def test_derive_topic_session_key_uses_thread_id() -> None:

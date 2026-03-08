@@ -8,6 +8,7 @@ import time
 import unicodedata
 
 from loguru import logger
+from telegram.error import Conflict
 from telegram import BotCommand, ReplyParameters, Update
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
@@ -239,6 +240,7 @@ class TelegramChannel(BaseChannel):
         self._media_group_buffers: dict[str, dict] = {}
         self._media_group_tasks: dict[str, asyncio.Task] = {}
         self._message_threads: dict[tuple[str, int], int] = {}
+        self._fatal_error: Exception | None = None
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -266,6 +268,7 @@ class TelegramChannel(BaseChannel):
             return
 
         self._running = True
+        self._fatal_error = None
 
         # Build the application with larger connection pool to avoid pool-timeout on long runs
         req = HTTPXRequest(
@@ -316,12 +319,16 @@ class TelegramChannel(BaseChannel):
         # Start polling (this runs until stopped)
         await self._app.updater.start_polling(
             allowed_updates=["message"],
-            drop_pending_updates=True  # Ignore old messages on startup
+            drop_pending_updates=True,  # Ignore old messages on startup
+            error_callback=self._on_polling_error,
         )
 
         # Keep running until stopped
-        while self._running:
+        while self._running and self._fatal_error is None:
             await asyncio.sleep(1)
+        if self._fatal_error is not None:
+            await self.stop()
+            raise RuntimeError("Telegram polling conflict: another bot instance is already running") from self._fatal_error
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
@@ -710,6 +717,20 @@ class TelegramChannel(BaseChannel):
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
         logger.error("Telegram error: {}", context.error)
+
+    def _on_polling_error(self, error: Exception) -> None:
+        """Handle polling-layer failures that don't go through normal update handlers."""
+        if isinstance(error, Conflict):
+            if self._fatal_error is None:
+                self._fatal_error = error
+                self._running = False
+                logger.error(
+                    "Telegram polling conflict detected: another bot instance is already using getUpdates"
+                )
+                if self._app is not None:
+                    asyncio.get_running_loop().create_task(self._app.updater.stop())
+            return
+        logger.error("Telegram polling error: {}", error)
 
     def _get_extension(
         self,
