@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -127,6 +128,43 @@ async def test_token_guard_pending_preserves_original_request(tmp_path: Path) ->
     assert resumed is not None
     assert resumed.content == "ok"
     assert provider.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_token_guard_allows_restart_command_while_pending(tmp_path: Path) -> None:
+    restart_callback = AsyncMock()
+    bus = MessageBus()
+    provider = _Provider()
+    loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=tmp_path,
+        model="dummy",
+        max_iterations=1,
+        restart_callback=restart_callback,
+        token_guard_config=TokenGuardConfig(
+            enabled=True,
+            threshold_tokens=10,
+            confirm_command="/confirm",
+            cancel_command="/cancel",
+        ),
+    )
+    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="A" * 300)
+    await loop._process_message(msg)
+
+    restarted = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="重启")
+    )
+    confirm = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/confirm")
+    )
+
+    restart_callback.assert_awaited_once()
+    assert restarted is not None
+    assert "重启回来" in restarted.content
+    assert confirm is not None
+    assert confirm.content == "No pending large task or coding plan to confirm."
+    assert provider.calls == 0
 
 
 @pytest.mark.asyncio

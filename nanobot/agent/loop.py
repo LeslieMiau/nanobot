@@ -868,7 +868,7 @@ class AgentLoop:
         if pending is not None or plan_pending is not None:
             if cmd in self._TOKEN_GUARD_EXIT_ALIASES:
                 cmd = cancel_cmd
-            elif cmd not in {confirm_cmd, cancel_cmd}:
+            elif cmd not in {confirm_cmd, cancel_cmd, "/restart"}:
                 pending_kind = "large task" if pending is not None else "coding plan"
                 return OutboundMessage(
                     channel=msg.channel,
@@ -930,6 +930,8 @@ class AgentLoop:
                 content="Canceled pending task.",
             )
         if cmd == "/restart":
+            self._token_guard_pending.pop(key, None)
+            self._plan_guard_pending.pop(key, None)
             if not self._restart_callback:
                 return OutboundMessage(
                     channel=msg.channel,
