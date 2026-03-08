@@ -293,6 +293,7 @@ def gateway(
     cron_store_path = get_cron_dir() / "jobs.json"
     cron = CronService(cron_store_path)
     repo_sync_cfg = config.gateway.repo_sync
+    legacy_repo_sync_marker = "__repo_sync__::"
     restart_requested = False
 
     async def request_restart() -> None:
@@ -367,6 +368,18 @@ def gateway(
             ))
         return response
     cron.on_job = on_cron_job
+
+    # Repo sync no longer uses cron jobs; clean up legacy scheduled markers.
+    legacy_repo_jobs = [
+        j for j in cron.list_jobs(include_disabled=True)
+        if j.payload.message.startswith(legacy_repo_sync_marker)
+    ]
+    if legacy_repo_jobs:
+        for job in legacy_repo_jobs:
+            cron.remove_job(job.id)
+        console.print(
+            f"[green]✓[/green] Removed {len(legacy_repo_jobs)} legacy repo sync cron job(s)"
+        )
 
     # Create channel manager
     channels = ChannelManager(config, bus)

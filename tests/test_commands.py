@@ -1,5 +1,6 @@
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -399,6 +400,7 @@ def test_gateway_starts_repo_sync_watcher_without_installing_cron_job(
     config.gateway.repo_sync.watch_interval_s = 15
     seen: dict[str, object] = {
         "cron_add_calls": 0,
+        "legacy_repo_jobs_removed": 0,
         "watcher_started": 0,
         "watcher_stopped": 0,
     }
@@ -414,9 +416,23 @@ def test_gateway_starts_repo_sync_watcher_without_installing_cron_job(
     class _FakeCron:
         def __init__(self, _store_path: Path) -> None:
             self.on_job = None
+            self._jobs = [
+                SimpleNamespace(
+                    id="legacy-sync",
+                    payload=SimpleNamespace(message="__repo_sync__::/tmp/repo::main"),
+                )
+            ]
 
         def status(self) -> dict[str, int]:
             return {"jobs": 0}
+
+        def list_jobs(self, include_disabled: bool = False) -> list:
+            return list(self._jobs)
+
+        def remove_job(self, _job_id: str) -> bool:
+            seen["legacy_repo_jobs_removed"] = int(seen["legacy_repo_jobs_removed"]) + 1
+            self._jobs = []
+            return True
 
         async def start(self) -> None:
             return None
@@ -481,6 +497,7 @@ def test_gateway_starts_repo_sync_watcher_without_installing_cron_job(
 
     assert result.exit_code == 0
     assert seen["cron_add_calls"] == 0
+    assert seen["legacy_repo_jobs_removed"] == 1
     assert seen["watcher_interval"] == 15
     assert seen["watcher_started"] == 1
     assert seen["watcher_stopped"] == 1
