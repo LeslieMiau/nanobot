@@ -403,6 +403,8 @@ def render_markdown(report: dict[str, Any]) -> str:
             lines.append(f"- Target job: `{operator_recovery['target_job_id']}`")
         if operator_recovery.get("command"):
             lines.append(f"- Command: `{operator_recovery['command']}`")
+        if operator_recovery.get("chat_command"):
+            lines.append(f"- Chat command: `{operator_recovery['chat_command']}`")
         elif operator_recovery.get("blocked_reason"):
             lines.append(f"- Blocked reason: {operator_recovery['blocked_reason']}")
     lines.append("")
@@ -466,6 +468,8 @@ def render_failure_brief(
         lines.append(f"- Operator recovery: `{status}` (`{operator_recovery['scope']}`)")
         if operator_recovery.get("command"):
             lines.append(f"- Operator retry command: `{operator_recovery['command']}`")
+        if operator_recovery.get("chat_command"):
+            lines.append(f"- Chat retry command: `{operator_recovery['chat_command']}`")
         elif operator_recovery.get("blocked_reason"):
             lines.append(f"- Operator retry block: {operator_recovery['blocked_reason']}")
 
@@ -976,6 +980,7 @@ def _build_operator_recovery(
             "scope": "cron_job",
             "target_job_id": target_job_id,
             "command": f"nanobot retry-cron {target_job_id}",
+            "chat_command": f"/retry-cron {target_job_id}",
             "blocked_reason": None,
         }
 
@@ -997,6 +1002,7 @@ def _build_operator_recovery(
         "scope": scope,
         "target_job_id": target_job_id,
         "command": None,
+        "chat_command": None,
         "blocked_reason": blocked_reason,
     }
 

@@ -84,6 +84,21 @@ async def test_retry_cron_stages_pending_confirmation(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_retry_cron_accepts_natural_language_trigger(tmp_path) -> None:
+    cron = _FakeCronService()
+    loop = _make_loop(tmp_path, cron)
+
+    out = await loop._process_message(
+        InboundMessage(channel="telegram", sender_id="u1", chat_id="chat-1", content="重跑定时任务 job-1")
+    )
+
+    assert out is not None
+    assert "Pending cron retry for `job-1`" in out.content
+    session = loop.sessions.get_or_create("telegram:chat-1")
+    assert session.metadata["operator_action"]["job_id"] == "job-1"
+
+
+@pytest.mark.asyncio
 async def test_retry_cron_confirm_executes_in_current_chat(tmp_path) -> None:
     cron = _FakeCronService()
     loop = _make_loop(tmp_path, cron)
@@ -110,6 +125,26 @@ async def test_retry_cron_confirm_executes_in_current_chat(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_retry_cron_accepts_natural_confirmation(tmp_path) -> None:
+    cron = _FakeCronService()
+    loop = _make_loop(tmp_path, cron)
+    loop.process_direct = AsyncMock(return_value="digest ready")
+
+    await loop._process_message(
+        InboundMessage(channel="telegram", sender_id="u1", chat_id="chat-1", content="/retry-cron job-1")
+    )
+    out = await loop._process_message(
+        InboundMessage(channel="telegram", sender_id="u1", chat_id="chat-1", content="确认")
+    )
+
+    assert out is not None
+    assert "Retried cron job `job-1` (Daily AI News):" in out.content
+    assert cron.run_calls == [("job-1", True)]
+    session = loop.sessions.get_or_create("telegram:chat-1")
+    assert "operator_action" not in session.metadata
+
+
+@pytest.mark.asyncio
 async def test_retry_cron_cancel_clears_pending_action(tmp_path) -> None:
     cron = _FakeCronService()
     loop = _make_loop(tmp_path, cron)
@@ -119,6 +154,24 @@ async def test_retry_cron_cancel_clears_pending_action(tmp_path) -> None:
     )
     out = await loop._process_message(
         InboundMessage(channel="telegram", sender_id="u1", chat_id="chat-1", content="/cancel")
+    )
+
+    assert out is not None
+    assert out.content == "Canceled pending task."
+    session = loop.sessions.get_or_create("telegram:chat-1")
+    assert "operator_action" not in session.metadata
+
+
+@pytest.mark.asyncio
+async def test_retry_cron_accepts_natural_cancellation(tmp_path) -> None:
+    cron = _FakeCronService()
+    loop = _make_loop(tmp_path, cron)
+
+    await loop._process_message(
+        InboundMessage(channel="telegram", sender_id="u1", chat_id="chat-1", content="/retry-cron job-1")
+    )
+    out = await loop._process_message(
+        InboundMessage(channel="telegram", sender_id="u1", chat_id="chat-1", content="取消")
     )
 
     assert out is not None

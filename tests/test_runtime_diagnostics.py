@@ -161,6 +161,7 @@ def test_build_report_summarizes_cron_and_session_issues(tmp_path: Path) -> None
     )
 
     report = build_report(config_path=config_path, limit=3)
+    markdown = render_markdown(report)
 
     assert report["gateway_lock"]["running"] is True
     assert report["cron"]["job_count"] == 2
@@ -182,9 +183,12 @@ def test_build_report_summarizes_cron_and_session_issues(tmp_path: Path) -> None
     assert report["operator_recovery"]["eligible"] is True
     assert report["operator_recovery"]["target_job_id"] == "abc12345"
     assert report["operator_recovery"]["command"] == "nanobot retry-cron abc12345"
+    assert report["operator_recovery"]["chat_command"] == "/retry-cron abc12345"
     assert any("tool" in action.lower() or "session" in action.lower() for action in report["diagnosis"]["recommended_actions"])
     assert len(report["history"]["recent_entries"]) == 2
     assert any("abc12345" in item for item in report["next_checks"])
+    assert "Command: `nanobot retry-cron abc12345`" in markdown
+    assert "Chat command: `/retry-cron abc12345`" in markdown
 
 
 def test_build_report_includes_focus_session_tail_and_markdown(tmp_path: Path) -> None:
@@ -312,6 +316,7 @@ def test_render_failure_brief_surfaces_operator_retry_for_cron_failure() -> None
 
     assert "Operator recovery: `eligible` (`cron_job`)" in brief
     assert "Operator retry command: `nanobot retry-cron job-1`" in brief
+    assert "Chat retry command: `/retry-cron job-1`" in brief
 
 
 def test_build_report_marks_stale_gateway_lock_as_high_urgency_schedule_issue(tmp_path: Path) -> None:

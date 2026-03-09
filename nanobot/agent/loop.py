@@ -139,7 +139,7 @@ class AgentLoop:
     _PLAN_CANCEL_COMMAND = "/cancel"
     _TOKEN_GUARD_MODES = {"off", "on", "strict", "relaxed"}
     _TOKEN_GUARD_PROCEED_ALIASES = {
-        "继续", "继续吧", "批准", "ok", "okay", "proceed", "continue", "/confirm", "confirm", "yes", "y", "好",
+        "继续", "继续吧", "批准", "ok", "okay", "proceed", "continue", "/confirm", "confirm", "yes", "y", "好", "确认",
     }
     _TOKEN_GUARD_CANCEL_ALIASES = {
         "/cancel", "cancel", "取消", "算了", "不用了", "stop", "no", "n",
@@ -1155,6 +1155,8 @@ class AgentLoop:
             return "", ""
         if match := cls._parse_natural_model_switch(raw):
             return "/model", match
+        if match := cls._parse_natural_cron_retry(raw):
+            return "/retry-cron", match
         first, rest = (raw.split(maxsplit=1) + [""])[:2]
         return cls._normalize_user_command(first), rest.strip()
 
@@ -1167,6 +1169,19 @@ class AgentLoop:
             r"^(?:请)?(?:把)?模型换成\s+(.+)$",
             r"^(?:请)?(?:把)?模型改成\s+(.+)$",
             r"^(?:请)?使用模型\s+(.+)$",
+        )
+        for pattern in patterns:
+            match = re.match(pattern, content.strip(), flags=re.IGNORECASE)
+            if match:
+                return match.group(1).strip()
+        return None
+
+    @staticmethod
+    def _parse_natural_cron_retry(content: str) -> str | None:
+        """Recognize natural-language cron retry requests."""
+        patterns = (
+            r"^(?:请)?(?:帮我)?(?:重试|重跑|重新运行)(?:一下)?\s*(?:cron|定时任务|任务|job)?\s*`?([a-z0-9_-]{4,})`?$",
+            r"^(?:请)?(?:帮我)?(?:把)?(?:cron|定时任务|任务|job)\s*`?([a-z0-9_-]{4,})`?\s*(?:重试|重跑|重新运行)(?:一下)?$",
         )
         for pattern in patterns:
             match = re.match(pattern, content.strip(), flags=re.IGNORECASE)
@@ -1356,8 +1371,8 @@ class AgentLoop:
             chat_id=msg.chat_id,
             content=(
                 f"Pending cron retry for `{job.id}` ({job.name or 'unnamed'}).\n"
-                f"Reply `{self._PLAN_CONFIRM_COMMAND}` to run it in this chat, or "
-                f"`{self._PLAN_CANCEL_COMMAND}` to cancel."
+                f"Reply `{self._PLAN_CONFIRM_COMMAND}` or `继续/确认` to run it in this chat, or "
+                f"`{self._PLAN_CANCEL_COMMAND}` or `取消` to cancel."
             ),
         )
 
@@ -2050,6 +2065,11 @@ class AgentLoop:
         control = self._parse_token_guard_control(msg.content)
         plan_pending = self._plan_guard_pending.get(key)
         operator_action = self._operator_action(session)
+        if operator_action:
+            if cmd in self._TOKEN_GUARD_EXIT_ALIASES or self._is_token_guard_cancel_message(msg.content):
+                cmd = self._PLAN_CANCEL_COMMAND
+            elif self._is_token_guard_proceed_message(msg.content):
+                cmd = self._PLAN_CONFIRM_COMMAND
         if control is not None:
             kind, value = control
             if kind == "mode":
@@ -2151,8 +2171,8 @@ class AgentLoop:
                 chat_id=msg.chat_id,
                 content=(
                     f"There is already a pending cron retry for `{job_id}` ({job_name}).\n"
-                    f"Reply `{self._PLAN_CONFIRM_COMMAND}` to run it, or "
-                    f"`{self._PLAN_CANCEL_COMMAND}` to cancel."
+                    f"Reply `{self._PLAN_CONFIRM_COMMAND}` or `继续/确认` to run it, or "
+                    f"`{self._PLAN_CANCEL_COMMAND}` or `取消` to cancel."
                 ),
                 metadata=msg.metadata or {},
             )
