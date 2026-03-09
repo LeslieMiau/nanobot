@@ -1,4 +1,5 @@
 import asyncio
+import json
 import shutil
 from pathlib import Path
 from types import SimpleNamespace
@@ -700,3 +701,90 @@ def test_gateway_cron_jobs_run_with_silent_progress(monkeypatch, tmp_path: Path)
     assert asyncio.run(kwargs["on_progress"]("hidden progress")) is None
     assert len(bus.outbound) == 1
     assert bus.outbound[0].content == "digest ready"
+
+
+def test_doctor_outputs_markdown_report(monkeypatch, tmp_path: Path) -> None:
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+
+    def _build_report(**kwargs):
+        seen["build_report"] = kwargs
+        return {
+            "paths": {
+                "config_path": "/tmp/config.json",
+                "workspace": str(config.workspace_path),
+                "jobs_path": "/tmp/cron/jobs.json",
+                "sessions_dir": str(config.workspace_path / "sessions"),
+            },
+            "gateway_lock": {"exists": False},
+            "cron": {"exists": False, "failing_jobs": []},
+            "sessions": {"latest": [], "suspected_failures": []},
+            "history": {"exists": False, "recent_entries": []},
+            "next_checks": ["check session file"],
+        }
+
+    monkeypatch.setattr("nanobot.debug.runtime_diagnostics.build_report", _build_report)
+    monkeypatch.setattr(
+        "nanobot.debug.runtime_diagnostics.render_markdown",
+        lambda report: "# doctor report\n\n- check session file\n",
+    )
+
+    result = runner.invoke(app, ["doctor"])
+
+    assert result.exit_code == 0
+    assert "doctor report" in result.stdout
+    assert seen["build_report"]["config_path"] is None
+    assert seen["build_report"]["workspace"] == config.workspace_path
+    assert seen["build_report"]["limit"] == 5
+    assert seen["build_report"]["session_key"] is None
+
+
+def test_doctor_outputs_json_and_respects_overrides(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    seen: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        "nanobot.config.loader.set_config_path",
+        lambda path: seen.__setitem__("config_path", path),
+    )
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+
+    def _build_report(**kwargs):
+        seen["build_report"] = kwargs
+        return {"ok": True, "session_key": kwargs["session_key"]}
+
+    monkeypatch.setattr("nanobot.debug.runtime_diagnostics.build_report", _build_report)
+
+    override = tmp_path / "override-workspace"
+    result = runner.invoke(
+        app,
+        [
+            "doctor",
+            "--config",
+            str(config_file),
+            "--workspace",
+            str(override),
+            "--format",
+            "json",
+            "--limit",
+            "7",
+            "--session-key",
+            "heartbeat",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen["config_path"] == config_file.resolve()
+    assert seen["build_report"]["config_path"] == config_file.resolve()
+    assert seen["build_report"]["workspace"] == override
+    assert seen["build_report"]["limit"] == 7
+    assert seen["build_report"]["session_key"] == "heartbeat"
+    assert json.loads(result.stdout) == {"ok": True, "session_key": "heartbeat"}

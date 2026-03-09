@@ -2,6 +2,7 @@
 
 import asyncio
 import fcntl
+import json
 import os
 import re
 import select
@@ -1092,6 +1093,41 @@ def channels_login():
 # ============================================================================
 # Status Commands
 # ============================================================================
+
+
+@app.command()
+def doctor(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    output_format: str = typer.Option("markdown", "--format", help="Output format: markdown or json"),
+    limit: int = typer.Option(5, "--limit", help="Max items per report section"),
+    session_key: str | None = typer.Option(None, "--session-key", help="Include a detailed tail for one session key"),
+):
+    """Summarize nanobot runtime records for troubleshooting."""
+    from nanobot.config.loader import load_config, set_config_path
+    from nanobot.debug.runtime_diagnostics import build_report, render_markdown
+
+    config_path = None
+    if config:
+        config_path = Path(config).expanduser().resolve()
+        if not config_path.exists():
+            console.print(f"[red]Error: Config file not found: {config_path}[/red]")
+            raise typer.Exit(1)
+        set_config_path(config_path)
+
+    loaded = load_config(config_path)
+    workspace_path = Path(workspace).expanduser() if workspace else loaded.workspace_path
+    report = build_report(
+        config_path=config_path,
+        workspace=workspace_path,
+        limit=max(1, limit),
+        session_key=session_key,
+    )
+
+    if output_format == "json":
+        typer.echo(json.dumps(report, indent=2, ensure_ascii=False))
+    else:
+        console.print(Markdown(render_markdown(report)))
 
 
 @app.command()
