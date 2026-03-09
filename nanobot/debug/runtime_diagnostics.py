@@ -269,6 +269,7 @@ def build_report(
     report["diagnosis"] = _classify_failure(report)
     report["remediation"] = _build_remediation(report, report["diagnosis"])
     report["auto_recovery"] = _build_auto_recovery(report, report["diagnosis"])
+    report["operator_recovery"] = _build_operator_recovery(report, report["diagnosis"])
     return report
 
 
@@ -282,6 +283,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     diagnosis = report.get("diagnosis")
     remediation = report.get("remediation")
     auto_recovery = report.get("auto_recovery")
+    operator_recovery = report.get("operator_recovery")
 
     lines = ["# nanobot runtime diagnostics", ""]
     lines.append("## Paths")
@@ -390,6 +392,21 @@ def render_markdown(report: dict[str, Any]) -> str:
             lines.append(f"- Blocked reason: {auto_recovery['blocked_reason']}")
     lines.append("")
 
+    lines.append("## Operator Recovery")
+    if not operator_recovery:
+        lines.append("- No operator-recovery policy is available.")
+    else:
+        status = "eligible" if operator_recovery["eligible"] else "blocked"
+        lines.append(f"- Status: `{status}`")
+        lines.append(f"- Scope: `{operator_recovery['scope']}`")
+        if operator_recovery.get("target_job_id"):
+            lines.append(f"- Target job: `{operator_recovery['target_job_id']}`")
+        if operator_recovery.get("command"):
+            lines.append(f"- Command: `{operator_recovery['command']}`")
+        elif operator_recovery.get("blocked_reason"):
+            lines.append(f"- Blocked reason: {operator_recovery['blocked_reason']}")
+    lines.append("")
+
     lines.append("## Recent history")
     if not history["exists"]:
         lines.append("- `memory/HISTORY.md` is missing.")
@@ -416,6 +433,7 @@ def render_failure_brief(
     diagnosis = _classify_failure(report, title=title, details=details)
     remediation = _build_remediation(report, diagnosis)
     auto_recovery = _build_auto_recovery(report, diagnosis, title=title, details=details)
+    operator_recovery = _build_operator_recovery(report, diagnosis, title=title, details=details)
 
     for detail in details or []:
         if detail:
@@ -443,6 +461,13 @@ def render_failure_brief(
             lines.append(f"- Retry delay: `{auto_recovery['retry_delay_s']}s`")
         elif auto_recovery.get("blocked_reason"):
             lines.append(f"- Recovery block: {auto_recovery['blocked_reason']}")
+    if operator_recovery:
+        status = "eligible" if operator_recovery["eligible"] else "blocked"
+        lines.append(f"- Operator recovery: `{status}` (`{operator_recovery['scope']}`)")
+        if operator_recovery.get("command"):
+            lines.append(f"- Operator retry command: `{operator_recovery['command']}`")
+        elif operator_recovery.get("blocked_reason"):
+            lines.append(f"- Operator retry block: {operator_recovery['blocked_reason']}")
 
     issues = report.get("sessions", {}).get("suspected_failures", [])
     if issues:
@@ -933,6 +958,49 @@ def _build_auto_recovery(
     }
 
 
+def _build_operator_recovery(
+    report: dict[str, Any],
+    diagnosis: dict[str, Any] | None,
+    *,
+    title: str | None = None,
+    details: list[str] | None = None,
+) -> dict[str, Any]:
+    if not diagnosis:
+        diagnosis = _classify_failure(report, title=title, details=details)
+
+    scope = _auto_recovery_scope(report, title=title, details=details)
+    target_job_id = _operator_retry_job_id(report, scope)
+    if scope == "cron_turn" and target_job_id:
+        return {
+            "eligible": True,
+            "scope": "cron_job",
+            "target_job_id": target_job_id,
+            "command": f"nanobot retry-cron {target_job_id}",
+            "blocked_reason": None,
+        }
+
+    if scope == "message_turn":
+        blocked_reason = (
+            "Manual replay is blocked because normal message turns do not yet have a "
+            "safe side-effect-aware retry path."
+        )
+    elif scope.startswith("heartbeat"):
+        blocked_reason = (
+            "Heartbeat recovery should use the built-in heartbeat flow instead of replaying "
+            "the failing turn manually."
+        )
+    else:
+        blocked_reason = "Operator-confirmed retry is not available for this failure shape yet."
+
+    return {
+        "eligible": False,
+        "scope": scope,
+        "target_job_id": target_job_id,
+        "command": None,
+        "blocked_reason": blocked_reason,
+    }
+
+
 def _safe_next_action(report: dict[str, Any], diagnosis: dict[str, Any]) -> str:
     category = diagnosis["category"]
     if report.get("gateway_lock", {}).get("stale"):
@@ -970,6 +1038,24 @@ def _auto_recovery_scope(
         return "message_turn"
 
     return "unknown"
+
+
+def _operator_retry_job_id(report: dict[str, Any], scope: str) -> str | None:
+    if scope != "cron_turn":
+        return None
+
+    failing_jobs = report.get("cron", {}).get("failing_jobs", [])
+    if failing_jobs:
+        job_id = failing_jobs[0].get("id")
+        if isinstance(job_id, str) and job_id:
+            return job_id
+
+    focus = report.get("sessions", {}).get("focus_session") or {}
+    focus_key = str(focus.get("key") or "")
+    if focus_key.startswith("cron:"):
+        job_id = focus_key.split(":", 1)[1].split(":", 1)[0]
+        return job_id or None
+    return None
 
 
 def _looks_transient_failure(

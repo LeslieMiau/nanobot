@@ -790,6 +790,113 @@ def test_doctor_outputs_json_and_respects_overrides(monkeypatch, tmp_path: Path)
     assert json.loads(result.stdout) == {"ok": True, "session_key": "heartbeat"}
 
 
+def test_retry_cron_runs_job_and_prints_response(monkeypatch, tmp_path: Path) -> None:
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+
+    captured: dict[str, object] = {}
+
+    class _FakeBus:
+        def __init__(self) -> None:
+            self.outbound: list[object] = []
+
+        async def publish_outbound(self, msg) -> None:
+            self.outbound.append(msg)
+
+        async def consume_outbound(self):
+            return self.outbound.pop(0)
+
+        @property
+        def outbound_size(self) -> int:
+            return len(self.outbound)
+
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", _FakeBus)
+    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: tmp_path / "cron")
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+            self.run_calls: list[tuple[str, bool]] = []
+
+        def list_jobs(self, include_disabled: bool = False) -> list:
+            return [
+                SimpleNamespace(
+                    id="job-1",
+                    name="Daily AI News",
+                    payload=CronPayload(message="Generate digest", deliver=True, channel="telegram", to="chat-1"),
+                )
+            ]
+
+        async def run_job(self, job_id: str, force: bool = False) -> bool:
+            self.run_calls.append((job_id, force))
+            if self.on_job is None:
+                return False
+            await self.on_job(self.list_jobs(True)[0])
+            captured["run_calls"] = list(self.run_calls)
+            return True
+
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
+
+    class _FakeAgentLoop:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def process_direct(self, message: str, session_key: str, channel: str, chat_id: str, on_progress=None) -> str:
+            captured["message"] = message
+            captured["session_key"] = session_key
+            captured["channel"] = channel
+            captured["chat_id"] = chat_id
+            return "retry result"
+
+        async def close_mcp(self) -> None:
+            return None
+
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._print_agent_response",
+        lambda content, render_markdown=True: captured.__setitem__("printed", (content, render_markdown)),
+    )
+
+    result = runner.invoke(app, ["retry-cron", "job-1"])
+
+    assert result.exit_code == 0
+    assert captured["run_calls"] == [("job-1", True)]
+    assert captured["session_key"] == "cron:job-1:manual"
+    assert captured["channel"] == "cli"
+    assert captured["chat_id"] == "cron-retry:job-1"
+    assert "Daily AI News" in captured["message"]
+    assert captured["printed"] == ("retry result", True)
+
+
+def test_retry_cron_fails_when_job_is_missing(monkeypatch, tmp_path: Path) -> None:
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "workspace")
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
+    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: tmp_path / "cron")
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            pass
+
+        def list_jobs(self, include_disabled: bool = False) -> list:
+            return []
+
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
+
+    result = runner.invoke(app, ["retry-cron", "missing-job"])
+
+    assert result.exit_code == 1
+    assert "Cron job not found" in result.stdout
+
+
 def test_gateway_cron_auto_diagnosis_publishes_on_failure(monkeypatch, tmp_path: Path) -> None:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)

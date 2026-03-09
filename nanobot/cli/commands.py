@@ -1272,6 +1272,144 @@ def doctor(
         console.print(Markdown(render_markdown(report)))
 
 
+@app.command("retry-cron")
+def retry_cron(
+    job_id: str = typer.Argument(..., help="Cron job ID to rerun"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    markdown: bool = typer.Option(True, "--markdown/--no-markdown", help="Render assistant output as Markdown"),
+    logs: bool = typer.Option(False, "--logs/--no-logs", help="Show nanobot runtime logs during retry"),
+):
+    """Rerun one cron job on demand for operator-confirmed recovery."""
+    from loguru import logger
+
+    from nanobot.agent.loop import AgentLoop
+    from nanobot.bus.queue import MessageBus
+    from nanobot.config.paths import get_cron_dir
+    from nanobot.cron.service import CronService
+    from nanobot.providers.catalog import build_available_models
+    from nanobot.providers.factory import build_runtime_provider
+
+    config_obj = _load_runtime_config(config, workspace)
+    sync_workspace_templates(config_obj.workspace_path)
+
+    bus = MessageBus()
+    provider = _make_provider(config_obj)
+    default_provider_name = config_obj.get_provider_name(config_obj.agents.defaults.model)
+
+    def provider_switcher(requested_model: str | None, requested_provider_name: str | None = None):
+        if requested_provider_name:
+            from nanobot.providers.factory import create_provider
+
+            model = requested_model or config_obj.agents.defaults.model
+            runtime_provider = create_provider(
+                config_obj,
+                model=model,
+                provider_name=requested_provider_name,
+            )
+            return runtime_provider, model, requested_provider_name
+        runtime_provider, selection = build_runtime_provider(
+            config_obj,
+            requested_model,
+            default_model=config_obj.agents.defaults.model,
+            default_provider_name=default_provider_name,
+        )
+        return runtime_provider, selection.model, selection.provider_name
+
+    def available_models_provider(current_model: str | None, current_provider: str | None):
+        return build_available_models(
+            config_obj,
+            default_model=config_obj.agents.defaults.model,
+            default_provider_name=default_provider_name,
+            current_model=current_model,
+            current_provider_name=current_provider,
+            coding_config=config_obj.agents.defaults.coding,
+        )
+
+    cron_store_path = get_cron_dir() / "jobs.json"
+    cron = CronService(cron_store_path)
+
+    jobs = cron.list_jobs(include_disabled=True)
+    job = next((item for item in jobs if item.id == job_id), None)
+    if job is None:
+        console.print(f"[red]Error: Cron job not found: {job_id}[/red]")
+        raise typer.Exit(1)
+
+    if logs:
+        logger.enable("nanobot")
+    else:
+        logger.disable("nanobot")
+
+    agent_loop = AgentLoop(
+        bus=bus,
+        provider=provider,
+        workspace=config_obj.workspace_path,
+        model=config_obj.agents.defaults.model,
+        temperature=config_obj.agents.defaults.temperature,
+        max_tokens=config_obj.agents.defaults.max_tokens,
+        max_iterations=config_obj.agents.defaults.max_tool_iterations,
+        memory_window=config_obj.agents.defaults.memory_window,
+        reasoning_effort=config_obj.agents.defaults.reasoning_effort,
+        brave_api_key=config_obj.tools.web.search.api_key or None,
+        web_proxy=config_obj.tools.web.proxy or None,
+        exec_config=config_obj.tools.exec,
+        cron_service=cron,
+        restrict_to_workspace=config_obj.tools.restrict_to_workspace,
+        mcp_servers=config_obj.tools.mcp_servers,
+        channels_config=config_obj.channels,
+        image_config=config_obj.tools.images,
+        persona_config=config_obj.agents.defaults.persona,
+        token_guard_config=config_obj.agents.defaults.token_guard,
+        coding_config=config_obj.agents.defaults.coding,
+        provider_name=default_provider_name,
+        provider_switcher=provider_switcher,
+        available_models_provider=available_models_provider,
+    )
+
+    outputs: list[str] = []
+
+    async def on_cron_job(run_job) -> str | None:
+        async def _silent(*_args, **_kwargs):
+            return None
+
+        response = await agent_loop.process_direct(
+            _build_cron_execution_message(run_job.name, run_job.payload.message),
+            session_key=f"cron:{run_job.id}:manual",
+            channel="cli",
+            chat_id=f"cron-retry:{run_job.id}",
+            on_progress=_silent,
+        )
+        if response:
+            outputs.append(response)
+        return response
+
+    cron.on_job = on_cron_job
+
+    async def run_once() -> tuple[bool, list[str]]:
+        ran = await cron.run_job(job_id, force=True)
+        bus_outputs: list[str] = []
+        while bus.outbound_size:
+            outbound = await bus.consume_outbound()
+            if outbound.content:
+                bus_outputs.append(outbound.content)
+        await agent_loop.close_mcp()
+        return ran, bus_outputs
+
+    console.print(f"[dim]Retrying cron job `{job.id}` ({job.name or 'unnamed'})[/dim]")
+    ran, bus_outputs = asyncio.run(run_once())
+
+    if not ran:
+        console.print(f"[red]Error: Failed to rerun cron job: {job_id}[/red]")
+        raise typer.Exit(1)
+
+    rendered = bus_outputs or outputs
+    if rendered:
+        for item in rendered:
+            _print_agent_response(item, render_markdown=markdown)
+    else:
+        console.print(f"[green]Retried cron job `{job.id}` successfully.[/green]")
+
+
 @app.command()
 def status():
     """Show nanobot status."""

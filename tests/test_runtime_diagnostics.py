@@ -179,6 +179,9 @@ def test_build_report_summarizes_cron_and_session_issues(tmp_path: Path) -> None
     assert report["auto_recovery"]["eligible"] is False
     assert report["auto_recovery"]["scope"] == "cron_turn"
     assert "side-effecting tools" in report["auto_recovery"]["blocked_reason"]
+    assert report["operator_recovery"]["eligible"] is True
+    assert report["operator_recovery"]["target_job_id"] == "abc12345"
+    assert report["operator_recovery"]["command"] == "nanobot retry-cron abc12345"
     assert any("tool" in action.lower() or "session" in action.lower() for action in report["diagnosis"]["recommended_actions"])
     assert len(report["history"]["recent_entries"]) == 2
     assert any("abc12345" in item for item in report["next_checks"])
@@ -219,9 +222,11 @@ def test_build_report_includes_focus_session_tail_and_markdown(tmp_path: Path) -
     assert "## Diagnosis" in markdown
     assert "## Remediation" in markdown
     assert "## Auto Recovery" in markdown
+    assert "## Operator Recovery" in markdown
     assert "Category: `tool`" in markdown
     assert "Safe next action: `inspect_session`" in markdown
     assert "Status: `blocked`" in markdown
+    assert "Heartbeat recovery should use the built-in heartbeat flow" in markdown
     assert "heartbeat" in markdown
     assert "unknown tool" in markdown
 
@@ -254,6 +259,7 @@ def test_render_failure_brief_uses_category_and_next_check() -> None:
     assert "Repairability: `high`, urgency: `medium`" in brief
     assert "Auto recovery: `eligible` (`heartbeat_decision`)" in brief
     assert "Retry delay: `15s`" in brief
+    assert "Operator recovery: `blocked` (`heartbeat_decision`)" in brief
     assert "Top clue: Error: Brave Search API key not configured" in brief
     assert "Latest failing job: `abc12345` `Morning digest` (tool timeout)" in brief
     assert "Next check: Open `heartbeat.jsonl` around the failing turn." in brief
@@ -280,7 +286,32 @@ def test_render_failure_brief_classifies_transport_failures_from_details() -> No
     assert "Repairability: `medium`, urgency: `high`" in brief
     assert "Auto recovery: `blocked` (`message_turn`)" in brief
     assert "Recovery block: Automatic retry is blocked because this failure path may already have executed side-effecting tools." in brief
+    assert "Operator recovery: `blocked` (`message_turn`)" in brief
+    assert "Operator retry block: Manual replay is blocked because normal message turns do not yet have a safe side-effect-aware retry path." in brief
     assert "Top fix: Verify channel credentials and target delivery metadata before retrying outbound delivery." in brief
+
+
+def test_render_failure_brief_surfaces_operator_retry_for_cron_failure() -> None:
+    report = {
+        "sessions": {"focus_session": {"key": "cron:job-1"}, "suspected_failures": []},
+        "cron": {
+            "failing_jobs": [
+                {"id": "job-1", "name": "Daily AI News", "last_error": "tool timeout", "last_status": "error"}
+            ]
+        },
+        "next_checks": ["Inspect cron session."],
+        "history": {"recent_entries": []},
+        "gateway_lock": {"stale": False},
+    }
+
+    brief = render_failure_brief(
+        report,
+        title="nanobot auto-diagnosis: cron failure",
+        details=["Job: `Daily AI News` (`job-1`)", "Error: `RuntimeError: boom`"],
+    )
+
+    assert "Operator recovery: `eligible` (`cron_job`)" in brief
+    assert "Operator retry command: `nanobot retry-cron job-1`" in brief
 
 
 def test_build_report_marks_stale_gateway_lock_as_high_urgency_schedule_issue(tmp_path: Path) -> None:
