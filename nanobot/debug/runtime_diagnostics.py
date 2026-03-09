@@ -102,6 +102,76 @@ _CATEGORY_ACTIONS = {
         "Reproduce the issue with a narrower request so the failing step is isolated in one session turn.",
     ],
 }
+_SAFE_NEXT_ACTIONS = {
+    "config": "check_config",
+    "tool": "inspect_session",
+    "transport": "check_transport",
+    "model": "retry_later",
+    "scheduling": "inspect_schedule",
+    "unknown": "inspect_session",
+}
+_REMEDIATION_TEMPLATES = {
+    "config": {
+        "repairability": "high",
+        "urgency": "medium",
+        "top_fix": "Check `config.json`, required secrets, and referenced paths before rerunning the same request.",
+        "fix_steps": [
+            "Verify provider/model settings and any required API keys or env vars.",
+            "Confirm workspace paths, files, and directories referenced by the failing turn exist.",
+            "After fixing configuration, rerun the same request or scheduled job once.",
+        ],
+    },
+    "tool": {
+        "repairability": "medium",
+        "urgency": "medium",
+        "top_fix": "Inspect the failing tool call in the session log, then rerun only that narrower step.",
+        "fix_steps": [
+            "Open the failing session turn and inspect the tool input, tool result, and surrounding context.",
+            "Confirm whether the failure came from missing files, permissions, or a bad tool argument.",
+            "Retry the smallest failing step after correcting the local precondition.",
+        ],
+    },
+    "transport": {
+        "repairability": "medium",
+        "urgency": "high",
+        "top_fix": "Verify channel credentials and target delivery metadata before retrying outbound delivery.",
+        "fix_steps": [
+            "Check the channel credential, destination chat ID, and delivery permissions.",
+            "Inspect the transport-specific sender output for network, auth, or forbidden errors.",
+            "Retry delivery once after confirming the target is reachable and authorized.",
+        ],
+    },
+    "model": {
+        "repairability": "medium",
+        "urgency": "medium",
+        "top_fix": "Verify provider health and quota, then retry later or with a smaller prompt.",
+        "fix_steps": [
+            "Check provider credentials, model availability, and current quota or rate-limit state.",
+            "If the prompt is large, retry with a shorter request or a fallback model.",
+            "If the provider is degraded, wait briefly before retrying the same turn.",
+        ],
+    },
+    "scheduling": {
+        "repairability": "high",
+        "urgency": "high",
+        "top_fix": "Inspect the scheduling path first: `cron/jobs.json`, the matching session log, and any stale `gateway.lock` state.",
+        "fix_steps": [
+            "Check whether the job or heartbeat run was skipped, disabled, or blocked by stale runtime state.",
+            "Inspect the matching cron or heartbeat session file for the exact failing turn.",
+            "After correcting the schedule or lock issue, rerun the job once manually if needed.",
+        ],
+    },
+    "unknown": {
+        "repairability": "low",
+        "urgency": "low",
+        "top_fix": "Inspect the raw session turn first; there is not enough signal yet for a safe targeted fix.",
+        "fix_steps": [
+            "Open the focus session around the failing turn and inspect the preceding tool calls.",
+            "Reproduce the problem with a narrower request to isolate one failing step.",
+            "Only after isolating the failure should you decide whether to reconfigure, retry, or edit code.",
+        ],
+    },
+}
 
 
 @dataclass(slots=True)
@@ -177,6 +247,7 @@ def build_report(
     }
     report["next_checks"] = _build_next_checks(report, limit=limit)
     report["diagnosis"] = _classify_failure(report)
+    report["remediation"] = _build_remediation(report, report["diagnosis"])
     return report
 
 
@@ -188,6 +259,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     sessions = report["sessions"]
     history = report["history"]
     diagnosis = report.get("diagnosis")
+    remediation = report.get("remediation")
 
     lines = ["# nanobot runtime diagnostics", ""]
     lines.append("## Paths")
@@ -270,6 +342,19 @@ def render_markdown(report: dict[str, Any]) -> str:
             lines.append(f"- Suggested action: {action}")
     lines.append("")
 
+    lines.append("## Remediation")
+    if not remediation:
+        lines.append("- No remediation plan is available.")
+    else:
+        lines.append(f"- Safe next action: `{remediation['safe_next_action']}`")
+        lines.append(
+            f"- Repairability: `{remediation['repairability']}`, urgency: `{remediation['urgency']}`"
+        )
+        lines.append(f"- Top fix: {remediation['top_fix']}")
+        for step in remediation.get("fix_steps", [])[:2]:
+            lines.append(f"- Fix step: {step}")
+    lines.append("")
+
     lines.append("## Recent history")
     if not history["exists"]:
         lines.append("- `memory/HISTORY.md` is missing.")
@@ -294,6 +379,7 @@ def render_failure_brief(
     """Render a concise failure summary suitable for proactive delivery."""
     lines = [title.strip() or "nanobot auto-diagnosis", ""]
     diagnosis = _classify_failure(report, title=title, details=details)
+    remediation = _build_remediation(report, diagnosis)
 
     for detail in details or []:
         if detail:
@@ -309,6 +395,11 @@ def render_failure_brief(
         )
         if diagnosis.get("signals"):
             lines.append(f"- Why: {diagnosis['signals'][0]}")
+    if remediation:
+        lines.append(f"- Safe next action: `{remediation['safe_next_action']}`")
+        lines.append(
+            f"- Repairability: `{remediation['repairability']}`, urgency: `{remediation['urgency']}`"
+        )
 
     issues = report.get("sessions", {}).get("suspected_failures", [])
     if issues:
@@ -325,8 +416,8 @@ def render_failure_brief(
     next_checks = report.get("next_checks", [])
     if next_checks:
         lines.append(f"- Next check: {next_checks[0]}")
-    if diagnosis and diagnosis.get("recommended_actions"):
-        lines.append(f"- Suggested action: {diagnosis['recommended_actions'][0]}")
+    if remediation:
+        lines.append(f"- Top fix: {remediation['top_fix']}")
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -730,6 +821,61 @@ def _recommended_actions(report: dict[str, Any], category: str) -> list[str]:
         if action not in unique:
             unique.append(action)
     return unique
+
+
+def _build_remediation(report: dict[str, Any], diagnosis: dict[str, Any] | None) -> dict[str, Any]:
+    if not diagnosis:
+        diagnosis = _classify_failure(report)
+
+    category = diagnosis["category"]
+    template = _REMEDIATION_TEMPLATES[category]
+    safe_next_action = _safe_next_action(report, diagnosis)
+    urgency = _remediation_urgency(report, diagnosis, template["urgency"])
+    fix_steps = list(template["fix_steps"])
+    for action in diagnosis.get("recommended_actions", [])[:2]:
+        if action not in fix_steps:
+            fix_steps.append(action)
+    for check in report.get("next_checks", [])[:2]:
+        if check not in fix_steps:
+            fix_steps.append(check)
+
+    return {
+        "safe_next_action": safe_next_action,
+        "repairability": _remediation_repairability(diagnosis, template["repairability"]),
+        "urgency": urgency,
+        "top_fix": template["top_fix"],
+        "fix_steps": fix_steps[:4],
+    }
+
+
+def _safe_next_action(report: dict[str, Any], diagnosis: dict[str, Any]) -> str:
+    category = diagnosis["category"]
+    if report.get("gateway_lock", {}).get("stale"):
+        return "inspect_schedule"
+    if diagnosis.get("confidence") == "low" and category not in {"config", "transport"}:
+        return "inspect_session"
+    return _SAFE_NEXT_ACTIONS[category]
+
+
+def _remediation_repairability(diagnosis: dict[str, Any], base: str) -> str:
+    if diagnosis.get("category") == "unknown":
+        return "low"
+    if diagnosis.get("confidence") == "low" and base == "high":
+        return "medium"
+    return base
+
+
+def _remediation_urgency(report: dict[str, Any], diagnosis: dict[str, Any], base: str) -> str:
+    category = diagnosis["category"]
+    if report.get("gateway_lock", {}).get("stale"):
+        return "high"
+    if category == "transport":
+        return "high"
+    if category == "scheduling" and report.get("cron", {}).get("failing_jobs"):
+        return "high"
+    if category == "unknown" and diagnosis.get("confidence") == "low":
+        return "low"
+    return base
 
 
 def _format_ms(value: int | None) -> str | None:

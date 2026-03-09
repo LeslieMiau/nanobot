@@ -171,6 +171,11 @@ def test_build_report_summarizes_cron_and_session_issues(tmp_path: Path) -> None
     assert "Directory not found" in report["sessions"]["suspected_failures"][0]["summary"]
     assert report["diagnosis"]["category"] == "tool"
     assert report["diagnosis"]["confidence"] in {"medium", "high"}
+    assert report["remediation"]["safe_next_action"] == "inspect_session"
+    assert report["remediation"]["repairability"] == "medium"
+    assert report["remediation"]["urgency"] == "medium"
+    assert "Inspect the failing tool call" in report["remediation"]["top_fix"]
+    assert any("tool" in step.lower() or "session" in step.lower() for step in report["remediation"]["fix_steps"])
     assert any("tool" in action.lower() or "session" in action.lower() for action in report["diagnosis"]["recommended_actions"])
     assert len(report["history"]["recent_entries"]) == 2
     assert any("abc12345" in item for item in report["next_checks"])
@@ -209,7 +214,9 @@ def test_build_report_includes_focus_session_tail_and_markdown(tmp_path: Path) -
     assert len(report["sessions"]["focus_session"]["recent_messages"]) == 3
     assert "## Focus session" in markdown
     assert "## Diagnosis" in markdown
+    assert "## Remediation" in markdown
     assert "Category: `tool`" in markdown
+    assert "Safe next action: `inspect_session`" in markdown
     assert "heartbeat" in markdown
     assert "unknown tool" in markdown
 
@@ -238,10 +245,12 @@ def test_render_failure_brief_uses_category_and_next_check() -> None:
     assert "Phase: `decision`" in brief
     assert "Session: `heartbeat`" in brief
     assert "Likely category: `config`" in brief
+    assert "Safe next action: `check_config`" in brief
+    assert "Repairability: `high`, urgency: `medium`" in brief
     assert "Top clue: Error: Brave Search API key not configured" in brief
     assert "Latest failing job: `abc12345` `Morning digest` (tool timeout)" in brief
     assert "Next check: Open `heartbeat.jsonl` around the failing turn." in brief
-    assert "Suggested action: Verify required keys, provider settings, and workspace paths in `config.json`." in brief
+    assert "Top fix: Check `config.json`, required secrets, and referenced paths before rerunning the same request." in brief
 
 
 def test_render_failure_brief_classifies_transport_failures_from_details() -> None:
@@ -260,4 +269,32 @@ def test_render_failure_brief_classifies_transport_failures_from_details() -> No
     )
 
     assert "Likely category: `transport`" in brief
-    assert "Suggested action: Verify channel credentials, target chat IDs, and outbound delivery permissions." in brief
+    assert "Safe next action: `check_transport`" in brief
+    assert "Repairability: `medium`, urgency: `high`" in brief
+    assert "Top fix: Verify channel credentials and target delivery metadata before retrying outbound delivery." in brief
+
+
+def test_build_report_marks_stale_gateway_lock_as_high_urgency_schedule_issue(tmp_path: Path) -> None:
+    config_dir = tmp_path / "config"
+    workspace = tmp_path / "workspace"
+    config_dir.mkdir()
+    workspace.mkdir()
+    config_path = config_dir / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "agents": {"defaults": {"workspace": str(workspace)}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    (config_dir / "gateway.lock").write_text("999999", encoding="utf-8")
+
+    report = build_report(config_path=config_path, session_key="heartbeat", limit=2)
+
+    assert report["gateway_lock"]["stale"] is True
+    assert report["diagnosis"]["category"] == "scheduling"
+    assert report["remediation"]["safe_next_action"] == "inspect_schedule"
+    assert report["remediation"]["urgency"] == "high"
+    assert "cron/jobs.json" in report["remediation"]["top_fix"]
