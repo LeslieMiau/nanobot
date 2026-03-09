@@ -31,6 +31,78 @@ _ISSUE_PATTERNS = [
     )
 ]
 
+_CATEGORY_ORDER = ("config", "tool", "transport", "model", "scheduling", "unknown")
+_CATEGORY_RULES: dict[str, list[tuple[re.Pattern[str], int]]] = {
+    "config": [
+        (re.compile(r"\bnot configured\b|\bmissing\b|\bconfiguration\b|\bconfig\b", re.IGNORECASE), 3),
+        (re.compile(r"\bapi key\b|\bcredential\b|\benv(?:ironment)? variable\b", re.IGNORECASE), 3),
+        (re.compile(r"\bworkspace\b|\bpath\b", re.IGNORECASE), 1),
+    ],
+    "tool": [
+        (re.compile(r"\bunknown tool\b|\btool timeout\b", re.IGNORECASE), 3),
+        (re.compile(r"\bdirectory not found\b|\bfile not found\b|\bpermission denied\b", re.IGNORECASE), 3),
+        (re.compile(r"\bcommand failed\b|\bexit code\b|\bexec\b|\bshell\b|\bspawn\b", re.IGNORECASE), 2),
+        (re.compile(r"\btraceback\b|\bverification\b", re.IGNORECASE), 1),
+    ],
+    "transport": [
+        (re.compile(r"\btelegram\b|\bslack\b|\bdiscord\b|\bwebhook\b", re.IGNORECASE), 3),
+        (re.compile(r"\bdelivery\b|\bdeliver\b|\bsend failed\b|\bchat[-_ ]?id\b|\bchannel\b", re.IGNORECASE), 2),
+        (re.compile(r"\bconnection refused\b|\bnetwork\b|\bunreachable\b|\bforbidden\b|\bunauthorized\b", re.IGNORECASE), 2),
+    ],
+    "model": [
+        (re.compile(r"\brate limit\b|\bquota\b|\bcontext length\b|\bmaximum context\b|\btoken limit\b", re.IGNORECASE), 3),
+        (re.compile(r"\bmodel\b|\bprovider\b|\bopenai\b|\banthropic\b|\blitellm\b|\bllm\b", re.IGNORECASE), 2),
+        (re.compile(r"\bai model\b|\bdecision error\b", re.IGNORECASE), 2),
+    ],
+    "scheduling": [
+        (re.compile(r"\bcron\b|\bheartbeat\b|\bschedule\b", re.IGNORECASE), 2),
+        (re.compile(r"\bnext run\b|\blast run\b|\bdisabled\b|\bskipped\b|\bnoop\b", re.IGNORECASE), 2),
+        (re.compile(r"\bgateway\.lock\b|\bstale lock\b", re.IGNORECASE), 3),
+    ],
+}
+_CLASSIFICATION_SOURCE_BONUS = {
+    "title": 0,
+    "detail": 2,
+    "session clue": 2,
+    "cron error": 2,
+    "focus message": 1,
+    "history entry": 1,
+}
+_CATEGORY_SUMMARIES = {
+    "config": "The latest failure most likely comes from missing or incorrect configuration.",
+    "tool": "The latest failure most likely comes from a tool call or local execution step.",
+    "transport": "The latest failure most likely happened while delivering or routing a message.",
+    "model": "The latest failure most likely comes from the model/provider layer.",
+    "scheduling": "The latest failure most likely comes from cron, heartbeat, or another scheduling path.",
+    "unknown": "The latest failure does not have a strong enough signal yet; inspect the raw session turn.",
+}
+_CATEGORY_ACTIONS = {
+    "config": [
+        "Verify required keys, provider settings, and workspace paths in `config.json`.",
+        "Check that any referenced files, directories, and env vars actually exist.",
+    ],
+    "tool": [
+        "Open the failing session turn and inspect the exact tool input and tool result.",
+        "Re-run the failing tool step with narrower input to separate tool failure from model planning.",
+    ],
+    "transport": [
+        "Verify channel credentials, target chat IDs, and outbound delivery permissions.",
+        "Check whether the transport-specific sender returned a network or authorization error.",
+    ],
+    "model": [
+        "Verify provider credentials, model availability, and current quota or rate-limit state.",
+        "Retry with a shorter prompt or a fallback model to confirm whether the provider path is unstable.",
+    ],
+    "scheduling": [
+        "Inspect `cron/jobs.json` and the matching session file for the skipped or failing run.",
+        "Check heartbeat rules, cron schedule metadata, and any stale `gateway.lock` state.",
+    ],
+    "unknown": [
+        "Open the focus session around the failing turn and inspect the preceding tool calls.",
+        "Reproduce the issue with a narrower request so the failing step is isolated in one session turn.",
+    ],
+}
+
 
 @dataclass(slots=True)
 class RuntimePaths:
@@ -104,6 +176,7 @@ def build_report(
         "history": _read_history(paths.history_path, limit=limit),
     }
     report["next_checks"] = _build_next_checks(report, limit=limit)
+    report["diagnosis"] = _classify_failure(report)
     return report
 
 
@@ -114,6 +187,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     cron = report["cron"]
     sessions = report["sessions"]
     history = report["history"]
+    diagnosis = report.get("diagnosis")
 
     lines = ["# nanobot runtime diagnostics", ""]
     lines.append("## Paths")
@@ -184,6 +258,18 @@ def render_markdown(report: dict[str, Any]) -> str:
             )
         lines.append("")
 
+    lines.append("## Diagnosis")
+    if not diagnosis:
+        lines.append("- No diagnosis summary is available.")
+    else:
+        lines.append(f"- Category: `{diagnosis['category']}` ({diagnosis['confidence']})")
+        lines.append(f"- Summary: {diagnosis['summary']}")
+        for signal in diagnosis.get("signals", [])[:2]:
+            lines.append(f"- Signal: {signal}")
+        for action in diagnosis.get("recommended_actions", [])[:2]:
+            lines.append(f"- Suggested action: {action}")
+    lines.append("")
+
     lines.append("## Recent history")
     if not history["exists"]:
         lines.append("- `memory/HISTORY.md` is missing.")
@@ -207,6 +293,7 @@ def render_failure_brief(
 ) -> str:
     """Render a concise failure summary suitable for proactive delivery."""
     lines = [title.strip() or "nanobot auto-diagnosis", ""]
+    diagnosis = _classify_failure(report, title=title, details=details)
 
     for detail in details or []:
         if detail:
@@ -215,6 +302,13 @@ def render_failure_brief(
     focus = report.get("sessions", {}).get("focus_session")
     if focus:
         lines.append(f"- Session: `{focus['key']}`")
+
+    if diagnosis:
+        lines.append(
+            f"- Likely category: `{diagnosis['category']}` ({diagnosis['confidence']})"
+        )
+        if diagnosis.get("signals"):
+            lines.append(f"- Why: {diagnosis['signals'][0]}")
 
     issues = report.get("sessions", {}).get("suspected_failures", [])
     if issues:
@@ -231,6 +325,8 @@ def render_failure_brief(
     next_checks = report.get("next_checks", [])
     if next_checks:
         lines.append(f"- Next check: {next_checks[0]}")
+    if diagnosis and diagnosis.get("recommended_actions"):
+        lines.append(f"- Suggested action: {diagnosis['recommended_actions'][0]}")
 
     return "\n".join(lines).rstrip() + "\n"
 
@@ -514,6 +610,126 @@ def _build_next_checks(report: dict[str, Any], *, limit: int) -> list[str]:
         if item not in unique:
             unique.append(item)
     return unique[:limit]
+
+
+def _classify_failure(
+    report: dict[str, Any],
+    *,
+    title: str | None = None,
+    details: list[str] | None = None,
+) -> dict[str, Any]:
+    scores = {category: 0 for category in _CATEGORY_ORDER}
+    signals: dict[str, list[str]] = {category: [] for category in _CATEGORY_ORDER}
+    seen_signals: set[tuple[str, str]] = set()
+
+    def add(category: str, score: int, reason: str) -> None:
+        scores[category] += score
+        marker = (category, reason)
+        if marker in seen_signals:
+            return
+        seen_signals.add(marker)
+        signals[category].append(reason)
+
+    lock = report.get("gateway_lock", {})
+    if lock.get("stale"):
+        add("scheduling", 4, "`gateway.lock` looks stale, so scheduled work may be blocked.")
+
+    focus = report.get("sessions", {}).get("focus_session") or {}
+    focus_key = str(focus.get("key") or "")
+    if focus_key == "heartbeat":
+        add("scheduling", 1, "The focus session is `heartbeat`.")
+    elif focus_key.startswith("cron:"):
+        add("scheduling", 1, "The focus session comes from a cron run.")
+
+    failing_jobs = report.get("cron", {}).get("failing_jobs", [])
+    if failing_jobs:
+        add("scheduling", 1, "`cron/jobs.json` contains recent failing jobs.")
+
+    for source_name, text in _classification_sources(report, title=title, details=details):
+        bonus = _CLASSIFICATION_SOURCE_BONUS[source_name]
+        snippet = _trim(text, width=100)
+        for category, rules in _CATEGORY_RULES.items():
+            for pattern, weight in rules:
+                if not pattern.search(text):
+                    continue
+                add(category, weight + bonus, f"{source_name.capitalize()} mentions `{snippet}`.")
+                break
+
+    ranked = sorted(
+        _CATEGORY_ORDER,
+        key=lambda category: (scores[category], -_CATEGORY_ORDER.index(category)),
+        reverse=True,
+    )
+    category = ranked[0]
+    top_score = scores[category]
+    runner_up = scores[ranked[1]] if len(ranked) > 1 else 0
+
+    if top_score <= 0:
+        category = "unknown"
+        confidence = "low"
+    elif top_score >= 6 or (top_score >= 4 and top_score - runner_up >= 2):
+        confidence = "high"
+    elif top_score >= 3:
+        confidence = "medium"
+    else:
+        confidence = "low"
+
+    return {
+        "category": category,
+        "confidence": confidence,
+        "summary": _CATEGORY_SUMMARIES[category],
+        "signals": signals[category][:3],
+        "recommended_actions": _recommended_actions(report, category)[:3],
+        "scores": {name: value for name, value in scores.items() if value > 0},
+    }
+
+
+def _classification_sources(
+    report: dict[str, Any],
+    *,
+    title: str | None,
+    details: list[str] | None,
+) -> list[tuple[str, str]]:
+    sources: list[tuple[str, str]] = []
+    if title:
+        sources.append(("title", title))
+    for detail in details or []:
+        if detail:
+            sources.append(("detail", detail))
+
+    for issue in report.get("sessions", {}).get("suspected_failures", [])[:3]:
+        summary = issue.get("summary")
+        if summary:
+            sources.append(("session clue", str(summary)))
+
+    focus = report.get("sessions", {}).get("focus_session") or {}
+    for message in focus.get("recent_messages", [])[-3:]:
+        summary = message.get("summary")
+        if summary:
+            sources.append(("focus message", str(summary)))
+
+    for job in report.get("cron", {}).get("failing_jobs", [])[:2]:
+        error_text = job.get("last_error") or job.get("last_status")
+        if error_text:
+            sources.append(("cron error", str(error_text)))
+
+    for entry in report.get("history", {}).get("recent_entries", [])[-2:]:
+        if entry:
+            sources.append(("history entry", str(entry)))
+
+    return sources
+
+
+def _recommended_actions(report: dict[str, Any], category: str) -> list[str]:
+    actions = list(_CATEGORY_ACTIONS[category])
+    for check in report.get("next_checks", []):
+        actions.append(check)
+
+    unique: list[str] = []
+    for action in actions:
+        if action not in unique:
+            unique.append(action)
+    return unique
 
 
 def _format_ms(value: int | None) -> str | None:

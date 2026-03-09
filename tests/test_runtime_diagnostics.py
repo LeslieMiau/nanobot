@@ -169,6 +169,9 @@ def test_build_report_summarizes_cron_and_session_issues(tmp_path: Path) -> None
     assert report["sessions"]["count"] == 2
     assert report["sessions"]["suspected_failures"][0]["session_key"] == "telegram:1"
     assert "Directory not found" in report["sessions"]["suspected_failures"][0]["summary"]
+    assert report["diagnosis"]["category"] == "tool"
+    assert report["diagnosis"]["confidence"] in {"medium", "high"}
+    assert any("tool" in action.lower() or "session" in action.lower() for action in report["diagnosis"]["recommended_actions"])
     assert len(report["history"]["recent_entries"]) == 2
     assert any("abc12345" in item for item in report["next_checks"])
 
@@ -205,11 +208,13 @@ def test_build_report_includes_focus_session_tail_and_markdown(tmp_path: Path) -
     assert report["sessions"]["focus_session"]["key"] == "heartbeat"
     assert len(report["sessions"]["focus_session"]["recent_messages"]) == 3
     assert "## Focus session" in markdown
+    assert "## Diagnosis" in markdown
+    assert "Category: `tool`" in markdown
     assert "heartbeat" in markdown
     assert "unknown tool" in markdown
 
 
-def test_render_failure_brief_uses_top_clue_and_next_check() -> None:
+def test_render_failure_brief_uses_category_and_next_check() -> None:
     report = {
         "sessions": {
             "focus_session": {"key": "heartbeat"},
@@ -232,6 +237,27 @@ def test_render_failure_brief_uses_top_clue_and_next_check() -> None:
     assert "nanobot auto-diagnosis: heartbeat failure" in brief
     assert "Phase: `decision`" in brief
     assert "Session: `heartbeat`" in brief
+    assert "Likely category: `config`" in brief
     assert "Top clue: Error: Brave Search API key not configured" in brief
     assert "Latest failing job: `abc12345` `Morning digest` (tool timeout)" in brief
     assert "Next check: Open `heartbeat.jsonl` around the failing turn." in brief
+    assert "Suggested action: Verify required keys, provider settings, and workspace paths in `config.json`." in brief
+
+
+def test_render_failure_brief_classifies_transport_failures_from_details() -> None:
+    report = {
+        "sessions": {"focus_session": {"key": "telegram:chat-1"}, "suspected_failures": []},
+        "cron": {"failing_jobs": []},
+        "next_checks": ["Open `telegram_chat-1.jsonl` around the failed send attempt."],
+        "history": {"recent_entries": []},
+        "gateway_lock": {"stale": False},
+    }
+
+    brief = render_failure_brief(
+        report,
+        title="nanobot auto-diagnosis: message failure",
+        details=["Session: `telegram:chat-1`", "Error: `TelegramSendError: forbidden by target chat`"],
+    )
+
+    assert "Likely category: `transport`" in brief
+    assert "Suggested action: Verify channel credentials, target chat IDs, and outbound delivery permissions." in brief
