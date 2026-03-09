@@ -241,15 +241,20 @@ async def test_tick_retries_transient_decision_error_once(tmp_path) -> None:
     ])
 
     seen: list[tuple[str, str]] = []
+    recovery: list[tuple[str, dict[str, object]]] = []
 
     async def _on_error(phase: str, error: Exception) -> None:
         seen.append((phase, str(error)))
+
+    async def _on_recovery(status: str, payload: dict[str, object]) -> None:
+        recovery.append((status, payload))
 
     service = HeartbeatService(
         workspace=tmp_path,
         provider=provider,
         model="openai/gpt-4o-mini",
         on_error=_on_error,
+        on_recovery=_on_recovery,
         decision_retry_delay_s=0.01,
     )
 
@@ -262,6 +267,9 @@ async def test_tick_retries_transient_decision_error_once(tmp_path) -> None:
     assert seen == [
         ("decision", "Heartbeat decision returned plain text instead of a tool call: Error: backend unavailable"),
     ]
+    assert [status for status, _payload in recovery] == ["scheduled", "recovered"]
+    assert recovery[0][1]["phase"] == "decision"
+    assert recovery[0][1]["retry_delay_s"] == 0.01
 
 
 @pytest.mark.asyncio
@@ -291,6 +299,36 @@ async def test_tick_does_not_retry_non_transient_decision_error(tmp_path) -> Non
 
 
 @pytest.mark.asyncio
+async def test_tick_reports_when_transient_decision_retry_is_exhausted(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
+
+    provider = DummyProvider([
+        LLMResponse(content="Error: backend unavailable", tool_calls=[]),
+        LLMResponse(content="Error: backend unavailable", tool_calls=[]),
+    ])
+
+    recovery: list[tuple[str, dict[str, object]]] = []
+
+    async def _on_recovery(status: str, payload: dict[str, object]) -> None:
+        recovery.append((status, payload))
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_recovery=_on_recovery,
+        decision_retry_delay_s=0.01,
+    )
+
+    await service._tick()
+    await asyncio.sleep(0.05)
+
+    assert provider.calls == 2
+    assert [status for status, _payload in recovery] == ["scheduled", "exhausted"]
+    assert "HeartbeatDecisionError" in str(recovery[1][1]["latest_error"])
+
+
+@pytest.mark.asyncio
 async def test_tick_dedupes_transient_decision_retry_until_success(tmp_path) -> None:
     (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
 
@@ -303,10 +341,16 @@ async def test_tick_dedupes_transient_decision_retry_until_success(tmp_path) -> 
         ),
     ])
 
+    recovery: list[tuple[str, dict[str, object]]] = []
+
+    async def _on_recovery(status: str, payload: dict[str, object]) -> None:
+        recovery.append((status, payload))
+
     service = HeartbeatService(
         workspace=tmp_path,
         provider=provider,
         model="openai/gpt-4o-mini",
+        on_recovery=_on_recovery,
         decision_retry_delay_s=0.03,
     )
 
@@ -316,3 +360,4 @@ async def test_tick_dedupes_transient_decision_retry_until_success(tmp_path) -> 
 
     assert provider.calls == 3
     assert service._decision_retry_task is None
+    assert [status for status, _payload in recovery] == ["scheduled", "recovered"]

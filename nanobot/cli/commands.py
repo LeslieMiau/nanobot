@@ -481,6 +481,20 @@ def gateway(
                 return
             await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=content))
 
+        async def _publish_notice(
+            *,
+            channel: str,
+            chat_id: str,
+            title: str,
+            details: list[str],
+        ) -> None:
+            if not chat_id or channel == "cli":
+                return
+            lines = [title.strip(), ""]
+            lines.extend(f"- {detail}" for detail in details if detail)
+            content = "\n".join(lines).rstrip() + "\n"
+            await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=content))
+
         async def on_message_error(msg, error: Exception) -> None:
             """Deliver a concise auto-diagnosis for normal message failures."""
             if msg.channel == "cli":
@@ -663,6 +677,59 @@ def gateway(
                 session_key="heartbeat",
             )
 
+        async def on_heartbeat_recovery(status: str, payload: dict[str, object]) -> None:
+            """Deliver concise heartbeat auto-recovery lifecycle notices."""
+            channel, chat_id = _pick_heartbeat_target()
+            if channel == "cli":
+                return
+
+            phase = str(payload.get("phase") or "decision")
+            retry_delay = payload.get("retry_delay_s")
+            retry_delay_text = f"{retry_delay}s" if retry_delay is not None else "unknown"
+            latest_error = payload.get("latest_error") or payload.get("error")
+
+            if status == "scheduled":
+                await _publish_notice(
+                    channel=channel,
+                    chat_id=chat_id,
+                    title="nanobot auto-recovery: heartbeat retry scheduled",
+                    details=[
+                        f"Phase: `{phase}`",
+                        f"Retry delay: `{retry_delay_text}`",
+                        "Transient heartbeat failure detected; one automatic retry has been scheduled.",
+                    ],
+                )
+                return
+
+            if status == "recovered":
+                await _publish_notice(
+                    channel=channel,
+                    chat_id=chat_id,
+                    title="nanobot auto-recovery: heartbeat recovered",
+                    details=[
+                        f"Phase: `{phase}`",
+                        f"Retry delay: `{retry_delay_text}`",
+                        "The automatic heartbeat retry succeeded; no manual action is needed right now.",
+                    ],
+                )
+                return
+
+            details = [
+                f"Phase: `{phase}`",
+                f"Retry delay: `{retry_delay_text}`",
+            ]
+            if latest_error:
+                details.append(f"Latest error: `{latest_error}`")
+            details.append(
+                "The automatic heartbeat retry did not recover the failure; continue manual troubleshooting."
+            )
+            await _publish_notice(
+                channel=channel,
+                chat_id=chat_id,
+                title="nanobot auto-recovery: heartbeat retry exhausted",
+                details=details,
+            )
+
         hb_cfg = config.gateway.heartbeat
         heartbeat = HeartbeatService(
             workspace=config.workspace_path,
@@ -671,6 +738,7 @@ def gateway(
             on_execute=on_heartbeat_execute,
             on_notify=on_heartbeat_notify,
             on_error=on_heartbeat_error,
+            on_recovery=on_heartbeat_recovery,
             interval_s=hb_cfg.interval_s,
             enabled=hb_cfg.enabled,
         )

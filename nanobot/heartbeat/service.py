@@ -64,6 +64,7 @@ class HeartbeatService:
         on_execute: Callable[[str], Coroutine[Any, Any, str]] | None = None,
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         on_error: Callable[[str, Exception], Coroutine[Any, Any, None]] | None = None,
+        on_recovery: Callable[[str, dict[str, Any]], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         decision_retry_delay_s: float = 15.0,
         enabled: bool = True,
@@ -74,6 +75,7 @@ class HeartbeatService:
         self.on_execute = on_execute
         self.on_notify = on_notify
         self.on_error = on_error
+        self.on_recovery = on_recovery
         self.interval_s = interval_s
         self.decision_retry_delay_s = decision_retry_delay_s
         self.enabled = enabled
@@ -196,7 +198,7 @@ class HeartbeatService:
         logger.info("Heartbeat: checking for tasks...")
         await self._run_tick_content(content, allow_retry=True)
 
-    async def _run_tick_content(self, content: str, *, allow_retry: bool) -> None:
+    async def _run_tick_content(self, content: str, *, allow_retry: bool) -> bool:
         """Run one heartbeat decision/execution cycle from prepared content."""
         try:
             action, tasks = await self._decide(content)
@@ -207,7 +209,7 @@ class HeartbeatService:
                 if allow_retry:
                     self._cancel_pending_decision_retry()
                 logger.info("Heartbeat: OK (nothing to report)")
-                return
+                return True
 
             logger.info("Heartbeat: tasks found, executing...")
             if self.on_execute:
@@ -219,14 +221,17 @@ class HeartbeatService:
             self._last_retry_signature = None
             if allow_retry:
                 self._cancel_pending_decision_retry()
+            return True
         except HeartbeatDecisionError as e:
             logger.warning("Heartbeat decision failed: {}", e)
             await self._report_error("decision", e)
             if allow_retry:
                 self._maybe_schedule_decision_retry(content, e)
+            return False
         except Exception as e:
             logger.exception("Heartbeat execution failed")
             await self._report_error("execution", e)
+            return False
 
     async def trigger_now(self) -> str | None:
         """Manually trigger a heartbeat."""
@@ -262,6 +267,12 @@ class HeartbeatService:
             return
         self._last_retry_signature = signature
         self._pending_decision_retry_signature = signature
+        payload = {
+            "phase": "decision",
+            "retry_delay_s": self.decision_retry_delay_s,
+            "error_type": type(error).__name__,
+            "error": str(error),
+        }
 
         async def _retry() -> None:
             try:
@@ -269,8 +280,17 @@ class HeartbeatService:
                     "Heartbeat: scheduling one-shot decision retry in {}s",
                     self.decision_retry_delay_s,
                 )
+                await self._report_recovery("scheduled", payload)
                 await asyncio.sleep(self.decision_retry_delay_s)
-                await self._run_tick_content(content, allow_retry=False)
+                recovered = await self._run_tick_content(content, allow_retry=False)
+                if recovered:
+                    await self._report_recovery("recovered", payload)
+                else:
+                    latest_error = self._last_error_signature
+                    exhausted_payload = dict(payload)
+                    if latest_error:
+                        exhausted_payload["latest_error"] = latest_error
+                    await self._report_recovery("exhausted", exhausted_payload)
             except asyncio.CancelledError:
                 raise
             finally:
@@ -286,6 +306,15 @@ class HeartbeatService:
             self._decision_retry_task.cancel()
         self._decision_retry_task = None
         self._pending_decision_retry_signature = None
+
+    async def _report_recovery(self, status: str, payload: dict[str, Any]) -> None:
+        """Send best-effort recovery lifecycle notifications."""
+        if not self.on_recovery:
+            return
+        try:
+            await self.on_recovery(status, payload)
+        except Exception as callback_error:
+            logger.warning("Heartbeat recovery callback failed during {}: {}", status, callback_error)
 
     @staticmethod
     def _is_transient_decision_error(error: Exception) -> bool:
