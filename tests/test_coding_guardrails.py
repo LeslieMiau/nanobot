@@ -71,7 +71,8 @@ async def test_coding_guard_blocks_edit_without_prior_read(tmp_path: Path) -> No
     )
 
     assert out is not None
-    assert out.content == "blocked"
+    assert out.content.startswith("blocked")
+    assert "Token Guard：原始体量" in out.content
     assert target.read_text(encoding="utf-8") == "print('old')\n"
     assert provider.calls == 2
     assert "requires reading a file before modifying it" in provider.messages[1][-1]["content"]

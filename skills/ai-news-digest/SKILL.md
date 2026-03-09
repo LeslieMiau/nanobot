@@ -90,6 +90,7 @@ Default-filter these categories unless the user explicitly asks:
 ## Daily Output Contract
 
 Output exactly 4 modules.
+Start directly with Module 1 content. Do not add any preamble, methodology, scoring notes, process narration, or "本次筛选如下" style meta text.
 
 ### Module 1: Must Know
 

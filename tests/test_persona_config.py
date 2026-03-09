@@ -11,6 +11,8 @@ def test_persona_defaults_are_backward_compatible() -> None:
     assert persona.script == "simplified"
     assert persona.intensity == "adaptive"
     assert persona.quote_retrieval is True
+    assert config.channels.send_progress is False
+    assert config.channels.send_tool_hints is False
     assert coding.enabled is True
     assert coding.auto_detect is True
     assert coding.disable_persona is True

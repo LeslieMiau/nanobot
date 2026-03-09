@@ -31,6 +31,8 @@ def test_workspace_ai_news_digest_skill_loads_content() -> None:
     assert "`70-84`: 候选" in content
     assert "`<70`: 默认过滤" in content
     assert "Module 1: Must Know" in content
+    assert "Do not add any preamble" in content
+    assert "process narration" in content
     assert "Module 2: Builder Takeaway" in content
     assert "Module 3: One Deep Read / Listen" in content
     assert "Module 4: Action Items" in content

@@ -80,6 +80,16 @@ def test_persona_runtime_hints_are_injected_into_system_prompt(tmp_path) -> None
     assert "最终输出必须全部使用简体中文" in messages[0]["content"]
 
 
+def test_system_prompt_requests_direct_non_coding_answers(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+
+    prompt = builder.build_system_prompt()
+
+    assert "answer with the final result first" in prompt
+    assert "Do not reveal hidden reasoning" in prompt
+
+
 def test_coding_prompt_is_injected_only_when_coding_mode_enabled(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     (workspace / "CODING.md").write_text("Always inspect files before editing.", encoding="utf-8")
