@@ -102,6 +102,7 @@ class AgentLoop:
         "/help": {"/help", "help", "帮助", "命令"},
         "/stop": {"/stop", "stop", "停止", "停下", "停止任务"},
         "/restart": {"/restart", "restart", "重启", "重新启动"},
+        "/retry-cron": {"/retry-cron", "retry-cron", "cron-retry"},
         "/model": {"/model", "model", "模型", "切换模型"},
         "/coding": {"/coding", "coding", "代码模式", "编码模式"},
         "/image-confirm": {"/image-confirm", "image-confirm", "确认图片", "确认生图"},
@@ -133,6 +134,7 @@ class AgentLoop:
     _CODING_SIDE_EFFECT_TOOLS = {"write_file", "edit_file", "exec", "spawn", "message", "cron"}
     _MODEL_SELECTION_KEY = "model_selection"
     _TOKEN_GUARD_STATE_KEY = "token_guard"
+    _OPERATOR_ACTION_KEY = "operator_action"
     _PLAN_CONFIRM_COMMAND = "/confirm"
     _PLAN_CANCEL_COMMAND = "/cancel"
     _TOKEN_GUARD_MODES = {"off", "on", "strict", "relaxed"}
@@ -1205,6 +1207,160 @@ class AgentLoop:
         session.metadata.pop(self._MODEL_SELECTION_KEY, None)
         self.sessions.save(session)
 
+    def _operator_action(self, session: Session) -> dict[str, Any] | None:
+        raw = session.metadata.get(self._OPERATOR_ACTION_KEY)
+        if not isinstance(raw, dict):
+            return None
+        kind = str(raw.get("kind") or "").strip()
+        if not kind:
+            return None
+        return raw
+
+    def _save_operator_action(self, session: Session, action: dict[str, Any] | None) -> None:
+        if action:
+            session.metadata[self._OPERATOR_ACTION_KEY] = action
+        else:
+            session.metadata.pop(self._OPERATOR_ACTION_KEY, None)
+        self.sessions.save(session)
+
+    @staticmethod
+    def _cron_retry_execution_message(job_name: str, instruction: str) -> str:
+        """Build the scheduled-task prompt for operator-confirmed cron retries."""
+        name = job_name.strip() if job_name.strip() else "(unnamed)"
+        scheduled_instruction = instruction.strip() if instruction.strip() else "(missing)"
+        return (
+            "You are executing a scheduled task.\n"
+            "Use the current local time from the runtime context.\n"
+            "Return only the final user-facing content that should be delivered now.\n"
+            "Do not include execution notes, phase labels, methods, thought process, task recap, or tool narration.\n\n"
+            "Scheduled task name:\n"
+            f"{name}\n\n"
+            "Scheduled instruction:\n"
+            f"{scheduled_instruction}"
+        )
+
+    async def _run_operator_cron_retry(
+        self,
+        session: Session,
+        msg: InboundMessage,
+        action: dict[str, Any],
+    ) -> OutboundMessage:
+        if not self.cron_service:
+            self._save_operator_action(session, None)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Cron retry is not available in this mode.",
+            )
+
+        job_id = str(action.get("job_id") or "").strip()
+        if not job_id:
+            self._save_operator_action(session, None)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Pending cron retry is missing a job ID.",
+            )
+
+        jobs = self.cron_service.list_jobs(include_disabled=True)
+        job = next((item for item in jobs if item.id == job_id), None)
+        if job is None:
+            self._save_operator_action(session, None)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"Cron job not found: `{job_id}`",
+            )
+
+        original_on_job = self.cron_service.on_job
+        outputs: list[str] = []
+
+        async def _on_job(run_job) -> str | None:
+            async def _silent(*_args, **_kwargs):
+                return None
+
+            response = await self.process_direct(
+                self._cron_retry_execution_message(run_job.name, run_job.payload.message),
+                session_key=f"cron:{run_job.id}:manual",
+                channel="cli",
+                chat_id=f"cron-retry:{run_job.id}",
+                on_progress=_silent,
+            )
+            if response:
+                outputs.append(response)
+            return response
+
+        self.cron_service.on_job = _on_job
+        try:
+            ran = await self.cron_service.run_job(job_id, force=True)
+        finally:
+            self.cron_service.on_job = original_on_job
+
+        self._save_operator_action(session, None)
+
+        if not ran:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"Failed to retry cron job `{job_id}`.",
+            )
+
+        result = outputs[-1] if outputs else f"Retried cron job `{job_id}` successfully."
+        prefix = f"Retried cron job `{job_id}` ({job.name or 'unnamed'}):\n\n"
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=prefix + result,
+            metadata=msg.metadata or {},
+        )
+
+    def _prepare_operator_cron_retry(
+        self,
+        session: Session,
+        msg: InboundMessage,
+        job_id: str,
+    ) -> OutboundMessage:
+        """Validate and stage a cron retry for explicit user confirmation."""
+        normalized = job_id.strip()
+        if not normalized:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Usage: `/retry-cron <job_id>`",
+            )
+        if not self.cron_service:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Cron retry is not available in this mode.",
+            )
+        jobs = self.cron_service.list_jobs(include_disabled=True)
+        job = next((item for item in jobs if item.id == normalized), None)
+        if job is None:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"Cron job not found: `{normalized}`",
+            )
+
+        self._save_operator_action(
+            session,
+            {
+                "kind": "cron_retry",
+                "job_id": job.id,
+                "job_name": job.name,
+            },
+        )
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=(
+                f"Pending cron retry for `{job.id}` ({job.name or 'unnamed'}).\n"
+                f"Reply `{self._PLAN_CONFIRM_COMMAND}` to run it in this chat, or "
+                f"`{self._PLAN_CANCEL_COMMAND}` to cancel."
+            ),
+        )
+
     def _effective_session_model(self, session: Session) -> tuple[str, str | None]:
         model, provider_name = self._session_model_selection(session)
         return model or self._default_model, provider_name or self._default_provider_name
@@ -1893,6 +2049,7 @@ class AgentLoop:
         token_state = self._token_guard_state(session)
         control = self._parse_token_guard_control(msg.content)
         plan_pending = self._plan_guard_pending.get(key)
+        operator_action = self._operator_action(session)
         if control is not None:
             kind, value = control
             if kind == "mode":
@@ -1957,7 +2114,10 @@ class AgentLoop:
                 token_state["pending_message"] = None
                 self._save_token_guard_state(session, token_state)
             plan_removed = self._plan_guard_pending.pop(key, None)
-            if removed is None and plan_removed is None:
+            operator_removed = operator_action
+            if operator_removed is not None:
+                self._save_operator_action(session, None)
+            if removed is None and plan_removed is None and operator_removed is None:
                 return OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
                     content="No pending large task or coding plan to cancel.",
@@ -1966,8 +2126,36 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id,
                 content="Canceled pending task.",
             )
+        if operator_action and cmd in {self._PLAN_CONFIRM_COMMAND, self._PLAN_CONFIRM_COMMAND.lstrip("/")}:
+            if operator_action.get("kind") == "cron_retry":
+                return await self._run_operator_cron_retry(session, msg, operator_action)
+            self._save_operator_action(session, None)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="Pending operator action is no longer available.",
+            )
         if cmd == "/restart":
             return await self._handle_restart(msg, publish=False)
+        if operator_action and cmd not in {
+            self._PLAN_CONFIRM_COMMAND,
+            self._PLAN_CONFIRM_COMMAND.lstrip("/"),
+            self._PLAN_CANCEL_COMMAND,
+            self._PLAN_CANCEL_COMMAND.lstrip("/"),
+            "/restart",
+        }:
+            job_id = str(operator_action.get("job_id") or "").strip()
+            job_name = str(operator_action.get("job_name") or "").strip() or "unnamed"
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    f"There is already a pending cron retry for `{job_id}` ({job_name}).\n"
+                    f"Reply `{self._PLAN_CONFIRM_COMMAND}` to run it, or "
+                    f"`{self._PLAN_CANCEL_COMMAND}` to cancel."
+                ),
+                metadata=msg.metadata or {},
+            )
         if pending is not None:
             if cmd in self._TOKEN_GUARD_EXIT_ALIASES or self._is_token_guard_cancel_message(msg.content):
                 token_state["pending_message"] = None
@@ -2038,7 +2226,9 @@ class AgentLoop:
                                   content="New session started.")
         if cmd == "/help":
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/start — Show welcome message\n/new — Start a new conversation\n/model — Show or switch model\n/coding — Show or set coding mode\n/image-confirm — Generate the current staged image\n/image-edit <feedback> — Revise the current staged image prompt\n/image-skip — Skip the current staged image\n/stop — Stop the current task\n/restart — Restart nanobot (gateway mode)\n/help — Show available commands")
+                                  content="🐈 nanobot commands:\n/start — Show welcome message\n/new — Start a new conversation\n/model — Show or switch model\n/coding — Show or set coding mode\n/retry-cron <job_id> — Stage a cron job retry in this chat\n/image-confirm — Generate the current staged image\n/image-edit <feedback> — Revise the current staged image prompt\n/image-skip — Skip the current staged image\n/stop — Stop the current task\n/restart — Restart nanobot (gateway mode)\n/help — Show available commands")
+        if cmd == "/retry-cron":
+            return self._prepare_operator_cron_retry(session, msg, cmd_arg)
         if cmd == "/model":
             arg = cmd_arg.strip()
             if not arg:
