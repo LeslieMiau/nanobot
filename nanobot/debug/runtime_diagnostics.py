@@ -199,6 +199,42 @@ def render_markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def render_failure_brief(
+    report: dict[str, Any],
+    *,
+    title: str,
+    details: list[str] | None = None,
+) -> str:
+    """Render a concise failure summary suitable for proactive delivery."""
+    lines = [title.strip() or "nanobot auto-diagnosis", ""]
+
+    for detail in details or []:
+        if detail:
+            lines.append(f"- {detail}")
+
+    focus = report.get("sessions", {}).get("focus_session")
+    if focus:
+        lines.append(f"- Session: `{focus['key']}`")
+
+    issues = report.get("sessions", {}).get("suspected_failures", [])
+    if issues:
+        lines.append(f"- Top clue: {issues[0]['summary']}")
+
+    failing_jobs = report.get("cron", {}).get("failing_jobs", [])
+    if failing_jobs:
+        job = failing_jobs[0]
+        lines.append(
+            f"- Latest failing job: `{job['id']}` `{job['name']}` "
+            f"({job.get('last_error') or job.get('last_status') or 'unknown'})"
+        )
+
+    next_checks = report.get("next_checks", [])
+    if next_checks:
+        lines.append(f"- Next check: {next_checks[0]}")
+
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def main(argv: list[str] | None = None) -> int:
     """CLI entrypoint for troubleshooting reports."""
     parser = argparse.ArgumentParser(description="Summarize nanobot runtime records.")

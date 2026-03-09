@@ -149,3 +149,78 @@ async def test_trigger_now_returns_none_when_decision_is_skip(tmp_path) -> None:
     )
 
     assert await service.trigger_now() is None
+
+
+@pytest.mark.asyncio
+async def test_tick_reports_decision_error_once_until_success(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
+
+    provider = DummyProvider([
+        LLMResponse(content="Error: backend unavailable", tool_calls=[]),
+        LLMResponse(content="Error: backend unavailable", tool_calls=[]),
+        LLMResponse(
+            content="",
+            tool_calls=[ToolCallRequest(id="hb_1", name="heartbeat", arguments={"action": "skip"})],
+        ),
+        LLMResponse(content="Error: backend unavailable", tool_calls=[]),
+    ])
+
+    seen: list[tuple[str, str]] = []
+
+    async def _on_error(phase: str, error: Exception) -> None:
+        seen.append((phase, str(error)))
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_error=_on_error,
+    )
+
+    await service._tick()
+    await service._tick()
+    await service._tick()
+    await service._tick()
+
+    assert seen == [
+        ("decision", "Heartbeat decision returned plain text instead of a tool call: Error: backend unavailable"),
+        ("decision", "Heartbeat decision returned plain text instead of a tool call: Error: backend unavailable"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tick_reports_execution_error(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
+
+    provider = DummyProvider([
+        LLMResponse(
+            content="",
+            tool_calls=[
+                ToolCallRequest(
+                    id="hb_1",
+                    name="heartbeat",
+                    arguments={"action": "run", "tasks": "check open tasks"},
+                )
+            ],
+        )
+    ])
+
+    seen: list[tuple[str, str]] = []
+
+    async def _on_execute(_tasks: str) -> str:
+        raise RuntimeError("execution boom")
+
+    async def _on_error(phase: str, error: Exception) -> None:
+        seen.append((phase, str(error)))
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_execute=_on_execute,
+        on_error=_on_error,
+    )
+
+    await service._tick()
+
+    assert seen == [("execution", "execution boom")]

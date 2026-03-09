@@ -62,6 +62,7 @@ class HeartbeatService:
         model: str,
         on_execute: Callable[[str], Coroutine[Any, Any, str]] | None = None,
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
+        on_error: Callable[[str, Exception], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
     ):
@@ -70,10 +71,12 @@ class HeartbeatService:
         self.model = model
         self.on_execute = on_execute
         self.on_notify = on_notify
+        self.on_error = on_error
         self.interval_s = interval_s
         self.enabled = enabled
         self._running = False
         self._task: asyncio.Task | None = None
+        self._last_error_signature: str | None = None
 
     @property
     def heartbeat_file(self) -> Path:
@@ -186,6 +189,7 @@ class HeartbeatService:
             action, tasks = await self._decide(content)
 
             if action != "run":
+                self._last_error_signature = None
                 logger.info("Heartbeat: OK (nothing to report)")
                 return
 
@@ -195,10 +199,13 @@ class HeartbeatService:
                 if response and self.on_notify:
                     logger.info("Heartbeat: completed, delivering response")
                     await self.on_notify(response)
+            self._last_error_signature = None
         except HeartbeatDecisionError as e:
             logger.warning("Heartbeat decision failed: {}", e)
-        except Exception:
+            await self._report_error("decision", e)
+        except Exception as e:
             logger.exception("Heartbeat execution failed")
+            await self._report_error("execution", e)
 
     async def trigger_now(self) -> str | None:
         """Manually trigger a heartbeat."""
@@ -209,3 +216,16 @@ class HeartbeatService:
         if action != "run" or not self.on_execute:
             return None
         return await self.on_execute(tasks)
+
+    async def _report_error(self, phase: str, error: Exception) -> None:
+        """Send a best-effort deduplicated error callback."""
+        signature = f"{phase}:{type(error).__name__}:{error}"
+        if signature == self._last_error_signature:
+            return
+        self._last_error_signature = signature
+        if not self.on_error:
+            return
+        try:
+            await self.on_error(phase, error)
+        except Exception as callback_error:
+            logger.warning("Heartbeat error callback failed during {}: {}", phase, callback_error)

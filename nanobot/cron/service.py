@@ -68,15 +68,18 @@ class CronService:
     def __init__(
         self,
         store_path: Path,
-        on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None
+        on_job: Callable[[CronJob], Coroutine[Any, Any, str | None]] | None = None,
+        on_error: Callable[[CronJob, Exception], Coroutine[Any, Any, None]] | None = None,
     ):
         self.store_path = store_path
         self.on_job = on_job
+        self.on_error = on_error
         self._store: CronStore | None = None
         self._last_mtime: float = 0.0
         self._timer_task: asyncio.Task | None = None
         self._watch_task: asyncio.Task | None = None
         self._running = False
+        self._last_error_signatures: dict[str, str] = {}
 
     def _load_store(self) -> CronStore:
         """Load jobs from disk. Reloads automatically if file was modified externally."""
@@ -268,16 +271,21 @@ class CronService:
             if j.enabled and j.state.next_run_at_ms and now >= j.state.next_run_at_ms
         ]
 
+        failures: list[tuple[CronJob, Exception]] = []
         for job in due_jobs:
-            await self._execute_job(job)
+            if error := await self._execute_job(job):
+                failures.append((job, error))
 
         self._save_store()
+        for job, error in failures:
+            await self._report_job_error(job, error)
         self._arm_timer()
 
-    async def _execute_job(self, job: CronJob) -> None:
+    async def _execute_job(self, job: CronJob) -> Exception | None:
         """Execute a single job."""
         start_ms = _now_ms()
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
+        failure: Exception | None = None
 
         try:
             response = None
@@ -286,11 +294,13 @@ class CronService:
 
             job.state.last_status = "ok"
             job.state.last_error = None
+            self._last_error_signatures.pop(job.id, None)
             logger.info("Cron: job '{}' completed", job.name)
 
         except Exception as e:
             job.state.last_status = "error"
             job.state.last_error = str(e)
+            failure = e if self._should_report_error(job.id, e) else None
             logger.error("Cron: job '{}' failed: {}", job.name, e)
 
         job.state.last_run_at_ms = start_ms
@@ -306,6 +316,23 @@ class CronService:
         else:
             # Compute next run
             job.state.next_run_at_ms = _compute_next_run(job.schedule, _now_ms())
+        return failure
+
+    def _should_report_error(self, job_id: str, error: Exception) -> bool:
+        """Suppress repeated identical errors until a job succeeds again."""
+        signature = f"{type(error).__name__}:{error}"
+        previous = self._last_error_signatures.get(job_id)
+        self._last_error_signatures[job_id] = signature
+        return signature != previous
+
+    async def _report_job_error(self, job: CronJob, error: Exception) -> None:
+        """Send a best-effort error callback after persisting job state."""
+        if not self.on_error:
+            return
+        try:
+            await self.on_error(job, error)
+        except Exception as callback_error:
+            logger.warning("Cron: error callback failed for '{}' ({}): {}", job.name, job.id, callback_error)
 
     # ========== Public API ==========
 

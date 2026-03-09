@@ -379,12 +379,16 @@ def gateway(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Start the nanobot gateway."""
+    from loguru import logger
+
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
+    from nanobot.bus.events import OutboundMessage
     from nanobot.channels.manager import ChannelManager
     from nanobot.config.paths import get_cron_dir
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
+    from nanobot.debug.runtime_diagnostics import build_report, render_failure_brief
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.providers.catalog import build_available_models
     from nanobot.providers.factory import build_runtime_provider
@@ -485,6 +489,28 @@ def gateway(
         )
 
         # Set cron callback (needs agent)
+        async def _publish_auto_diagnosis(
+            *,
+            channel: str,
+            chat_id: str,
+            title: str,
+            details: list[str],
+            session_key: str | None = None,
+        ) -> None:
+            if not chat_id or channel == "cli":
+                return
+            try:
+                report = build_report(
+                    workspace=config.workspace_path,
+                    limit=3,
+                    session_key=session_key,
+                )
+                content = render_failure_brief(report, title=title, details=details)
+            except Exception:
+                logger.exception("Failed to build auto-diagnosis report")
+                return
+            await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=content))
+
         async def on_cron_job(job: CronJob) -> str | None:
             """Execute a cron job through the agent."""
             from nanobot.agent.tools.cron import CronTool
@@ -516,7 +542,6 @@ def gateway(
                 return response
 
             if job.payload.deliver and job.payload.to and response:
-                from nanobot.bus.events import OutboundMessage
                 await bus.publish_outbound(OutboundMessage(
                     channel=job.payload.channel or "cli",
                     chat_id=job.payload.to,
@@ -524,6 +549,23 @@ def gateway(
                 ))
             return response
         cron.on_job = on_cron_job
+
+        async def on_cron_error(job: CronJob, error: Exception) -> None:
+            """Deliver a concise auto-diagnosis for cron failures."""
+            if not (job.payload.deliver and job.payload.to):
+                return
+            await _publish_auto_diagnosis(
+                channel=job.payload.channel or "cli",
+                chat_id=job.payload.to,
+                title="nanobot auto-diagnosis: cron failure",
+                details=[
+                    f"Job: `{job.name}` (`{job.id}`)",
+                    f"Error: `{type(error).__name__}: {error}`",
+                ],
+                session_key=f"cron:{job.id}",
+            )
+
+        cron.on_error = on_cron_error
 
         # Repo sync no longer uses cron jobs; clean up legacy scheduled markers.
         legacy_repo_jobs = [
@@ -582,13 +624,28 @@ def gateway(
 
         async def on_heartbeat_notify(response: str) -> None:
             """Deliver a heartbeat response to the user's channel."""
-            from nanobot.bus.events import OutboundMessage
             if not _should_deliver_heartbeat_response(response):
                 return
             channel, chat_id = _pick_heartbeat_target()
             if channel == "cli":
                 return  # No external channel available to deliver to
             await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+
+        async def on_heartbeat_error(phase: str, error: Exception) -> None:
+            """Deliver a concise auto-diagnosis for heartbeat failures."""
+            channel, chat_id = _pick_heartbeat_target()
+            if channel == "cli":
+                return
+            await _publish_auto_diagnosis(
+                channel=channel,
+                chat_id=chat_id,
+                title="nanobot auto-diagnosis: heartbeat failure",
+                details=[
+                    f"Phase: `{phase}`",
+                    f"Error: `{type(error).__name__}: {error}`",
+                ],
+                session_key="heartbeat",
+            )
 
         hb_cfg = config.gateway.heartbeat
         heartbeat = HeartbeatService(
@@ -597,6 +654,7 @@ def gateway(
             model=agent.model,
             on_execute=on_heartbeat_execute,
             on_notify=on_heartbeat_notify,
+            on_error=on_heartbeat_error,
             interval_s=hb_cfg.interval_s,
             enabled=hb_cfg.enabled,
         )

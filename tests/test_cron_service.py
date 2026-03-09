@@ -87,3 +87,46 @@ async def test_running_service_picks_up_external_new_job(tmp_path) -> None:
         assert service.list_jobs(include_disabled=True) == []
     finally:
         service.stop()
+
+
+@pytest.mark.asyncio
+async def test_error_callback_reports_only_new_failures_until_success(tmp_path) -> None:
+    store_path = tmp_path / "cron" / "jobs.json"
+    seen: list[tuple[str, str]] = []
+    state = {"fail": True}
+
+    async def on_job(_job) -> None:
+        if state["fail"]:
+            raise RuntimeError("boom")
+
+    async def on_error(job, error: Exception) -> None:
+        seen.append((job.id, str(error)))
+
+    service = CronService(store_path, on_job=on_job, on_error=on_error)
+    job = service.add_job(
+        name="failing-job",
+        schedule=CronSchedule(kind="every", every_ms=1000),
+        message="hello",
+    )
+
+    job.state.next_run_at_ms = 1
+    service._save_store()
+    await service._on_timer()
+    assert seen == [(job.id, "boom")]
+
+    service.list_jobs(include_disabled=True)[0].state.next_run_at_ms = 1
+    service._save_store()
+    await service._on_timer()
+    assert seen == [(job.id, "boom")]
+
+    state["fail"] = False
+    service.list_jobs(include_disabled=True)[0].state.next_run_at_ms = 1
+    service._save_store()
+    await service._on_timer()
+    assert seen == [(job.id, "boom")]
+
+    state["fail"] = True
+    service.list_jobs(include_disabled=True)[0].state.next_run_at_ms = 1
+    service._save_store()
+    await service._on_timer()
+    assert seen == [(job.id, "boom"), (job.id, "boom")]

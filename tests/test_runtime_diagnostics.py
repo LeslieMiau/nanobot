@@ -3,7 +3,12 @@ import os
 from pathlib import Path
 
 from nanobot.agent.skills import SkillsLoader
-from nanobot.debug.runtime_diagnostics import build_report, render_markdown, resolve_runtime_paths
+from nanobot.debug.runtime_diagnostics import (
+    build_report,
+    render_failure_brief,
+    render_markdown,
+    resolve_runtime_paths,
+)
 
 
 def _write_session(path: Path, key: str, messages: list[dict], *, updated_at: str) -> None:
@@ -202,3 +207,31 @@ def test_build_report_includes_focus_session_tail_and_markdown(tmp_path: Path) -
     assert "## Focus session" in markdown
     assert "heartbeat" in markdown
     assert "unknown tool" in markdown
+
+
+def test_render_failure_brief_uses_top_clue_and_next_check() -> None:
+    report = {
+        "sessions": {
+            "focus_session": {"key": "heartbeat"},
+            "suspected_failures": [{"summary": "Error: Brave Search API key not configured"}],
+        },
+        "cron": {
+            "failing_jobs": [
+                {"id": "abc12345", "name": "Morning digest", "last_error": "tool timeout", "last_status": "error"}
+            ]
+        },
+        "next_checks": ["Open `heartbeat.jsonl` around the failing turn."],
+    }
+
+    brief = render_failure_brief(
+        report,
+        title="nanobot auto-diagnosis: heartbeat failure",
+        details=["Phase: `decision`", "Error: `HeartbeatDecisionError: plain text`"],
+    )
+
+    assert "nanobot auto-diagnosis: heartbeat failure" in brief
+    assert "Phase: `decision`" in brief
+    assert "Session: `heartbeat`" in brief
+    assert "Top clue: Error: Brave Search API key not configured" in brief
+    assert "Latest failing job: `abc12345` `Morning digest` (tool timeout)" in brief
+    assert "Next check: Open `heartbeat.jsonl` around the failing turn." in brief
