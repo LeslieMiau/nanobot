@@ -448,7 +448,7 @@ def gateway(
                 coding_config=config.agents.defaults.coding,
             )
 
-        # Create cron service first (callback set after agent creation)
+        # Create cron service first so agent tools can reference it.
         cron_store_path = get_cron_dir() / "jobs.json"
         cron = CronService(cron_store_path)
         repo_sync_cfg = config.gateway.repo_sync
@@ -458,6 +458,43 @@ def gateway(
         async def request_restart() -> None:
             nonlocal restart_requested
             restart_requested = True
+
+        async def _publish_auto_diagnosis(
+            *,
+            channel: str,
+            chat_id: str,
+            title: str,
+            details: list[str],
+            session_key: str | None = None,
+        ) -> None:
+            if not chat_id or channel == "cli":
+                return
+            try:
+                report = build_report(
+                    workspace=config.workspace_path,
+                    limit=3,
+                    session_key=session_key,
+                )
+                content = render_failure_brief(report, title=title, details=details)
+            except Exception:
+                logger.exception("Failed to build auto-diagnosis report")
+                return
+            await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=content))
+
+        async def on_message_error(msg, error: Exception) -> None:
+            """Deliver a concise auto-diagnosis for normal message failures."""
+            if msg.channel == "cli":
+                return
+            await _publish_auto_diagnosis(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                title="nanobot auto-diagnosis: message failure",
+                details=[
+                    f"Session: `{msg.session_key}`",
+                    f"Error: `{type(error).__name__}: {error}`",
+                ],
+                session_key=msg.session_key,
+            )
 
         # Create agent with cron service
         agent = AgentLoop(
@@ -483,34 +520,13 @@ def gateway(
             token_guard_config=config.agents.defaults.token_guard,
             coding_config=config.agents.defaults.coding,
             restart_callback=request_restart,
+            error_callback=on_message_error,
             provider_name=default_provider_name,
             provider_switcher=provider_switcher,
             available_models_provider=available_models_provider,
         )
 
         # Set cron callback (needs agent)
-        async def _publish_auto_diagnosis(
-            *,
-            channel: str,
-            chat_id: str,
-            title: str,
-            details: list[str],
-            session_key: str | None = None,
-        ) -> None:
-            if not chat_id or channel == "cli":
-                return
-            try:
-                report = build_report(
-                    workspace=config.workspace_path,
-                    limit=3,
-                    session_key=session_key,
-                )
-                content = render_failure_brief(report, title=title, details=details)
-            except Exception:
-                logger.exception("Failed to build auto-diagnosis report")
-                return
-            await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=content))
-
         async def on_cron_job(job: CronJob) -> str | None:
             """Execute a cron job through the agent."""
             from nanobot.agent.tools.cron import CronTool

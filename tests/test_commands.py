@@ -1040,3 +1040,125 @@ def test_gateway_heartbeat_auto_diagnosis_publishes_on_failure(monkeypatch, tmp_
     assert bus.outbound[0].chat_id == "chat-1"
     assert "nanobot auto-diagnosis: heartbeat failure" in bus.outbound[0].content
     assert "Phase: `execution`" in bus.outbound[0].content
+
+
+def test_gateway_message_auto_diagnosis_publishes_on_failure(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.bus.events import InboundMessage
+
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: config_file.parent / "cron")
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr("nanobot.cli.commands._find_other_gateway_processes", lambda: [])
+    monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: SimpleNamespace(list_sessions=lambda: []))
+    monkeypatch.setattr("nanobot.debug.runtime_diagnostics.build_report", lambda **_kwargs: {"sessions": {"focus_session": {"key": "telegram:chat-1"}, "suspected_failures": []}, "cron": {"failing_jobs": []}, "next_checks": ["Open the session"]})
+    monkeypatch.setattr("nanobot.debug.runtime_diagnostics.render_failure_brief", lambda _report, *, title, details: f"{title}\n- {details[0]}\n- {details[1]}\n")
+
+    class _FakeLock:
+        def __init__(self, _path: Path) -> None:
+            pass
+
+        def acquire(self) -> None:
+            return None
+
+        def release(self) -> None:
+            return None
+
+    monkeypatch.setattr("nanobot.cli.commands._GatewayInstanceLock", _FakeLock)
+
+    class _FakeBus:
+        def __init__(self) -> None:
+            self.outbound: list[object] = []
+
+        async def publish_outbound(self, msg) -> None:
+            self.outbound.append(msg)
+
+    bus = _FakeBus()
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: bus)
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+            self.on_error = None
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def list_jobs(self, include_disabled: bool = False) -> list:
+            return []
+
+        def remove_job(self, _job_id: str) -> bool:
+            return False
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeAgentLoop:
+        last_instance = None
+
+        def __init__(self, *args, **kwargs) -> None:
+            self.tools = {}
+            self.model = "gpt-5"
+            self._error_callback = kwargs.get("error_callback")
+            _FakeAgentLoop.last_instance = self
+
+        async def run(self) -> None:
+            return None
+
+        async def close_mcp(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeChannels:
+        def __init__(self, *_args, **_kwargs) -> None:
+            self.enabled_channels: list[str] = ["telegram"]
+
+        async def start_all(self) -> None:
+            return None
+
+        async def stop_all(self) -> None:
+            return None
+
+    class _FakeHeartbeat:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannels)
+    monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _FakeHeartbeat)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    agent = _FakeAgentLoop.last_instance
+    assert agent is not None
+    assert agent._error_callback is not None
+
+    msg = InboundMessage(channel="telegram", sender_id="u1", chat_id="chat-1", content="hello")
+    asyncio.run(agent._error_callback(msg, RuntimeError("boom")))
+
+    assert len(bus.outbound) == 1
+    assert bus.outbound[0].channel == "telegram"
+    assert bus.outbound[0].chat_id == "chat-1"
+    assert "nanobot auto-diagnosis: message failure" in bus.outbound[0].content
+    assert "Session: `telegram:chat-1`" in bus.outbound[0].content

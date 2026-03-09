@@ -11,6 +11,11 @@ import pytest
 
 def _make_loop():
     """Create a minimal AgentLoop with mocked dependencies."""
+    return _make_loop_with_error_callback(None)
+
+
+def _make_loop_with_error_callback(error_callback):
+    """Create a minimal AgentLoop with mocked dependencies and optional error callback."""
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
 
@@ -24,7 +29,12 @@ def _make_loop():
          patch("nanobot.agent.loop.SessionManager"), \
          patch("nanobot.agent.loop.SubagentManager") as MockSubMgr:
         MockSubMgr.return_value.cancel_by_session = AsyncMock(return_value=0)
-        loop = AgentLoop(bus=bus, provider=provider, workspace=workspace)
+        loop = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=workspace,
+            error_callback=error_callback,
+        )
     return loop, bus
 
 
@@ -156,6 +166,46 @@ class TestDispatch:
         t2 = asyncio.create_task(loop._dispatch(msg2))
         await asyncio.gather(t1, t2)
         assert order == ["start-a", "end-a", "start-b", "end-b"]
+
+    @pytest.mark.asyncio
+    async def test_dispatch_reports_new_errors_once_until_success(self):
+        from nanobot.bus.events import InboundMessage
+
+        seen: list[str] = []
+
+        async def on_error(msg, error: Exception) -> None:
+            seen.append(f"{msg.session_key}:{error}")
+
+        loop, bus = _make_loop_with_error_callback(on_error)
+        msg = InboundMessage(channel="test", sender_id="u1", chat_id="c1", content="hello")
+
+        async def boom(_msg, **_kwargs):
+            raise RuntimeError("boom")
+
+        loop._process_message = boom
+
+        await loop._dispatch(msg)
+        out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        assert out.content == "Sorry, I encountered an error."
+        assert seen == ["test:c1:boom"]
+
+        await loop._dispatch(msg)
+        out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        assert out.content == "Sorry, I encountered an error."
+        assert seen == ["test:c1:boom"]
+
+        async def ok(_msg, **_kwargs):
+            return None
+
+        loop._process_message = ok
+        await loop._dispatch(msg)
+        assert seen == ["test:c1:boom"]
+
+        loop._process_message = boom
+        await loop._dispatch(msg)
+        out = await asyncio.wait_for(bus.consume_outbound(), timeout=1.0)
+        assert out.content == "Sorry, I encountered an error."
+        assert seen == ["test:c1:boom", "test:c1:boom"]
 
 
 class TestSubagentCancellation:

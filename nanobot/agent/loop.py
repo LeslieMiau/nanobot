@@ -167,6 +167,7 @@ class AgentLoop:
         token_guard_config: TokenGuardConfig | None = None,
         coding_config: CodingConfig | None = None,
         restart_callback: Callable[[], Awaitable[None]] | None = None,
+        error_callback: Callable[[InboundMessage, Exception], Awaitable[None]] | None = None,
         provider_name: str | None = None,
         provider_switcher: Callable[[str | None, str | None], tuple[LLMProvider, str, str | None]] | None = None,
         available_models_provider: Callable[[str | None, str | None], list[AvailableModel]] | None = None,
@@ -196,6 +197,7 @@ class AgentLoop:
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self._restart_callback = restart_callback
+        self._error_callback = error_callback
         self._provider_switcher = provider_switcher
         self._available_models_provider = available_models_provider
 
@@ -230,6 +232,7 @@ class AgentLoop:
         self._coding_model_cooldowns: dict[str, float] = {}
         self._last_coding_route_resolved: list[str] = []
         self._last_coding_route_skipped: list[str] = []
+        self._last_dispatch_error_signatures: dict[str, str] = {}
         self._processing_lock = asyncio.Lock()
         self._register_default_tools()
 
@@ -1778,6 +1781,7 @@ class AgentLoop:
         async with self._processing_lock:
             try:
                 response = await self._process_message(msg)
+                self._last_dispatch_error_signatures.pop(msg.session_key, None)
                 if response is not None:
                     await self.bus.publish_outbound(response)
                 elif msg.channel == "cli":
@@ -1788,12 +1792,27 @@ class AgentLoop:
             except asyncio.CancelledError:
                 logger.info("Task cancelled for session {}", msg.session_key)
                 raise
-            except Exception:
+            except Exception as e:
                 logger.exception("Error processing message for session {}", msg.session_key)
                 await self.bus.publish_outbound(OutboundMessage(
                     channel=msg.channel, chat_id=msg.chat_id,
                     content="Sorry, I encountered an error.",
                 ))
+                await self._report_dispatch_error(msg, e)
+
+    async def _report_dispatch_error(self, msg: InboundMessage, error: Exception) -> None:
+        """Send a best-effort deduplicated error callback for normal message failures."""
+        if not self._error_callback:
+            return
+        signature = f"{type(error).__name__}:{error}"
+        previous = self._last_dispatch_error_signatures.get(msg.session_key)
+        self._last_dispatch_error_signatures[msg.session_key] = signature
+        if signature == previous:
+            return
+        try:
+            await self._error_callback(msg, error)
+        except Exception as callback_error:
+            logger.warning("Error callback failed for session {}: {}", msg.session_key, callback_error)
 
     async def close_mcp(self) -> None:
         """Close MCP connections."""
