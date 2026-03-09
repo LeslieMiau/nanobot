@@ -124,7 +124,7 @@ def test_config_matches_github_copilot_codex_with_hyphen_prefix():
 
 def test_config_matches_openai_codex_with_hyphen_prefix():
     config = Config()
-    config.agents.defaults.model = "openai-codex/gpt-5.1-codex"
+    config.agents.defaults.model = "openai-codex/gpt-5.4"
 
     assert config.get_provider_name() == "openai_codex"
 
@@ -145,8 +145,8 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 
 
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
-    assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
-    assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+    assert _strip_model_prefix("openai-codex/gpt-5.4") == "gpt-5.4"
+    assert _strip_model_prefix("openai_codex/gpt-5.4") == "gpt-5.4"
 
 
 def test_build_heartbeat_execution_message_includes_summary_file_and_noop_rule():

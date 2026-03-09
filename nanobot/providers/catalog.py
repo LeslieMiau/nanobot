@@ -35,7 +35,7 @@ _PROVIDER_MODEL_CATALOG: dict[str, tuple[str, ...]] = {
         "gpt-4o",
     ),
     "openai_codex": (
-        "openai-codex/gpt-5.1-codex",
+        "openai-codex/gpt-5.4",
     ),
     "github_copilot": (
         "github-copilot/gpt-5.3-codex",

@@ -6,6 +6,9 @@ def test_persona_defaults_are_backward_compatible() -> None:
     persona = config.agents.defaults.persona
     coding = config.agents.defaults.coding
 
+    assert config.agents.defaults.model == "openai-codex/gpt-5.4"
+    assert config.agents.defaults.provider == "auto"
+    assert config.get_provider_name() == "openai_codex"
     assert persona.mode == "default"
     assert persona.dialect == "tw_s1"
     assert persona.script == "simplified"

@@ -20,7 +20,7 @@ DEFAULT_ORIGINATOR = "nanobot"
 class OpenAICodexProvider(LLMProvider):
     """Use Codex OAuth to call the Responses API."""
 
-    def __init__(self, default_model: str = "openai-codex/gpt-5.1-codex"):
+    def __init__(self, default_model: str = "openai-codex/gpt-5.4"):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
 

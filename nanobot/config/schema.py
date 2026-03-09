@@ -282,7 +282,7 @@ class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.nanobot/workspace"
-    model: str = "anthropic/claude-opus-4-5"
+    model: str = "openai-codex/gpt-5.4"
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )

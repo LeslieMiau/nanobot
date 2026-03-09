@@ -1,7 +1,9 @@
 import pytest
 
 from nanobot.config.schema import Config
+from nanobot.providers.catalog import build_available_models
 from nanobot.providers.factory import ProviderConfigError, create_provider, resolve_switch_selection
+from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
 
 def test_resolve_switch_selection_prefers_explicit_provider_prefix() -> None:
@@ -58,3 +60,29 @@ def test_create_provider_rejects_unauthenticated_github_copilot(monkeypatch: pyt
             model="github-copilot/gpt-5.3-codex",
             provider_name="github_copilot",
         )
+
+
+def test_create_provider_uses_openai_codex_for_default_config() -> None:
+    config = Config()
+
+    provider = create_provider(config)
+
+    assert isinstance(provider, OpenAICodexProvider)
+    assert provider.get_default_model() == "openai-codex/gpt-5.4"
+
+
+def test_build_available_models_uses_openai_codex_gpt_5_4_as_default_entry() -> None:
+    config = Config()
+
+    models = build_available_models(
+        config,
+        default_model=config.agents.defaults.model,
+        default_provider_name=config.get_provider_name(config.agents.defaults.model),
+        coding_config=config.agents.defaults.coding,
+    )
+
+    assert any(
+        model.model == "openai-codex/gpt-5.4" and model.provider_name == "openai_codex"
+        for model in models
+    )
+    assert not any(model.model == "openai-codex/gpt-5.1-codex" for model in models)

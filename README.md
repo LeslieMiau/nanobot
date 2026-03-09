@@ -719,7 +719,7 @@ nanobot provider login openai-codex
 {
   "agents": {
     "defaults": {
-      "model": "openai-codex/gpt-5.1-codex"
+      "model": "openai-codex/gpt-5.4"
     }
   }
 }
