@@ -172,6 +172,26 @@ _REMEDIATION_TEMPLATES = {
         ],
     },
 }
+_TRANSIENT_FAILURE_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in (
+        r"\btimeout\b",
+        r"\btimed out\b",
+        r"\brate limit\b",
+        r"\bquota\b",
+        r"\btemporar(?:y|ily)\b",
+        r"\bbackend unavailable\b",
+        r"\bservice unavailable\b",
+        r"\bconnection reset\b",
+        r"\bconnection refused\b",
+        r"\bconnection aborted\b",
+        r"\bnetwork\b",
+        r"\bunreachable\b",
+        r"\boverloaded\b",
+        r"\btry again\b",
+        r"\b5\d{2}\b",
+    )
+]
 
 
 @dataclass(slots=True)
@@ -248,6 +268,7 @@ def build_report(
     report["next_checks"] = _build_next_checks(report, limit=limit)
     report["diagnosis"] = _classify_failure(report)
     report["remediation"] = _build_remediation(report, report["diagnosis"])
+    report["auto_recovery"] = _build_auto_recovery(report, report["diagnosis"])
     return report
 
 
@@ -260,6 +281,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     history = report["history"]
     diagnosis = report.get("diagnosis")
     remediation = report.get("remediation")
+    auto_recovery = report.get("auto_recovery")
 
     lines = ["# nanobot runtime diagnostics", ""]
     lines.append("## Paths")
@@ -355,6 +377,19 @@ def render_markdown(report: dict[str, Any]) -> str:
             lines.append(f"- Fix step: {step}")
     lines.append("")
 
+    lines.append("## Auto Recovery")
+    if not auto_recovery:
+        lines.append("- No auto-recovery policy is available.")
+    else:
+        status = "eligible" if auto_recovery["eligible"] else "blocked"
+        lines.append(f"- Status: `{status}`")
+        lines.append(f"- Scope: `{auto_recovery['scope']}`")
+        if auto_recovery["eligible"]:
+            lines.append(f"- Retry delay: `{auto_recovery['retry_delay_s']}s`")
+        elif auto_recovery.get("blocked_reason"):
+            lines.append(f"- Blocked reason: {auto_recovery['blocked_reason']}")
+    lines.append("")
+
     lines.append("## Recent history")
     if not history["exists"]:
         lines.append("- `memory/HISTORY.md` is missing.")
@@ -380,6 +415,7 @@ def render_failure_brief(
     lines = [title.strip() or "nanobot auto-diagnosis", ""]
     diagnosis = _classify_failure(report, title=title, details=details)
     remediation = _build_remediation(report, diagnosis)
+    auto_recovery = _build_auto_recovery(report, diagnosis, title=title, details=details)
 
     for detail in details or []:
         if detail:
@@ -400,6 +436,13 @@ def render_failure_brief(
         lines.append(
             f"- Repairability: `{remediation['repairability']}`, urgency: `{remediation['urgency']}`"
         )
+    if auto_recovery:
+        status = "eligible" if auto_recovery["eligible"] else "blocked"
+        lines.append(f"- Auto recovery: `{status}` (`{auto_recovery['scope']}`)")
+        if auto_recovery["eligible"]:
+            lines.append(f"- Retry delay: `{auto_recovery['retry_delay_s']}s`")
+        elif auto_recovery.get("blocked_reason"):
+            lines.append(f"- Recovery block: {auto_recovery['blocked_reason']}")
 
     issues = report.get("sessions", {}).get("suspected_failures", [])
     if issues:
@@ -848,6 +891,48 @@ def _build_remediation(report: dict[str, Any], diagnosis: dict[str, Any] | None)
     }
 
 
+def _build_auto_recovery(
+    report: dict[str, Any],
+    diagnosis: dict[str, Any] | None,
+    *,
+    title: str | None = None,
+    details: list[str] | None = None,
+) -> dict[str, Any]:
+    if not diagnosis:
+        diagnosis = _classify_failure(report, title=title, details=details)
+
+    scope = _auto_recovery_scope(report, title=title, details=details)
+    transient = _looks_transient_failure(report, title=title, details=details)
+    retry_delay_s = 15
+    eligible = scope == "heartbeat_decision" and transient
+
+    blocked_reason = None
+    if not eligible:
+        if scope in {"cron_turn", "message_turn", "heartbeat_execution"}:
+            blocked_reason = (
+                "Automatic retry is blocked because this failure path may already have executed "
+                "side-effecting tools."
+            )
+        elif scope in {"heartbeat", "heartbeat_unknown"}:
+            blocked_reason = (
+                "Automatic retry is only enabled when the failure is clearly in heartbeat decision phase."
+            )
+        elif scope == "heartbeat_decision":
+            blocked_reason = (
+                "Automatic retry is only enabled for transient provider or network failures during "
+                "heartbeat decision."
+            )
+        else:
+            blocked_reason = "Automatic retry is not enabled for this failure shape yet."
+
+    return {
+        "eligible": eligible,
+        "scope": scope,
+        "retry_delay_s": retry_delay_s if eligible else None,
+        "blocked_reason": blocked_reason,
+    }
+
+
 def _safe_next_action(report: dict[str, Any], diagnosis: dict[str, Any]) -> str:
     category = diagnosis["category"]
     if report.get("gateway_lock", {}).get("stale"):
@@ -855,6 +940,48 @@ def _safe_next_action(report: dict[str, Any], diagnosis: dict[str, Any]) -> str:
     if diagnosis.get("confidence") == "low" and category not in {"config", "transport"}:
         return "inspect_session"
     return _SAFE_NEXT_ACTIONS[category]
+
+
+def _auto_recovery_scope(
+    report: dict[str, Any],
+    *,
+    title: str | None,
+    details: list[str] | None,
+) -> str:
+    lowered_title = (title or "").lower()
+    lowered_details = " ".join(details or []).lower()
+    focus = report.get("sessions", {}).get("focus_session") or {}
+    focus_key = str(focus.get("key") or "")
+
+    if "heartbeat" in lowered_title or focus_key == "heartbeat":
+        if "phase: `decision`" in lowered_details or "phase: decision" in lowered_details:
+            return "heartbeat_decision"
+        if "phase: `execution`" in lowered_details or "phase: execution" in lowered_details:
+            return "heartbeat_execution"
+        return "heartbeat"
+
+    if "cron failure" in lowered_title or focus_key.startswith("cron:") or report.get("cron", {}).get("failing_jobs"):
+        return "cron_turn"
+
+    if "message failure" in lowered_title:
+        return "message_turn"
+
+    if focus_key and ":" in focus_key:
+        return "message_turn"
+
+    return "unknown"
+
+
+def _looks_transient_failure(
+    report: dict[str, Any],
+    *,
+    title: str | None,
+    details: list[str] | None,
+) -> bool:
+    for _source_name, text in _classification_sources(report, title=title, details=details):
+        if any(pattern.search(text) for pattern in _TRANSIENT_FAILURE_PATTERNS):
+            return True
+    return False
 
 
 def _remediation_repairability(diagnosis: dict[str, Any], base: str) -> str:

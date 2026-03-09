@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
@@ -64,6 +65,7 @@ class HeartbeatService:
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         on_error: Callable[[str, Exception], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
+        decision_retry_delay_s: float = 15.0,
         enabled: bool = True,
     ):
         self.workspace = workspace
@@ -73,9 +75,13 @@ class HeartbeatService:
         self.on_notify = on_notify
         self.on_error = on_error
         self.interval_s = interval_s
+        self.decision_retry_delay_s = decision_retry_delay_s
         self.enabled = enabled
         self._running = False
         self._task: asyncio.Task | None = None
+        self._decision_retry_task: asyncio.Task | None = None
+        self._pending_decision_retry_signature: str | None = None
+        self._last_retry_signature: str | None = None
         self._last_error_signature: str | None = None
 
     @property
@@ -163,6 +169,10 @@ class HeartbeatService:
         if self._task:
             self._task.cancel()
             self._task = None
+        if self._decision_retry_task:
+            self._decision_retry_task.cancel()
+            self._decision_retry_task = None
+        self._pending_decision_retry_signature = None
 
     async def _run_loop(self) -> None:
         """Main heartbeat loop."""
@@ -184,12 +194,18 @@ class HeartbeatService:
             return
 
         logger.info("Heartbeat: checking for tasks...")
+        await self._run_tick_content(content, allow_retry=True)
 
+    async def _run_tick_content(self, content: str, *, allow_retry: bool) -> None:
+        """Run one heartbeat decision/execution cycle from prepared content."""
         try:
             action, tasks = await self._decide(content)
 
             if action != "run":
                 self._last_error_signature = None
+                self._last_retry_signature = None
+                if allow_retry:
+                    self._cancel_pending_decision_retry()
                 logger.info("Heartbeat: OK (nothing to report)")
                 return
 
@@ -200,9 +216,14 @@ class HeartbeatService:
                     logger.info("Heartbeat: completed, delivering response")
                     await self.on_notify(response)
             self._last_error_signature = None
+            self._last_retry_signature = None
+            if allow_retry:
+                self._cancel_pending_decision_retry()
         except HeartbeatDecisionError as e:
             logger.warning("Heartbeat decision failed: {}", e)
             await self._report_error("decision", e)
+            if allow_retry:
+                self._maybe_schedule_decision_retry(content, e)
         except Exception as e:
             logger.exception("Heartbeat execution failed")
             await self._report_error("execution", e)
@@ -229,3 +250,63 @@ class HeartbeatService:
             await self.on_error(phase, error)
         except Exception as callback_error:
             logger.warning("Heartbeat error callback failed during {}: {}", phase, callback_error)
+
+    def _maybe_schedule_decision_retry(self, content: str, error: Exception) -> None:
+        """Schedule a one-shot retry for transient decision failures."""
+        if not self._is_transient_decision_error(error):
+            return
+        if self._decision_retry_task and not self._decision_retry_task.done():
+            return
+        signature = f"{type(error).__name__}:{error}"
+        if signature == self._last_retry_signature:
+            return
+        self._last_retry_signature = signature
+        self._pending_decision_retry_signature = signature
+
+        async def _retry() -> None:
+            try:
+                logger.info(
+                    "Heartbeat: scheduling one-shot decision retry in {}s",
+                    self.decision_retry_delay_s,
+                )
+                await asyncio.sleep(self.decision_retry_delay_s)
+                await self._run_tick_content(content, allow_retry=False)
+            except asyncio.CancelledError:
+                raise
+            finally:
+                if self._pending_decision_retry_signature == signature:
+                    self._pending_decision_retry_signature = None
+                self._decision_retry_task = None
+
+        self._decision_retry_task = asyncio.create_task(_retry())
+
+    def _cancel_pending_decision_retry(self) -> None:
+        """Cancel an outstanding one-shot retry when a later attempt succeeds."""
+        if self._decision_retry_task and not self._decision_retry_task.done():
+            self._decision_retry_task.cancel()
+        self._decision_retry_task = None
+        self._pending_decision_retry_signature = None
+
+    @staticmethod
+    def _is_transient_decision_error(error: Exception) -> bool:
+        text = str(error)
+        return any(
+            re.search(pattern, text, re.IGNORECASE)
+            for pattern in (
+                r"\btimeout\b",
+                r"\btimed out\b",
+                r"\brate limit\b",
+                r"\bquota\b",
+                r"\btemporar(?:y|ily)\b",
+                r"\bbackend unavailable\b",
+                r"\bservice unavailable\b",
+                r"\bconnection reset\b",
+                r"\bconnection refused\b",
+                r"\bconnection aborted\b",
+                r"\bnetwork\b",
+                r"\bunreachable\b",
+                r"\boverloaded\b",
+                r"\btry again\b",
+                r"\b5\d{2}\b",
+            )
+        )

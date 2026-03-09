@@ -9,8 +9,10 @@ from nanobot.providers.base import LLMResponse, ToolCallRequest
 class DummyProvider:
     def __init__(self, responses: list[LLMResponse]):
         self._responses = list(responses)
+        self.calls = 0
 
     async def chat(self, *args, **kwargs) -> LLMResponse:
+        self.calls += 1
         if self._responses:
             return self._responses.pop(0)
         return LLMResponse(content="", tool_calls=[])
@@ -224,3 +226,93 @@ async def test_tick_reports_execution_error(tmp_path) -> None:
     await service._tick()
 
     assert seen == [("execution", "execution boom")]
+
+
+@pytest.mark.asyncio
+async def test_tick_retries_transient_decision_error_once(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
+
+    provider = DummyProvider([
+        LLMResponse(content="Error: backend unavailable", tool_calls=[]),
+        LLMResponse(
+            content="",
+            tool_calls=[ToolCallRequest(id="hb_1", name="heartbeat", arguments={"action": "skip"})],
+        ),
+    ])
+
+    seen: list[tuple[str, str]] = []
+
+    async def _on_error(phase: str, error: Exception) -> None:
+        seen.append((phase, str(error)))
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        on_error=_on_error,
+        decision_retry_delay_s=0.01,
+    )
+
+    await service._tick()
+    await asyncio.sleep(0.05)
+
+    assert provider.calls == 2
+    assert service._decision_retry_task is None
+    assert service._last_error_signature is None
+    assert seen == [
+        ("decision", "Heartbeat decision returned plain text instead of a tool call: Error: backend unavailable"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_tick_does_not_retry_non_transient_decision_error(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
+
+    provider = DummyProvider([
+        LLMResponse(content="Error: invalid response schema", tool_calls=[]),
+        LLMResponse(
+            content="",
+            tool_calls=[ToolCallRequest(id="hb_1", name="heartbeat", arguments={"action": "skip"})],
+        ),
+    ])
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        decision_retry_delay_s=0.01,
+    )
+
+    await service._tick()
+    await asyncio.sleep(0.05)
+
+    assert provider.calls == 1
+    assert len(provider._responses) == 1
+
+
+@pytest.mark.asyncio
+async def test_tick_dedupes_transient_decision_retry_until_success(tmp_path) -> None:
+    (tmp_path / "HEARTBEAT.md").write_text("- [ ] do thing", encoding="utf-8")
+
+    provider = DummyProvider([
+        LLMResponse(content="Error: backend unavailable", tool_calls=[]),
+        LLMResponse(content="Error: backend unavailable", tool_calls=[]),
+        LLMResponse(
+            content="",
+            tool_calls=[ToolCallRequest(id="hb_1", name="heartbeat", arguments={"action": "skip"})],
+        ),
+    ])
+
+    service = HeartbeatService(
+        workspace=tmp_path,
+        provider=provider,
+        model="openai/gpt-4o-mini",
+        decision_retry_delay_s=0.03,
+    )
+
+    await service._tick()
+    await service._tick()
+    await asyncio.sleep(0.08)
+
+    assert provider.calls == 3
+    assert service._decision_retry_task is None
