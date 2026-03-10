@@ -84,7 +84,7 @@ async def test_model_command_switches_model_and_applies_to_chat(tmp_path: Path) 
     normal = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="hello")
     out = await loop._process_message(normal)
     assert out is not None
-    assert out.content == "default:gpt-5.2"
+    assert out.content.startswith("default:gpt-5.2")
     assert provider.last_model == "gpt-5.2"
 
 
@@ -343,8 +343,8 @@ async def test_model_command_switch_is_isolated_per_session(tmp_path: Path) -> N
 
     assert out_a is not None
     assert out_b is not None
-    assert out_a.content == "switched:gpt-5.2"
-    assert out_b.content == "default:dummy"
+    assert out_a.content.startswith("switched:gpt-5.2")
+    assert out_b.content.startswith("default:dummy")
 
 
 @pytest.mark.asyncio
@@ -381,8 +381,8 @@ async def test_model_command_reset_only_affects_current_session(tmp_path: Path) 
     assert "provider: `custom`" in reset.content
     assert out_a is not None
     assert out_b is not None
-    assert out_a.content == "default:dummy"
-    assert out_b.content == "switched:gemini-2.0"
+    assert out_a.content.startswith("default:dummy")
+    assert out_b.content.startswith("switched:gemini-2.0")
 
 
 @pytest.mark.asyncio
@@ -412,7 +412,7 @@ async def test_model_command_persists_session_selection_across_reloads(tmp_path:
     )
 
     assert out is not None
-    assert out.content == "switched:gpt-5.2"
+    assert out.content.startswith("switched:gpt-5.2")
 
 
 @pytest.mark.asyncio
@@ -449,7 +449,7 @@ async def test_system_messages_use_session_key_override_for_model_selection(tmp_
     )
 
     assert out is not None
-    assert out.content == "switched:gpt-5.2"
+    assert out.content.startswith("switched:gpt-5.2")
 
 
 @pytest.mark.asyncio

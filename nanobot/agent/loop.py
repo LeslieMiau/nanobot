@@ -15,9 +15,12 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 from loguru import logger
 
 from nanobot.agent.context import ContextBuilder
+from nanobot.agent.image_flow import ImageFlowController
 from nanobot.agent.tools.image_generate import ImageGenerateTool
 from nanobot.agent.memory import MemoryStore
+from nanobot.agent.model_selection import ModelSelectionController
 from nanobot.agent.subagent import SubagentManager
+from nanobot.agent.token_guard import TokenGuardAssessment, TokenGuardController
 from nanobot.agent.tools.cron import CronTool
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
@@ -64,23 +67,6 @@ class _CodingRouteCandidate:
     model: str
     provider_name: str | None
     normalization_note: str | None = None
-
-
-@dataclass(frozen=True)
-class _TokenGuardAssessment:
-    mode: str
-    total_score: int
-    raw_risk: str
-    final_risk: str
-    raw_range: str
-    effective_range: str
-    cache_friendliness: str
-    effective_increment: str
-    risk_tags: list[str]
-    waste_tags: list[str]
-    drivers: list[str]
-    alternatives: list[str]
-    hard_triggered: bool = False
 
 
 class AgentLoop:
@@ -236,6 +222,9 @@ class AgentLoop:
         self._last_coding_route_skipped: list[str] = []
         self._last_dispatch_error_signatures: dict[str, str] = {}
         self._processing_lock = asyncio.Lock()
+        self._image_flow = ImageFlowController(self)
+        self._model_selection = ModelSelectionController(self)
+        self._token_guard_controller = TokenGuardController(self)
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:
@@ -257,7 +246,7 @@ class AgentLoop:
                 ImageGenerateTool(
                     workspace=self.workspace,
                     config=self.image_config,
-                    stage_callback=self._stage_image_request,
+                    stage_callback=self._image_flow.stage_request,
                 )
             )
         self.tools.register(SpawnTool(manager=self.subagents))
@@ -315,213 +304,14 @@ class AgentLoop:
                     else:
                         tool.set_context(channel, chat_id)
 
-    @staticmethod
-    def _image_queue_key() -> str:
-        return "image_generation_queue"
-
-    def _get_image_queue(self, session: Session) -> dict[str, Any]:
-        queue = session.metadata.get(self._image_queue_key())
-        if not isinstance(queue, dict):
-            queue = {"items": []}
-            session.metadata[self._image_queue_key()] = queue
-        items = queue.get("items")
-        if not isinstance(items, list):
-            queue["items"] = []
-        return queue
-
-    @staticmethod
-    def _current_image_index(items: list[dict[str, Any]]) -> int | None:
-        for idx, item in enumerate(items):
-            if item.get("status") == "pending":
-                return idx
-        return None
-
-    def _format_image_preview(self, item: dict[str, Any], *, position: int, total: int) -> str:
-        title = item.get("title") or f"Image {position}/{total}"
-        platform = item.get("platform") or "generic"
-        role_name = item.get("role_name") or "TradingCat"
-        overlay_text = item.get("overlay_text") or "(none)"
-        output_path = item.get("output_path") or ""
-        aspect_ratio = item.get("aspect_ratio") or ""
-        size = item.get("size") or ""
-        return (
-            f"[Image prompt {position}/{total}] {title}\n"
-            f"Platform: {platform}\n"
-            f"Role: {role_name}\n"
-            f"Overlay text: {overlay_text}\n"
-            f"Aspect ratio: {aspect_ratio or '(default)'}\n"
-            f"Size: {size or '(default)'}\n"
-            f"Output path: `{output_path}`\n\n"
-            "Prompt:\n"
-            f"```text\n{item.get('prompt', '')}\n```\n\n"
-            "Reply `/image-confirm` to generate this image, "
-            "`/image-edit <feedback>` to revise the prompt, or `/image-skip` to skip it."
-        )
-
-    async def _stage_image_request(self, payload: dict[str, Any]) -> str:
-        channel = str(payload.get("channel") or "").strip()
-        chat_id = str(payload.get("chat_id") or "").strip()
-        if not channel or not chat_id:
-            return "Error: no active session context for image staging"
-
-        session = self.sessions.get_or_create(f"{channel}:{chat_id}")
-        queue = self._get_image_queue(session)
-        items: list[dict[str, Any]] = queue["items"]
-        item = {
-            "content_pack_id": payload.get("content_pack_id") or "",
-            "card_index": payload.get("card_index") or len(items) + 1,
-            "title": payload.get("title") or "",
-            "overlay_text": payload.get("overlay_text") or "",
-            "role_name": payload.get("role_name") or "TradingCat",
-            "platform": payload.get("platform") or "xiaohongshu",
-            "prompt": payload.get("prompt") or "",
-            "base_prompt": payload.get("prompt") or "",
-            "size": payload.get("size") or "",
-            "aspect_ratio": payload.get("aspect_ratio") or "",
-            "style_preset": payload.get("style_preset") or "",
-            "negative_prompt": payload.get("negative_prompt") or "",
-            "output_path": payload.get("output_path") or "",
-            "status": "pending",
-        }
-        items.append(item)
-        self.sessions.save(session)
-
-        current_idx = self._current_image_index(items)
-        if current_idx == len(items) - 1:
-            return self._format_image_preview(item, position=current_idx + 1, total=len(items))
-        staged_label = item["title"] or f"card {item['card_index']}"
-        return (
-            f"Staged image {len(items)}/{len(items)}: "
-            f"{staged_label}"
-        )
-
     async def _handle_image_confirm(self, msg: InboundMessage, session: Session) -> OutboundMessage:
-        queue = self._get_image_queue(session)
-        items: list[dict[str, Any]] = queue["items"]
-        idx = self._current_image_index(items)
-        if idx is None:
-            session.metadata.pop(self._image_queue_key(), None)
-            self.sessions.save(session)
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="No pending image prompt to confirm.",
-            )
-
-        item = items[idx]
-        tool = self.tools.get("image_generate")
-        if tool is None:
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="Image generation tool is not available.",
-            )
-        result = await tool.execute(
-            action="generate",
-            prompt=item["prompt"],
-            output_path=item["output_path"],
-            size=item.get("size") or None,
-            aspect_ratio=item.get("aspect_ratio") or None,
-            style_preset=item.get("style_preset") or None,
-            negative_prompt=item.get("negative_prompt") or None,
-        )
-        if result.startswith("Error:"):
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content=result)
-
-        payload = json.loads(result)
-        item["status"] = "generated"
-        item["generated_path"] = payload.get("file_path") or ""
-        item["model"] = payload.get("model") or ""
-        item["provider"] = payload.get("provider") or ""
-
-        next_idx = self._current_image_index(items)
-        if next_idx is None:
-            session.metadata.pop(self._image_queue_key(), None)
-            self.sessions.save(session)
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=(
-                    f"Generated image {idx + 1}/{len(items)}: `{payload.get('file_path', '')}`\n"
-                    "All staged images are processed."
-                ),
-            )
-
-        self.sessions.save(session)
-        next_item = items[next_idx]
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=(
-                f"Generated image {idx + 1}/{len(items)}: `{payload.get('file_path', '')}`\n\n"
-                + self._format_image_preview(next_item, position=next_idx + 1, total=len(items))
-            ),
-        )
+        return await self._image_flow.handle_confirm(msg, session)
 
     def _handle_image_edit(self, msg: InboundMessage, session: Session, feedback: str) -> OutboundMessage:
-        queue = self._get_image_queue(session)
-        items: list[dict[str, Any]] = queue["items"]
-        idx = self._current_image_index(items)
-        if idx is None:
-            session.metadata.pop(self._image_queue_key(), None)
-            self.sessions.save(session)
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="No pending image prompt to edit.",
-            )
-        if not feedback.strip():
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="Usage: `/image-edit <feedback>`",
-            )
-
-        item = items[idx]
-        base_prompt = item.get("base_prompt") or item.get("prompt") or ""
-        item["base_prompt"] = base_prompt
-        item["prompt"] = f"{base_prompt}\n\nRevision request: {feedback.strip()}"
-        self.sessions.save(session)
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=self._format_image_preview(item, position=idx + 1, total=len(items)),
-        )
+        return self._image_flow.handle_edit(msg, session, feedback)
 
     def _handle_image_skip(self, msg: InboundMessage, session: Session) -> OutboundMessage:
-        queue = self._get_image_queue(session)
-        items: list[dict[str, Any]] = queue["items"]
-        idx = self._current_image_index(items)
-        if idx is None:
-            session.metadata.pop(self._image_queue_key(), None)
-            self.sessions.save(session)
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="No pending image prompt to skip.",
-            )
-
-        items[idx]["status"] = "skipped"
-        next_idx = self._current_image_index(items)
-        if next_idx is None:
-            session.metadata.pop(self._image_queue_key(), None)
-            self.sessions.save(session)
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=f"Skipped image {idx + 1}/{len(items)}. No more staged images remain.",
-            )
-
-        self.sessions.save(session)
-        next_item = items[next_idx]
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=(
-                f"Skipped image {idx + 1}/{len(items)}.\n\n"
-                + self._format_image_preview(next_item, position=next_idx + 1, total=len(items))
-            ),
-        )
+        return self._image_flow.handle_skip(msg, session)
 
     @classmethod
     def _session_coding_mode(cls, session: Session) -> str:
@@ -660,131 +450,18 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
-    @staticmethod
-    def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
-        """Estimate token usage from message payload size."""
-        total_chars = 0
-
-        def walk(v: Any) -> None:
-            nonlocal total_chars
-            if isinstance(v, str):
-                total_chars += len(v)
-                return
-            if isinstance(v, dict):
-                for vv in v.values():
-                    walk(vv)
-                return
-            if isinstance(v, list):
-                for vv in v:
-                    walk(vv)
-                return
-
-        walk(messages)
-        # Rough heuristic for mixed CJK/English prompts.
-        return max(1, (total_chars + 2) // 3)
-
-    @staticmethod
-    def _token_guard_band_from_score(total: int) -> tuple[str, str]:
-        if total <= 5:
-            return "minimal", "<2k"
-        if total <= 9:
-            return "small", "2k-8k"
-        if total <= 14:
-            return "medium", "8k-25k"
-        if total <= 19:
-            return "large", "25k-60k"
-        return "extreme", "60k+"
-
-    @staticmethod
-    def _token_guard_band_index(risk: str) -> int:
-        return {"minimal": 0, "small": 1, "medium": 2, "large": 3, "extreme": 4}[risk]
-
-    @classmethod
-    def _token_guard_risk_from_index(cls, index: int) -> str:
-        return ("minimal", "small", "medium", "large", "extreme")[max(0, min(4, index))]
-
-    @staticmethod
-    def _flatten_message_text(content: Any) -> str:
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            parts: list[str] = []
-            for item in content:
-                if isinstance(item, dict):
-                    if item.get("type") == "text":
-                        text = item.get("text")
-                        if isinstance(text, str):
-                            parts.append(text)
-                    elif item.get("type") == "image_url":
-                        parts.append("[image]")
-            return "\n".join(parts)
-        return ""
-
     def _token_guard_state(self, session: Session) -> dict[str, Any]:
-        raw = session.metadata.get(self._TOKEN_GUARD_STATE_KEY)
-        state = raw if isinstance(raw, dict) else {}
-
-        default_mode = str(self.token_guard.default_mode or "on").strip().lower()
-        if default_mode not in self._TOKEN_GUARD_MODES:
-            default_mode = "on"
-        mode = str(state.get("mode") or default_mode).strip().lower()
-        if mode not in self._TOKEN_GUARD_MODES:
-            mode = default_mode
-
-        try:
-            budget_k = int(state.get("budget_k", self.token_guard.default_budget_k))
-        except (TypeError, ValueError):
-            budget_k = int(self.token_guard.default_budget_k)
-        budget_k = max(1, budget_k)
-
-        pending_message = state.get("pending_message")
-        if not isinstance(pending_message, str) or not pending_message.strip():
-            pending_message = None
-
-        return {
-            "mode": mode,
-            "budget_k": budget_k,
-            "pending_message": pending_message,
-        }
+        return self._token_guard_controller.state(session)
 
     def _save_token_guard_state(self, session: Session, state: dict[str, Any]) -> None:
-        pending_message = state.get("pending_message")
-        session.metadata[self._TOKEN_GUARD_STATE_KEY] = {
-            "mode": state["mode"],
-            "budget_k": int(state["budget_k"]),
-            "pending_message": pending_message if isinstance(pending_message, str) and pending_message.strip() else None,
-        }
-        self.sessions.save(session)
+        self._token_guard_controller.save_state(session, state)
 
     def _clear_token_guard_pending(self, session: Session, *, save: bool) -> None:
-        state = self._token_guard_state(session)
-        if state.get("pending_message") is None:
-            return
-        state["pending_message"] = None
-        if save:
-            self._save_token_guard_state(session, state)
-        else:
-            session.metadata[self._TOKEN_GUARD_STATE_KEY] = {
-                "mode": state["mode"],
-                "budget_k": state["budget_k"],
-                "pending_message": None,
-            }
+        self._token_guard_controller.clear_pending(session, save=save)
 
     @classmethod
     def _parse_token_guard_control(cls, content: str) -> tuple[str, str | int] | None:
-        raw = content.strip()
-        if not raw:
-            return None
-        lowered = raw.lower()
-        if match := re.fullmatch(r"token\s*guard\s*:\s*(off|on|strict|relaxed)", lowered):
-            return "mode", match.group(1)
-        if match := re.fullmatch(r"token\s*budget\s*:\s*(\d+)\s*k", lowered):
-            return "budget", int(match.group(1))
-        if lowered in {"stop blocking", "stop warning"}:
-            return "mode", "relaxed"
-        if lowered == "just do it":
-            return "mode", "off"
-        return None
+        return TokenGuardController.parse_control(content)
 
     @classmethod
     def _is_token_guard_proceed_message(cls, content: str) -> bool:
@@ -793,43 +470,6 @@ class AgentLoop:
     @classmethod
     def _is_token_guard_cancel_message(cls, content: str) -> bool:
         return content.strip().lower() in cls._TOKEN_GUARD_CANCEL_ALIASES
-
-    @classmethod
-    def _classify_task_topic(cls, text: str) -> str:
-        lowered = text.lower()
-        if cls._looks_like_coding_request(text):
-            return "code"
-        if any(token in lowered for token in ("doc", "docs", "readme", "documentation", "文档", "说明")):
-            return "doc"
-        if any(token in lowered for token in ("image", "images", "picture", "图片", "截图", "pdf")):
-            return "image"
-        if any(token in lowered for token in ("analysis", "analyze", "review", "总结", "分析", "评估")):
-            return "analysis"
-        return "other"
-
-    @staticmethod
-    def _token_guard_risk_label(risk: str) -> str:
-        return {
-            "minimal": "低风险",
-            "small": "低风险",
-            "medium": "中风险",
-            "large": "大",
-            "extreme": "极高",
-        }[risk]
-
-    @staticmethod
-    def _token_guard_cache_label(level: str) -> str:
-        return {"high": "高", "medium": "中", "low": "低"}[level]
-
-    @staticmethod
-    def _token_guard_effective_increment_label(risk: str) -> str:
-        return {
-            "minimal": "低",
-            "small": "低",
-            "medium": "中",
-            "large": "高",
-            "extreme": "极高",
-        }[risk]
 
     def _assess_token_guard(
         self,
@@ -840,303 +480,25 @@ class AgentLoop:
         coding_enabled: bool,
         mode: str,
         parsed_cmd: str,
-    ) -> _TokenGuardAssessment:
-        lowered = msg.content.lower()
-        history_tokens = self._estimate_tokens(history)
-        current_tokens = self._estimate_tokens(
-            [{"role": "user", "content": {"text": msg.content, "media": ["[attachment]"] * len(msg.media or [])}}]
-        )
-        media_count = len(msg.media or [])
-        user_turns = sum(1 for item in history if item.get("role") == "user")
-
-        if current_tokens < 250:
-            signal_a = 0
-        elif current_tokens < 1_200:
-            signal_a = 1
-        elif current_tokens < 4_000:
-            signal_a = 2
-        else:
-            signal_a = 3
-
-        mentioned_heavy_files = any(token in lowered for token in ("pdf", "images", "screenshots", "截图", "图片", "附件"))
-        if media_count == 0 and not mentioned_heavy_files:
-            signal_b = 0
-        elif media_count <= 2:
-            signal_b = 1
-        elif media_count <= 6 or mentioned_heavy_files:
-            signal_b = 2
-        else:
-            signal_b = 3
-
-        repo_wide = any(
-            token in lowered
-            for token in (
-                "repo-wide", "repository-wide", "whole repo", "entire repo", "entire project", "all files",
-                "整个仓库", "整个项目", "全仓", "所有文件", "全项目",
-            )
-        )
-        multi_file = repo_wide or self._looks_like_large_change_request(msg.content) or any(
-            token in lowered for token in ("across files", "multiple files", "many files", "多文件", "跨文件")
-        )
-        if repo_wide:
-            signal_c = 3
-        elif multi_file:
-            signal_c = 2
-        elif coding_enabled or self._looks_like_path_or_code(msg.content):
-            signal_c = 1
-        else:
-            signal_c = 0
-
-        process_markers = [
-            "search", "scan", "grep", "read", "edit", "patch", "modify", "test", "verify", "debug", "trace",
-            "搜索", "扫描", "读取", "修改", "补丁", "测试", "验证", "排查", "重构",
-        ]
-        process_hits = sum(1 for marker in process_markers if marker in lowered)
-        if (signal_c >= 2 and process_hits >= 3) or ("step by step" in lowered) or ("逐步" in lowered):
-            signal_d = 3
-        elif process_hits >= 2 or (coding_enabled and signal_c >= 2):
-            signal_d = 2
-        elif coding_enabled or process_hits >= 1:
-            signal_d = 1
-        else:
-            signal_d = 0
-
-        exhaustive = any(
-            token in lowered
-            for token in (
-                "exhaustive", "every", "everything", "list all", "all possible", "item by item",
-                "逐项", "穷举", "全量", "全部列出", "详细列出", "所有可能",
-            )
-        )
-        detailed = exhaustive or any(
-            token in lowered for token in ("detailed", "deep dive", "full report", "详细", "完整报告", "深入")
-        )
-        if exhaustive and signal_c >= 2:
-            signal_e = 3
-        elif detailed:
-            signal_e = 2
-        elif any(token in lowered for token in ("explain", "summary", "说明", "总结")):
-            signal_e = 1
-        else:
-            signal_e = 0
-
-        if history_tokens < 4_000 and user_turns < 8:
-            signal_f = 0
-        elif history_tokens < 12_000 and user_turns < 20:
-            signal_f = 1
-        elif history_tokens < 30_000 and user_turns < 50:
-            signal_f = 2
-        else:
-            signal_f = 3
-
-        risk_tags: list[str] = []
-        waste_tags: list[str] = []
-
-        previous_user_text = ""
-        for item in reversed(history):
-            if item.get("role") == "user":
-                previous_user_text = self._flatten_message_text(item.get("content"))
-                break
-        current_topic = self._classify_task_topic(msg.content)
-        previous_topic = self._classify_task_topic(previous_user_text) if previous_user_text else "other"
-
-        signal_g = 0
-        if signal_f > 0 and previous_topic not in {"other", current_topic}:
-            signal_g = 2 if signal_f >= 2 else 1
-            waste_tags.append("CROSS_THEME")
-        if signal_f >= 2 and signal_a >= 2 and any(
-            token in lowered for token in ("rules", "instructions", "requirements", "policy", "规则", "要求", "约束")
-        ):
-            signal_g = max(signal_g, 2)
-            waste_tags.append("REPEATED_RULES")
-        if signal_f >= 3 and signal_a >= 2:
-            signal_g = max(signal_g, 3)
-
-        tool_categories = 0
-        if any(token in lowered for token in ("web", "browse", "search online", "google", "internet", "网页", "联网")):
-            tool_categories += 1
-            risk_tags.append("HEAVY_BASH_WEB")
-        if any(token in lowered for token in ("bash", "shell", "terminal", "command", "git ", "pytest", "日志", "命令行")):
-            tool_categories += 1
-            if "HEAVY_BASH_WEB" not in risk_tags:
-                risk_tags.append("HEAVY_BASH_WEB")
-        if any(token in lowered for token in ("mcp", "server", "servers")):
-            tool_categories += 1
-            risk_tags.append("HEAVY_MCP")
-        if any(token in lowered for token in ("subagent", "agent loop", "spawn", "子代理")):
-            tool_categories += 1
-            risk_tags.append("SUBAGENT_HEAVY")
-        if tool_categories >= 3:
-            signal_h = 3
-        elif tool_categories == 2:
-            signal_h = 2
-        elif tool_categories == 1:
-            signal_h = 1
-        else:
-            signal_h = 0
-
-        signal_i = 0
-        switch_tags = 0
-        if parsed_cmd == "/model" or self._parse_natural_model_switch(msg.content):
-            signal_i = max(signal_i, 2)
-            switch_tags += 1
-            risk_tags.append("MODEL_SWITCH")
-        if any(token in lowered for token in ("thinking mode", "reasoning mode", "深度思考", "推理模式")):
-            signal_i = max(signal_i, 2)
-            switch_tags += 1
-            risk_tags.append("THINKING_SWITCH")
-        if any(token in lowered for token in ("switch tools", "tool strategy", "改用 mcp", "改用 web", "换工具")):
-            signal_i = max(signal_i, 1)
-            switch_tags += 1
-            risk_tags.append("TOOL_STRATEGY_SWITCH")
-        if switch_tags >= 2:
-            signal_i = max(signal_i, 3)
-
-        if signal_f >= 2:
-            risk_tags.append("LONG_SESSION")
-        if signal_c >= 3:
-            risk_tags.append("REPO_WIDE")
-        if signal_d >= 3:
-            risk_tags.append("TOOL_LOOP")
-        if signal_e >= 2:
-            risk_tags.append("BIG_OUTPUT")
-        if signal_b >= 2:
-            risk_tags.append("BIG_FILES")
-
-        total = signal_a + signal_b + signal_c + signal_d + signal_e + signal_f + signal_g + signal_h + signal_i
-        raw_risk, raw_range = self._token_guard_band_from_score(total)
-
-        cache_penalty = signal_f + signal_g + signal_i
-        if cache_penalty <= 2:
-            cache_friendliness = "high"
-        elif cache_penalty <= 5:
-            cache_friendliness = "medium"
-        else:
-            cache_friendliness = "low"
-
-        hard_triggered = any(
-            (
-                signal_c >= 2 and signal_d >= 3,
-                signal_b >= 3,
-                signal_f >= 2 and signal_c >= 3,
-                signal_i >= 2 and signal_f >= 2,
-                switch_tags >= 2,
-                signal_e >= 3 and signal_c >= 2,
-                signal_h >= 3 and signal_d >= 2,
-            )
-        )
-
-        final_index = self._token_guard_band_index(raw_risk)
-        if hard_triggered:
-            final_index = self._token_guard_band_index("extreme")
-        else:
-            if raw_risk in {"large", "extreme"} and cache_friendliness == "high":
-                final_index -= 1
-            if raw_risk in {"medium", "large", "extreme"} and cache_friendliness == "low":
-                final_index += 1
-            if switch_tags > 0:
-                final_index += 1
-            if mode == "strict":
-                final_index += 1
-            elif mode == "relaxed":
-                final_index -= 1
-        final_risk = self._token_guard_risk_from_index(final_index)
-        _, effective_range = self._token_guard_band_from_score(
-            {self._token_guard_risk_from_index(i): s for i, s in enumerate((0, 6, 10, 15, 20))}[final_risk]
-        )
-
-        driver_candidates: list[tuple[int, str]] = []
-        if signal_f >= 2:
-            driver_candidates.append((signal_f, f"当前会话已经偏长，历史上下文粗估约 {history_tokens} tokens。"))
-        if signal_c >= 3:
-            driver_candidates.append((signal_c + 1, "请求范围接近仓库级或项目级。"))
-        elif signal_c == 2:
-            driver_candidates.append((signal_c, "请求已经扩展到多文件或多模块范围。"))
-        if signal_d >= 2:
-            driver_candidates.append((signal_d, "任务很可能进入 search-read-edit-test 这类多步工具循环。"))
-        if signal_h >= 2:
-            driver_candidates.append((signal_h, "Bash/Web/MCP 等高开销工具链暴露较多。"))
-        if signal_e >= 2:
-            driver_candidates.append((signal_e, "你要求的输出偏长或偏全量。"))
-        if signal_i >= 2:
-            driver_candidates.append((signal_i, "当前请求包含模型、思考模式或工具策略切换。"))
-        if signal_a >= 2:
-            driver_candidates.append((signal_a, f"当前输入本身已经较长，粗估约 {current_tokens} tokens。"))
-        if signal_g >= 2:
-            driver_candidates.append((signal_g, "当前前缀缓存友好度较低，重复成本更高。"))
-        drivers = [text for _, text in sorted(driver_candidates, key=lambda item: item[0], reverse=True)[:3]]
-        if not drivers:
-            drivers = ["当前请求没有明显的高成本模式。"]
-
-        alternatives: list[str] = []
-        if signal_c >= 2:
-            alternatives.append("先把范围缩到一个目录、模块或文件集，再逐批推进。")
-        if signal_f >= 2:
-            alternatives.append("考虑先开新会话，或者先压缩上下文后再继续。")
-        if signal_h >= 2:
-            alternatives.append("先用 grep/read 缩小范围，避免把大段工具输出重新喂回上下文。")
-        if signal_e >= 2:
-            alternatives.append("先给结论和补丁计划，详细展开按需追加。")
-        if not alternatives:
-            alternatives = [
-                "先限定问题表面，再决定是否需要扩大范围。",
-                "先输出结论和执行计划，细节按需展开。",
-                "先验证最高价值的子集，再决定是否继续扩展。",
-            ]
-
-        return _TokenGuardAssessment(
+    ) -> TokenGuardAssessment:
+        return self._token_guard_controller.assess(
+            session=session,
+            history=history,
+            msg=msg,
+            coding_enabled=coding_enabled,
             mode=mode,
-            total_score=total,
-            raw_risk=raw_risk,
-            final_risk=final_risk,
-            raw_range=raw_range,
-            effective_range=effective_range,
-            cache_friendliness=cache_friendliness,
-            effective_increment=self._token_guard_effective_increment_label(final_risk),
-            risk_tags=sorted(set(risk_tags)),
-            waste_tags=sorted(set(waste_tags)),
-            drivers=drivers,
-            alternatives=alternatives[:3],
-            hard_triggered=hard_triggered,
+            parsed_cmd=parsed_cmd,
         )
 
-    def _token_guard_intercept_message(self, state: dict[str, Any], assessment: _TokenGuardAssessment) -> str:
-        risk_tags = assessment.risk_tags or ["NONE"]
-        return (
-            "⚠️ Token Guard 拦截\n\n"
-            f"风险等级：{self._token_guard_risk_label(assessment.final_risk)}\n"
-            f"缓存友好度：{self._token_guard_cache_label(assessment.cache_friendliness)}\n"
-            f"预计有效新增：{assessment.effective_increment}\n"
-            f"你的 TokenBudget：{state['budget_k']}k，仅供参考\n\n"
-            "主要耗费点（前 3 项）：\n"
-            f"1. {assessment.drivers[0]}\n"
-            f"2. {assessment.drivers[1] if len(assessment.drivers) > 1 else assessment.drivers[0]}\n"
-            f"3. {assessment.drivers[2] if len(assessment.drivers) > 2 else assessment.drivers[-1]}\n\n"
-            "已识别风险标签：\n"
-            f"{', '.join(risk_tags)}\n\n"
-            "推荐低成本替代方案：\n"
-            f"- {assessment.alternatives[0]}\n"
-            f"- {assessment.alternatives[1] if len(assessment.alternatives) > 1 else assessment.alternatives[0]}\n"
-            f"- {assessment.alternatives[2] if len(assessment.alternatives) > 2 else assessment.alternatives[-1]}\n\n"
-            "继续方式：\n"
-            "- 回复「继续 / 批准 / ok / proceed」= 仅放行本次原任务\n"
-            "- 或直接给一个缩小范围、降低浪费的新指令"
-        )
+    def _token_guard_intercept_message(self, state: dict[str, Any], assessment: TokenGuardAssessment) -> str:
+        return self._token_guard_controller.intercept_message(state, assessment)
 
     def _append_token_guard_estimate(
         self,
         content: str | None,
-        assessment: _TokenGuardAssessment,
+        assessment: TokenGuardAssessment,
     ) -> str | None:
-        if not content:
-            return content
-        risk = "低风险" if assessment.final_risk in {"minimal", "small"} else "中风险"
-        line = (
-            f"Token Guard：原始体量 ≈ {assessment.raw_range}，缓存友好度 "
-            f"{self._token_guard_cache_label(assessment.cache_friendliness)}，预计有效新增 ≈ "
-            f"{assessment.effective_range} tokens（{risk}，粗估）"
-        )
-        return content.rstrip() + "\n\n" + line
+        return self._token_guard_controller.append_estimate(content, assessment)
 
     @classmethod
     def _normalize_user_command(cls, content: str) -> str:
@@ -1162,19 +524,7 @@ class AgentLoop:
 
     @staticmethod
     def _parse_natural_model_switch(content: str) -> str | None:
-        """Recognize natural-language model switch requests."""
-        patterns = (
-            r"^(?:请)?(?:把)?模型(?:切换|换|改)(?:到|成|为)?\s+(.+)$",
-            r"^(?:请)?(?:把)?模型切换(?:到|成|为)?\s+(.+)$",
-            r"^(?:请)?(?:把)?模型换成\s+(.+)$",
-            r"^(?:请)?(?:把)?模型改成\s+(.+)$",
-            r"^(?:请)?使用模型\s+(.+)$",
-        )
-        for pattern in patterns:
-            match = re.match(pattern, content.strip(), flags=re.IGNORECASE)
-            if match:
-                return match.group(1).strip()
-        return None
+        return ModelSelectionController.parse_natural_model_switch(content)
 
     @staticmethod
     def _parse_natural_cron_retry(content: str) -> str | None:
@@ -1190,20 +540,10 @@ class AgentLoop:
         return None
 
     def _apply_model_provider(self, provider: LLMProvider, model: str, provider_name: str | None) -> None:
-        """Update runtime provider/model state for the main loop and subagents."""
-        self.provider = provider
-        self.provider_name = provider_name
-        self.model = model
-        self.subagents.provider = provider
-        self.subagents.model = model
+        self._model_selection.apply_model_provider(provider, model, provider_name)
 
     def _session_model_selection(self, session: Session) -> tuple[str | None, str | None]:
-        raw = session.metadata.get(self._MODEL_SELECTION_KEY)
-        if not isinstance(raw, dict):
-            return None, None
-        model = str(raw.get("model") or "").strip() or None
-        provider_name = str(raw.get("provider_name") or "").strip() or None
-        return model, provider_name
+        return self._model_selection.session_model_selection(session)
 
     def _persist_session_model_selection(
         self,
@@ -1212,15 +552,14 @@ class AgentLoop:
         model: str,
         provider_name: str | None,
     ) -> None:
-        session.metadata[self._MODEL_SELECTION_KEY] = {
-            "model": model,
-            "provider_name": provider_name,
-        }
-        self.sessions.save(session)
+        self._model_selection.persist_session_model_selection(
+            session,
+            model=model,
+            provider_name=provider_name,
+        )
 
     def _clear_session_model_selection(self, session: Session) -> None:
-        session.metadata.pop(self._MODEL_SELECTION_KEY, None)
-        self.sessions.save(session)
+        self._model_selection.clear_session_model_selection(session)
 
     def _operator_action(self, session: Session) -> dict[str, Any] | None:
         raw = session.metadata.get(self._OPERATOR_ACTION_KEY)
@@ -1377,110 +716,25 @@ class AgentLoop:
         )
 
     def _effective_session_model(self, session: Session) -> tuple[str, str | None]:
-        model, provider_name = self._session_model_selection(session)
-        return model or self._default_model, provider_name or self._default_provider_name
+        return self._model_selection.effective_session_model(session)
 
     def _reset_model_provider(self) -> None:
-        """Restore runtime model/provider to startup defaults."""
-        self._apply_model_provider(self._default_provider, self._default_model, self._default_provider_name)
-
-    def _invoke_provider_switcher(
-        self,
-        requested_model: str | None,
-        provider_name: str | None = None,
-    ) -> tuple[LLMProvider, str, str | None]:
-        if self._provider_switcher is None:
-            raise RuntimeError("provider switcher not configured")
-        try:
-            return self._provider_switcher(requested_model, provider_name)
-        except TypeError:
-            return self._provider_switcher(requested_model)
+        self._model_selection.reset_model_provider()
 
     def _switch_model_provider(self, requested_model: str, provider_name: str | None = None) -> None:
-        """Switch runtime model/provider for subsequent turns."""
-        if self._provider_switcher:
-            provider, model, resolved_provider_name = self._invoke_provider_switcher(
-                requested_model,
-                provider_name,
-            )
-            self._apply_model_provider(provider, model, resolved_provider_name)
-            return
-        self.model = requested_model
-        self.provider_name = provider_name
-        self.subagents.model = requested_model
+        self._model_selection.switch_model_provider(requested_model, provider_name)
 
     def _restore_session_model_provider(self, session: Session) -> None:
-        """Restore runtime provider/model for the active session."""
-        selected_model, selected_provider_name = self._session_model_selection(session)
-        if not selected_model:
-            self._reset_model_provider()
-            return
-        try:
-            self._switch_model_provider(selected_model, provider_name=selected_provider_name)
-        except Exception as e:
-            logger.warning("Failed to restore session model {} for {}: {}", selected_model, session.key, e)
-            self._clear_session_model_selection(session)
-            self._reset_model_provider()
+        self._model_selection.restore_session_model_provider(session)
 
     def _available_models_for_session(self, session: Session) -> list[AvailableModel]:
-        current_model, current_provider_name = self._effective_session_model(session)
-        options: list[AvailableModel] = []
-        seen: set[str] = set()
-
-        def add(model: str, provider_name: str | None = None, source: str | None = None) -> None:
-            normalized = str(model or "").strip()
-            if not normalized or normalized in seen:
-                return
-            seen.add(normalized)
-            options.append(AvailableModel(normalized, provider_name=provider_name, source=source))
-
-        if self._available_models_provider:
-            for option in self._available_models_provider(current_model, current_provider_name):
-                add(option.model, option.provider_name, option.source)
-        else:
-            add(self._default_model, self._default_provider_name, "default")
-            add(current_model, current_provider_name, "current")
-            for model in self._coding_route_raw_models():
-                add(model, source="coding")
-        return options
+        return self._model_selection.available_models_for_session(session)
 
     def _format_available_models(self, session: Session) -> str:
-        current_model, current_provider_name = self._effective_session_model(session)
-        lines = [
-            f"Current model: `{current_model}`",
-            f"Current provider: `{current_provider_name or 'unknown'}`",
-            "",
-            "Available models:",
-        ]
-        for idx, option in enumerate(self._available_models_for_session(session), start=1):
-            details: list[str] = []
-            tags: list[str] = []
-            if option.provider_name:
-                details.append(f"provider: `{option.provider_name}`")
-            if option.model == current_model:
-                tags.append("current")
-            if option.model == self._default_model:
-                tags.append("default")
-            if option.source == "coding":
-                tags.append("coding")
-            if tags:
-                details.append(", ".join(tags))
-            suffix = f" ({'; '.join(details)})" if details else ""
-            lines.append(f"{idx}. `{option.model}`{suffix}")
-        lines.append("")
-        lines.append("Use `/model <name>` or `/model <number>` to switch, or `/model reset` to restore default.")
-        return "\n".join(lines)
+        return self._model_selection.format_available_models(session)
 
     def _resolve_model_selection_argument(self, session: Session, arg: str) -> tuple[str, str | None]:
-        normalized = arg.strip()
-        if not normalized.isdigit():
-            return normalized, None
-        index = int(normalized)
-        options = self._available_models_for_session(session)
-        if index < 1 or index > len(options):
-            raise ValueError(f"Model index {index} is out of range. Use `/model list` to inspect available models.")
-        option = options[index - 1]
-        return option.model, option.provider_name
+        return self._model_selection.resolve_model_selection_argument(session, arg)
 
     def _coding_route_raw_models(self) -> list[str]:
         primary = str(getattr(self.coding_config, "primary_model", "")).strip()
