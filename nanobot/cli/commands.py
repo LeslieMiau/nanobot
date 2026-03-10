@@ -1,13 +1,10 @@
 """CLI commands for nanobot."""
 
 import asyncio
-import fcntl
 import json
 import os
-import re
 import select
 import signal
-import subprocess
 import sys
 from pathlib import Path
 
@@ -33,11 +30,21 @@ from rich.table import Table
 from rich.text import Text
 
 from nanobot import __logo__, __version__
-from nanobot.app.gateway import run_gateway
-from nanobot.cli.bootstrap import (
+from nanobot.app.gateway import (
+    _GatewayInstanceLock,
+    _find_other_gateway_processes,
+    _gateway_lock_path,
+    run_gateway,
+)
+from nanobot.app.prompts import (
+    build_cron_execution_message as _build_cron_execution_message,
+    build_heartbeat_execution_message as _build_heartbeat_execution_message,
+    should_deliver_heartbeat_response as _should_deliver_heartbeat_response,
+)
+from nanobot.app.runtime import (
     build_agent_runtime,
-    load_runtime_config as _bootstrap_load_runtime_config,
-    make_provider as _bootstrap_make_provider,
+    load_runtime_config as _runtime_load_config,
+    make_provider as _runtime_make_provider,
 )
 from nanobot.config.paths import get_workspace_path
 from nanobot.config.schema import Config
@@ -58,82 +65,6 @@ EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 
 _PROMPT_SESSION: PromptSession | None = None
 _SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
-
-
-class _GatewayInstanceLock:
-    """Best-effort single-instance lock for gateway mode."""
-
-    def __init__(self, path: Path):
-        self.path = path
-        self._fh = None
-
-    def acquire(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._fh = self.path.open("a+", encoding="utf-8")
-        try:
-            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise RuntimeError("gateway lock is already held") from exc
-        self._fh.seek(0)
-        self._fh.truncate()
-        self._fh.write(str(os.getpid()))
-        self._fh.flush()
-
-    def release(self) -> None:
-        if not self._fh:
-            return
-        try:
-            fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
-        except Exception:
-            pass
-        self._fh.close()
-        self._fh = None
-
-
-def _gateway_lock_path() -> Path:
-    from nanobot.config.loader import get_config_path
-
-    return get_config_path().parent / "gateway.lock"
-
-
-def _looks_like_gateway_command(command: str) -> bool:
-    lowered = command.lower()
-    return bool(
-        re.search(r"(^|\s)(?:\S*/)?nanobot(?:\.py)?\s+gateway(?:\s|$)", lowered)
-        or re.search(
-            r"(^|\s)(?:\S*/)?python(?:\d+(?:\.\d+)*)?\s+-m\s+nanobot(?:\.cli\.commands)?\s+gateway(?:\s|$)",
-            lowered,
-        )
-    )
-
-
-def _find_other_gateway_processes() -> list[tuple[int, str]]:
-    """Find other local nanobot gateway processes by scanning the process table."""
-    try:
-        result = subprocess.run(
-            ["ps", "-ax", "-o", "pid=,command="],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except Exception:
-        return []
-
-    current_pid = os.getpid()
-    matches: list[tuple[int, str]] = []
-    for raw_line in result.stdout.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        parts = line.split(None, 1)
-        if len(parts) != 2 or not parts[0].isdigit():
-            continue
-        pid = int(parts[0])
-        command = parts[1].strip()
-        if pid == current_pid or not _looks_like_gateway_command(command):
-            continue
-        matches.append((pid, command))
-    return matches
 
 
 def _flush_pending_tty_input() -> None:
@@ -300,55 +231,12 @@ def onboard():
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
-    return _bootstrap_make_provider(config, console=console)
+    return _runtime_make_provider(config, console=console)
 
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
     """Load config and optionally override the active workspace."""
-    return _bootstrap_load_runtime_config(config, workspace, console=console)
-
-
-def _build_heartbeat_execution_message(tasks_summary: str, heartbeat_content: str) -> str:
-    """Build the phase 2 heartbeat prompt for the full agent loop."""
-    summary = tasks_summary.strip() if tasks_summary.strip() else "(empty)"
-    content = heartbeat_content.strip() if heartbeat_content.strip() else "(missing)"
-    return (
-        "You are executing heartbeat tasks.\n"
-        "Use the current local time from the runtime context.\n"
-        "Re-evaluate the full HEARTBEAT.md below before acting.\n"
-        "Check any referenced marker or output files before execution.\n"
-        "Execute only tasks that are actually due right now.\n"
-        "Return only the final user-facing content that should be delivered right now.\n"
-        "Do not include execution notes, phase labels, methods, thought process, task recap, or tool narration.\n"
-        "If no task is due right now, return exactly NOOP and nothing else.\n\n"
-        "Phase 1 summary:\n"
-        f"{summary}\n\n"
-        "Full HEARTBEAT.md:\n"
-        f"{content}"
-    )
-
-
-def _build_cron_execution_message(job_name: str, instruction: str) -> str:
-    """Build the scheduled-task prompt for the full agent loop."""
-    name = job_name.strip() if job_name.strip() else "(unnamed)"
-    scheduled_instruction = instruction.strip() if instruction.strip() else "(missing)"
-    return (
-        "You are executing a scheduled task.\n"
-        "Use the current local time from the runtime context.\n"
-        "Return only the final user-facing content that should be delivered now.\n"
-        "Do not include execution notes, phase labels, methods, thought process, task recap, or tool narration.\n\n"
-        "Scheduled task name:\n"
-        f"{name}\n\n"
-        "Scheduled instruction:\n"
-        f"{scheduled_instruction}"
-    )
-
-
-def _should_deliver_heartbeat_response(response: str | None) -> bool:
-    """Return True only when the heartbeat result should be delivered to the user."""
-    if not response:
-        return False
-    return response.strip().upper() != "NOOP"
+    return _runtime_load_config(config, workspace, console=console)
 
 
 # ============================================================================
@@ -370,17 +258,13 @@ def gateway(
         verbose=verbose,
         config_path=config,
         console=console,
-        logo=__logo__,
-        argv=sys.argv[1:],
-        load_runtime_config=_load_runtime_config,
-        sync_templates=sync_workspace_templates,
-        make_provider=_make_provider,
+        restart_args=sys.argv[1:],
+        load_config_fn=_load_runtime_config,
+        sync_templates_fn=sync_workspace_templates,
+        provider_factory=_make_provider,
         find_other_gateway_processes=_find_other_gateway_processes,
         gateway_lock_cls=_GatewayInstanceLock,
         gateway_lock_path_factory=_gateway_lock_path,
-        build_cron_execution_message=_build_cron_execution_message,
-        build_heartbeat_execution_message=_build_heartbeat_execution_message,
-        should_deliver_heartbeat_response=_should_deliver_heartbeat_response,
     )
 
 

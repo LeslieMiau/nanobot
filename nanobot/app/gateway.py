@@ -3,17 +3,103 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import os
+import re
+import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
 from rich.console import Console
 
-from nanobot.cli.bootstrap import build_agent_runtime
+from nanobot import __logo__
+from nanobot.app.prompts import (
+    build_cron_execution_message,
+    build_heartbeat_execution_message,
+    should_deliver_heartbeat_response,
+)
+from nanobot.app.runtime import build_agent_runtime, load_runtime_config, make_provider
+from nanobot.utils.helpers import sync_workspace_templates
 
 if TYPE_CHECKING:
     from nanobot.config.schema import Config
+
+
+class _GatewayInstanceLock:
+    """Best-effort single-instance lock for gateway mode."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self._fh = None
+
+    def acquire(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = self.path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError("gateway lock is already held") from exc
+        self._fh.seek(0)
+        self._fh.truncate()
+        self._fh.write(str(os.getpid()))
+        self._fh.flush()
+
+    def release(self) -> None:
+        if not self._fh:
+            return
+        try:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        self._fh.close()
+        self._fh = None
+
+
+def _gateway_lock_path() -> Path:
+    from nanobot.config.loader import get_config_path
+
+    return get_config_path().parent / "gateway.lock"
+
+
+def _looks_like_gateway_command(command: str) -> bool:
+    lowered = command.lower()
+    return bool(
+        re.search(r"(^|\s)(?:\S*/)?nanobot(?:\.py)?\s+gateway(?:\s|$)", lowered)
+        or re.search(
+            r"(^|\s)(?:\S*/)?python(?:\d+(?:\.\d+)*)?\s+-m\s+nanobot(?:\.cli\.commands)?\s+gateway(?:\s|$)",
+            lowered,
+        )
+    )
+
+
+def _find_other_gateway_processes() -> list[tuple[int, str]]:
+    """Find other local nanobot gateway processes by scanning the process table."""
+    try:
+        result = subprocess.run(
+            ["ps", "-ax", "-o", "pid=,command="],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except Exception:
+        return []
+
+    current_pid = os.getpid()
+    matches: list[tuple[int, str]] = []
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) != 2 or not parts[0].isdigit():
+            continue
+        pid = int(parts[0])
+        command = parts[1].strip()
+        if pid == current_pid or not _looks_like_gateway_command(command):
+            continue
+        matches.append((pid, command))
+    return matches
 
 
 def run_gateway(
@@ -22,20 +108,16 @@ def run_gateway(
     workspace: str | None,
     verbose: bool,
     config_path: str | None,
-    console: Console,
-    logo: str,
-    argv: Sequence[str],
-    load_runtime_config: Callable[[str | None, str | None], Config],
-    sync_templates: Callable[[Path], Any],
-    make_provider: Callable[[Config], Any],
-    find_other_gateway_processes: Callable[[], list[tuple[int, str]]],
-    gateway_lock_cls: Callable[[Path], Any],
-    gateway_lock_path_factory: Callable[[], Path],
-    build_cron_execution_message: Callable[[str, str], str],
-    build_heartbeat_execution_message: Callable[[str, str], str],
-    should_deliver_heartbeat_response: Callable[[str | None], bool],
+    console: Console | None = None,
+    restart_args: Sequence[str] | None = None,
+    load_config_fn: Callable[[str | None, str | None], Config] | None = None,
+    sync_templates_fn: Callable[[Path], Any] | None = None,
+    provider_factory: Callable[[Config], Any] | None = None,
+    find_other_gateway_processes: Callable[[], list[tuple[int, str]]] | None = None,
+    gateway_lock_cls: Callable[[Path], Any] | None = None,
+    gateway_lock_path_factory: Callable[[], Path] | None = None,
 ) -> None:
-    """Run the nanobot gateway with injected entrypoint helpers."""
+    """Run the nanobot gateway with overridable runtime dependencies."""
     from loguru import logger
 
     from nanobot.bus.events import OutboundMessage
@@ -51,7 +133,25 @@ def run_gateway(
 
         logging.basicConfig(level=logging.DEBUG)
 
-    config = load_runtime_config(config_path, workspace)
+    console = console or Console()
+    restart_argv = list(restart_args or sys.argv[1:])
+
+    if load_config_fn is None:
+        def load_config_fn(config_path_arg: str | None, workspace_arg: str | None) -> Config:
+            return load_runtime_config(config_path_arg, workspace_arg, console=console)
+    if sync_templates_fn is None:
+        sync_templates_fn = sync_workspace_templates
+    if provider_factory is None:
+        def provider_factory(config_obj: Config) -> Any:
+            return make_provider(config_obj, console=console)
+    if find_other_gateway_processes is None:
+        find_other_gateway_processes = _find_other_gateway_processes
+    if gateway_lock_cls is None:
+        gateway_lock_cls = _GatewayInstanceLock
+    if gateway_lock_path_factory is None:
+        gateway_lock_path_factory = _gateway_lock_path
+
+    config = load_config_fn(config_path, workspace)
     if others := find_other_gateway_processes():
         console.print("[red]Another nanobot gateway instance is already running.[/red]")
         for pid, command in others:
@@ -66,8 +166,8 @@ def run_gateway(
         raise SystemExit(1) from exc
 
     try:
-        console.print(f"{logo} Starting nanobot gateway on port {port}...")
-        sync_templates(config.workspace_path)
+        console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
+        sync_templates_fn(config.workspace_path)
         session_manager = SessionManager(config.workspace_path)
         repo_sync_cfg = config.gateway.repo_sync
         legacy_repo_sync_marker = "__repo_sync__::"
@@ -132,7 +232,7 @@ def run_gateway(
 
         runtime = build_agent_runtime(
             config,
-            provider_factory=make_provider,
+            provider_factory=provider_factory,
             session_manager=session_manager,
             restart_callback=request_restart,
             error_callback=on_message_error,
@@ -409,6 +509,6 @@ def run_gateway(
         asyncio.run(run())
         if restart_requested:
             instance_lock.release()
-            os.execv(sys.executable, [sys.executable, "-m", "nanobot", *argv])
+            os.execv(sys.executable, [sys.executable, "-m", "nanobot", *restart_argv])
     finally:
         instance_lock.release()
