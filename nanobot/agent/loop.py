@@ -12,11 +12,13 @@ from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent.command_router import CommandRouterController
 from nanobot.agent.coding.guard import CodingGuardController
 from nanobot.agent.coding.routing import CodingRouteCandidate, CodingRouteController
 from nanobot.agent.coding.summary import CodingSummaryController, TurnExecutionState
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.image_flow import ImageFlowController
+from nanobot.agent.turn_executor import TurnExecutorController
 from nanobot.agent.tools.image_generate import ImageGenerateTool
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.model_selection import ModelSelectionController
@@ -200,12 +202,14 @@ class AgentLoop:
         self._last_coding_route_skipped: list[str] = []
         self._last_dispatch_error_signatures: dict[str, str] = {}
         self._processing_lock = asyncio.Lock()
+        self._command_router = CommandRouterController(self)
         self._coding_guard = CodingGuardController(self)
         self._coding_route = CodingRouteController(self)
         self._coding_summary = CodingSummaryController(self)
         self._image_flow = ImageFlowController(self)
         self._model_selection = ModelSelectionController(self)
         self._token_guard_controller = TokenGuardController(self)
+        self._turn_executor = TurnExecutorController(self)
         self._register_default_tools()
 
     def _coding_summary_controller(self) -> CodingSummaryController:
@@ -509,18 +513,9 @@ class AgentLoop:
     @staticmethod
     def _cron_retry_execution_message(job_name: str, instruction: str) -> str:
         """Build the scheduled-task prompt for operator-confirmed cron retries."""
-        name = job_name.strip() if job_name.strip() else "(unnamed)"
-        scheduled_instruction = instruction.strip() if instruction.strip() else "(missing)"
-        return (
-            "You are executing a scheduled task.\n"
-            "Use the current local time from the runtime context.\n"
-            "Return only the final user-facing content that should be delivered now.\n"
-            "Do not include execution notes, phase labels, methods, thought process, task recap, or tool narration.\n\n"
-            "Scheduled task name:\n"
-            f"{name}\n\n"
-            "Scheduled instruction:\n"
-            f"{scheduled_instruction}"
-        )
+        from nanobot.app.prompts import build_cron_execution_message
+
+        return build_cron_execution_message(job_name, instruction)
 
     async def _run_operator_cron_retry(
         self,
@@ -1026,49 +1021,8 @@ class AgentLoop:
         bypass_plan_guard: bool = False,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
-        # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
-            channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
-                                else ("cli", msg.chat_id))
-            logger.info("Processing system message from {}", msg.sender_id)
-            key = msg.session_key_override or f"{channel}:{chat_id}"
-            session = self.sessions.get_or_create(key)
-            self._restore_session_model_provider(session)
-            _, coding_enabled = self._resolve_coding_mode(session, msg.content)
-            self._set_tool_context(
-                channel,
-                chat_id,
-                msg.metadata.get("message_id"),
-                coding_enabled=coding_enabled,
-                session_key=key,
-            )
-            history = session.get_history(max_messages=self.memory_window)
-            persona_hints = self._persona_hints_for_turn(msg.content, coding_enabled=coding_enabled)
-            turn_temperature = self._temperature_for_turn(msg.content, coding_enabled=coding_enabled)
-            messages = self.context.build_messages(
-                history=history, current_message=msg.content, channel=channel, chat_id=chat_id,
-                persona_runtime_hints=persona_hints,
-                coding_mode=coding_enabled,
-            )
-            final_content, _, all_msgs, turn_state = await self._run_agent_loop(
-                messages,
-                temperature_override=turn_temperature,
-                coding_enabled=coding_enabled,
-            )
-            final_content = await self._apply_persona_output_controls(
-                final_content,
-                all_msgs,
-                coding_enabled=coding_enabled,
-            )
-            final_content = self._apply_coding_summary(
-                final_content,
-                turn_state,
-                coding_enabled=coding_enabled,
-            )
-            self._save_turn(session, all_msgs, 1 + len(history))
-            self.sessions.save(session)
-            return OutboundMessage(channel=channel, chat_id=chat_id,
-                                  content=final_content or "Background task completed.")
+            return await self._turn_executor.execute_system_message(msg)
 
         preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
         logger.info("Processing message from {}:{}: {}", msg.channel, msg.sender_id, preview)
@@ -1076,439 +1030,24 @@ class AgentLoop:
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
         self._restore_session_model_provider(session)
-
-        # Slash commands
-        cmd, cmd_arg = self._parse_user_command(msg.content)
-        token_state = self._token_guard_state(session)
-        control = self._parse_token_guard_control(msg.content)
-        plan_pending = self._plan_guard_pending.get(key)
-        operator_action = self._operator_action(session)
-        if operator_action:
-            if cmd in self._TOKEN_GUARD_EXIT_ALIASES or self._is_token_guard_cancel_message(msg.content):
-                cmd = self._PLAN_CANCEL_COMMAND
-            elif self._is_token_guard_proceed_message(msg.content):
-                cmd = self._PLAN_CONFIRM_COMMAND
-        if control is not None:
-            kind, value = control
-            if kind == "mode":
-                token_state["mode"] = str(value)
-                self._save_token_guard_state(session, token_state)
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=f"Token Guard mode set to: `{token_state['mode']}`",
-                )
-            token_state["budget_k"] = int(value)
-            self._save_token_guard_state(session, token_state)
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=f"Token Guard budget set to: `{token_state['budget_k']}k`",
-            )
-        pending = token_state.get("pending_message")
-        if plan_pending and cmd in self._TOKEN_GUARD_EXIT_ALIASES:
-            cmd = self._PLAN_CANCEL_COMMAND
-        if plan_pending and cmd not in {
-            self._PLAN_CONFIRM_COMMAND,
-            self._PLAN_CONFIRM_COMMAND.lstrip("/"),
-            self._PLAN_CANCEL_COMMAND,
-            self._PLAN_CANCEL_COMMAND.lstrip("/"),
-            "/restart",
-        }:
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=(
-                    "There is already a pending coding plan.\n"
-                    f"Reply `{self._PLAN_CONFIRM_COMMAND}` to continue it, or "
-                    f"`{self._PLAN_CANCEL_COMMAND}` to cancel."
-                ),
-                metadata=msg.metadata or {},
-            )
-        if plan_pending and cmd in {self._PLAN_CONFIRM_COMMAND, self._PLAN_CONFIRM_COMMAND.lstrip("/")}:
-            plan_pending = self._plan_guard_pending.pop(key, None)
-            if plan_pending:
-                replay = InboundMessage(
-                    channel=msg.channel,
-                    sender_id=msg.sender_id,
-                    chat_id=msg.chat_id,
-                    content=plan_pending,
-                    metadata=msg.metadata or {},
-                )
-                return await self._process_message(
-                    replay,
-                    session_key=key,
-                    on_progress=on_progress,
-                    bypass_token_guard=True,
-                    bypass_plan_guard=True,
-                )
-            return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id,
-                content="No pending large task or coding plan to confirm.",
-            )
-        if cmd in {self._PLAN_CANCEL_COMMAND, self._PLAN_CANCEL_COMMAND.lstrip("/")}:
-            removed = token_state.get("pending_message")
-            if removed is not None:
-                token_state["pending_message"] = None
-                self._save_token_guard_state(session, token_state)
-            plan_removed = self._plan_guard_pending.pop(key, None)
-            operator_removed = operator_action
-            if operator_removed is not None:
-                self._save_operator_action(session, None)
-            if removed is None and plan_removed is None and operator_removed is None:
-                return OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content="No pending large task or coding plan to cancel.",
-                )
-            return OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id,
-                content="Canceled pending task.",
-            )
-        if operator_action and cmd in {self._PLAN_CONFIRM_COMMAND, self._PLAN_CONFIRM_COMMAND.lstrip("/")}:
-            if operator_action.get("kind") == "cron_retry":
-                return await self._run_operator_cron_retry(session, msg, operator_action)
-            self._save_operator_action(session, None)
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content="Pending operator action is no longer available.",
-            )
-        if cmd == "/restart":
-            return await self._handle_restart(msg, publish=False)
-        if operator_action and cmd not in {
-            self._PLAN_CONFIRM_COMMAND,
-            self._PLAN_CONFIRM_COMMAND.lstrip("/"),
-            self._PLAN_CANCEL_COMMAND,
-            self._PLAN_CANCEL_COMMAND.lstrip("/"),
-            "/restart",
-        }:
-            job_id = str(operator_action.get("job_id") or "").strip()
-            job_name = str(operator_action.get("job_name") or "").strip() or "unnamed"
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=(
-                    f"There is already a pending cron retry for `{job_id}` ({job_name}).\n"
-                    f"Reply `{self._PLAN_CONFIRM_COMMAND}` or `继续/确认` to run it, or "
-                    f"`{self._PLAN_CANCEL_COMMAND}` or `取消` to cancel."
-                ),
-                metadata=msg.metadata or {},
-            )
-        if pending is not None:
-            if cmd in self._TOKEN_GUARD_EXIT_ALIASES or self._is_token_guard_cancel_message(msg.content):
-                token_state["pending_message"] = None
-                self._save_token_guard_state(session, token_state)
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="Canceled pending token-guard task.",
-                )
-            if self._is_token_guard_proceed_message(msg.content):
-                token_state["pending_message"] = None
-                self._save_token_guard_state(session, token_state)
-                replay = InboundMessage(
-                    channel=msg.channel,
-                    sender_id=msg.sender_id,
-                    chat_id=msg.chat_id,
-                    content=pending,
-                    metadata=msg.metadata or {},
-                )
-                return await self._process_message(
-                    replay,
-                    session_key=key,
-                    on_progress=on_progress,
-                    bypass_token_guard=True,
-                    bypass_plan_guard=bypass_plan_guard,
-                )
-            token_state["pending_message"] = None
-            self._save_token_guard_state(session, token_state)
-        if cmd == "/start":
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=self._SHINCHAN_WELCOME,
-            )
-        if cmd == "/new":
-            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
-            self._consolidating.add(session.key)
-            try:
-                async with lock:
-                    snapshot = session.messages[session.last_consolidated:]
-                    if snapshot:
-                        temp = Session(key=session.key)
-                        temp.messages = list(snapshot)
-                        if not await self._consolidate_memory(
-                            temp,
-                            provider=self.provider,
-                            model=self.model,
-                            archive_all=True,
-                        ):
-                            return OutboundMessage(
-                                channel=msg.channel, chat_id=msg.chat_id,
-                                content="Memory archival failed, session not cleared. Please try again.",
-                            )
-            except Exception:
-                logger.exception("/new archival failed for {}", session.key)
-                return OutboundMessage(
-                    channel=msg.channel, chat_id=msg.chat_id,
-                    content="Memory archival failed, session not cleared. Please try again.",
-                )
-            finally:
-                self._consolidating.discard(session.key)
-
-            session.clear()
-            self._clear_token_guard_pending(session, save=False)
-            self.sessions.save(session)
-            self.sessions.invalidate(session.key)
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="New session started.")
-        if cmd == "/help":
-            return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id,
-                                  content="🐈 nanobot commands:\n/start — Show welcome message\n/new — Start a new conversation\n/model — Show or switch model\n/coding — Show or set coding mode\n/retry-cron <job_id> — Stage a cron job retry in this chat\n/image-confirm — Generate the current staged image\n/image-edit <feedback> — Revise the current staged image prompt\n/image-skip — Skip the current staged image\n/stop — Stop the current task\n/restart — Restart nanobot (gateway mode)\n/help — Show available commands")
-        if cmd == "/retry-cron":
-            return self._prepare_operator_cron_retry(session, msg, cmd_arg)
-        if cmd == "/model":
-            arg = cmd_arg.strip()
-            if not arg:
-                current_model, current_provider_name = self._effective_session_model(session)
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=(
-                        f"Current model: `{current_model}`\n"
-                        f"Current provider: `{current_provider_name or 'unknown'}`\n"
-                        "Use `/model list` to inspect choices, `/model <name>` or `/model <number>` "
-                        "to switch, or `/model reset` to restore default."
-                    ),
-                )
-            if arg.lower() in {"list", "ls", "列表"}:
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=self._format_available_models(session),
-                )
-            if arg.lower() in {"reset", "default", "默认", "恢复默认"}:
-                self._reset_model_provider()
-                self._clear_session_model_selection(session)
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=f"Model reset to default: `{self.model}` (provider: `{self.provider_name or 'unknown'}`)",
-                )
-            try:
-                requested_model, requested_provider_name = self._resolve_model_selection_argument(session, arg)
-                self._switch_model_provider(requested_model, provider_name=requested_provider_name)
-                self._persist_session_model_selection(
-                    session,
-                    model=self.model,
-                    provider_name=self.provider_name,
-                )
-            except Exception as e:
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=f"Model switch failed: {e}",
-                )
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=f"Model switched to: `{self.model}` (provider: `{self.provider_name or 'unknown'}`)",
-            )
-        if cmd == "/coding":
-            arg = cmd_arg.strip().lower()
-            if not self.coding_config.enabled:
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="Coding mode is disabled in config.",
-                )
-            if arg in {"", "status"}:
-                setting, _ = self._resolve_coding_mode(session, "")
-                workspace_repo = "yes" if self._workspace_has_repo_markers() else "no"
-                active_desc = (
-                    "always active"
-                    if setting == "on"
-                    else "always off"
-                    if setting == "off"
-                    else "auto-detected per request"
-                )
-                route_candidates, route_resolved, route_skipped = self._resolve_coding_route_candidates()
-                fallback_models = getattr(self.coding_config, "fallback_models", []) or []
-                fallback_block = (
-                    "\n".join(f"- `{model}`" for model in fallback_models)
-                    if fallback_models
-                    else "- (none)"
-                )
-                resolved_block = "\n".join(route_resolved) if route_resolved else "- (none)"
-                skipped_block = "\n".join(route_skipped) if route_skipped else "- (none)"
-                route_active = "yes" if route_candidates else "no"
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=(
-                        f"Coding mode setting: `{setting}`\n"
-                        f"Auto-detect: `{self.coding_config.auto_detect}`\n"
-                        f"Workspace looks like repo: `{workspace_repo}`\n"
-                        f"Current behavior: {active_desc}\n"
-                        f"Coding primary model: `{self.coding_config.primary_model}`\n"
-                        f"Coding model route active: `{route_active}`\n"
-                        "Coding fallback models:\n"
-                        f"{fallback_block}\n"
-                        "Resolved coding candidates:\n"
-                        f"{resolved_block}\n"
-                        "Skipped coding candidates:\n"
-                        f"{skipped_block}\n"
-                        "Use `/coding on`, `/coding off`, or `/coding auto`."
-                    ),
-                )
-            if arg not in self._CODING_SESSION_MODES:
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="Usage: `/coding status|on|off|auto`",
-                )
-            session.metadata["coding_mode"] = arg
-            self.sessions.save(session)
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=f"Coding mode set to: `{arg}`",
-            )
-        if cmd == "/image-confirm":
-            return await self._handle_image_confirm(msg, session)
-        if cmd == "/image-edit":
-            return self._handle_image_edit(msg, session, cmd_arg)
-        if cmd == "/image-skip":
-            return self._handle_image_skip(msg, session)
-
-        unconsolidated = len(session.messages) - session.last_consolidated
-        if (unconsolidated >= self.memory_window and session.key not in self._consolidating):
-            self._consolidating.add(session.key)
-            lock = self._consolidation_locks.setdefault(session.key, asyncio.Lock())
-            consolidation_provider = self.provider
-            consolidation_model = self.model
-
-            async def _consolidate_and_unlock():
-                try:
-                    async with lock:
-                        await self._consolidate_memory(
-                            session,
-                            provider=consolidation_provider,
-                            model=consolidation_model,
-                        )
-                finally:
-                    self._consolidating.discard(session.key)
-                    _task = asyncio.current_task()
-                    if _task is not None:
-                        self._consolidation_tasks.discard(_task)
-
-            _task = asyncio.create_task(_consolidate_and_unlock())
-            self._consolidation_tasks.add(_task)
-
-        _, coding_enabled = self._resolve_coding_mode(session, msg.content)
-        self._set_tool_context(
-            msg.channel,
-            msg.chat_id,
-            msg.metadata.get("message_id"),
-            coding_enabled=coding_enabled,
-            session_key=key,
+        routed = await self._command_router.route(
+            msg=msg,
+            session=session,
+            key=key,
+            on_progress=on_progress,
+            bypass_token_guard=bypass_token_guard,
+            bypass_plan_guard=bypass_plan_guard,
         )
-        if message_tool := self.tools.get("message"):
-            if isinstance(message_tool, MessageTool):
-                message_tool.start_turn()
-
-        history = session.get_history(max_messages=self.memory_window)
-        persona_hints = self._persona_hints_for_turn(msg.content, coding_enabled=coding_enabled)
-        turn_temperature = self._temperature_for_turn(msg.content, coding_enabled=coding_enabled)
-        initial_messages = self.context.build_messages(
-            history=history,
-            current_message=msg.content,
-            media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
-            persona_runtime_hints=persona_hints,
-            coding_mode=coding_enabled,
-        )
-        token_assessment: _TokenGuardAssessment | None = None
-        if self.token_guard.enabled and not bypass_token_guard:
-            mode = token_state["mode"]
-            if mode != "off":
-                token_assessment = self._assess_token_guard(
-                    session=session,
-                    history=history,
-                    msg=msg,
-                    coding_enabled=coding_enabled,
-                    mode=mode,
-                    parsed_cmd=cmd,
-                )
-                if token_assessment.final_risk in {"large", "extreme"}:
-                    token_state["pending_message"] = msg.content
-                    self._save_token_guard_state(session, token_state)
-                    return OutboundMessage(
-                        channel=msg.channel,
-                        chat_id=msg.chat_id,
-                        content=self._token_guard_intercept_message(token_state, token_assessment),
-                        metadata=msg.metadata or {},
-                    )
-        if (
-            coding_enabled
-            and not bypass_plan_guard
-            and self.coding_config.require_plan_for_large_changes
-            and self._looks_like_large_change_request(msg.content)
-        ):
-            self._plan_guard_pending[key] = msg.content
-            plan_content = await self._build_large_change_plan(
-                history=history,
-                msg=msg,
-                coding_enabled=coding_enabled,
-            )
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=plan_content,
-                metadata=msg.metadata or {},
-            )
-
-        async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
-            meta = dict(msg.metadata or {})
-            meta["_progress"] = True
-            meta["_tool_hint"] = tool_hint
-            await self.bus.publish_outbound(OutboundMessage(
-                channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
-            ))
-
-        final_content, _, all_msgs, turn_state = await self._run_agent_loop(
-            initial_messages,
-            on_progress=on_progress or _bus_progress,
-            temperature_override=turn_temperature,
-            coding_enabled=coding_enabled,
-        )
-        final_content = await self._apply_persona_output_controls(
-            final_content,
-            all_msgs,
-            coding_enabled=coding_enabled,
-        )
-        final_content = self._apply_coding_summary(
-            final_content,
-            turn_state,
-            coding_enabled=coding_enabled,
-        )
-        if token_assessment is not None:
-            final_content = self._append_token_guard_estimate(final_content, token_assessment)
-
-        if final_content is None:
-            final_content = "I've completed processing but have no response to give."
-
-        self._save_turn(session, all_msgs, 1 + len(history))
-        self.sessions.save(session)
-
-        if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
+        if routed.response is not None:
+            return routed.response
+        if routed.context is None:
             return None
-
-        preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
-        logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
-        return OutboundMessage(
-            channel=msg.channel, chat_id=msg.chat_id, content=final_content,
-            metadata=msg.metadata or {},
+        return await self._turn_executor.execute_user_turn(
+            msg=msg,
+            request=routed.context,
+            on_progress=on_progress,
+            bypass_token_guard=bypass_token_guard,
+            bypass_plan_guard=bypass_plan_guard,
         )
 
     def _save_turn(self, session: Session, messages: list[dict], skip: int) -> None:
