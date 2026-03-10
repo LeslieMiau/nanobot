@@ -20,4 +20,12 @@ __pycache__/
 poetry.lock
 .pytest_cache/
 botpy.log
-
+/skills/
+/content_queue/
+/memory/
+/sessions/
+/SOUL.md
+/USER.md
+/TOOLS.md
+/CODING.md
+/HEARTBEAT.md

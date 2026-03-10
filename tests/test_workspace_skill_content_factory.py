@@ -3,9 +3,11 @@ from pathlib import Path
 from nanobot.agent.skills import SkillsLoader
 
 
+EXAMPLE_WORKSPACE = Path(__file__).resolve().parents[1] / "examples" / "workspace"
+
+
 def test_workspace_content_factory_skill_is_discoverable() -> None:
-    workspace = Path(__file__).resolve().parents[1]
-    loader = SkillsLoader(workspace)
+    loader = SkillsLoader(EXAMPLE_WORKSPACE)
 
     skills = loader.list_skills(filter_unavailable=False)
     names = {skill["name"] for skill in skills}
@@ -14,8 +16,7 @@ def test_workspace_content_factory_skill_is_discoverable() -> None:
 
 
 def test_workspace_content_factory_skill_loads_content() -> None:
-    workspace = Path(__file__).resolve().parents[1]
-    loader = SkillsLoader(workspace)
+    loader = SkillsLoader(EXAMPLE_WORKSPACE)
 
     content = loader.load_skill("content-factory")
 

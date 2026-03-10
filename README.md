@@ -1176,6 +1176,8 @@ If you edit the `.service` file itself, run `systemctl --user daemon-reload` bef
 ## 📁 Project Structure
 
 ```
+examples/
+└── workspace/     # 🧪 Example external workspace (custom skills, sample outputs)
 nanobot/
 ├── agent/          # 🧠 Core agent logic
 │   ├── loop.py     #    Agent loop (LLM ↔ tool execution)
@@ -1184,7 +1186,7 @@ nanobot/
 │   ├── skills.py   #    Skills loader
 │   ├── subagent.py #    Background task execution
 │   └── tools/      #    Built-in tools (incl. spawn)
-├── skills/         # 🎯 Bundled skills (github, weather, tmux...)
+├── skills/         # 🎯 Bundled built-in skills shipped with the package
 ├── channels/       # 📱 Chat channel integrations
 ├── bus/            # 🚌 Message routing
 ├── cron/           # ⏰ Scheduled tasks
@@ -1194,6 +1196,9 @@ nanobot/
 ├── config/         # ⚙️ Configuration
 └── cli/            # 🖥️ Commands
 ```
+
+Workspace data such as `skills/`, `content_queue/`, `memory/`, and `sessions/` should live outside the source tree.
+Use [`examples/workspace/`](/Users/miau/Documents/nanobot/examples/workspace) as the sample layout for custom workspace assets.
 
 ## 🤝 Contribute & Roadmap
 

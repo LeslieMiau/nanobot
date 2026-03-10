@@ -3,9 +3,11 @@ from pathlib import Path
 from nanobot.agent.skills import SkillsLoader
 
 
+EXAMPLE_WORKSPACE = Path(__file__).resolve().parents[1] / "examples" / "workspace"
+
+
 def test_workspace_ai_news_digest_skill_is_discoverable() -> None:
-    workspace = Path(__file__).resolve().parents[1]
-    loader = SkillsLoader(workspace)
+    loader = SkillsLoader(EXAMPLE_WORKSPACE)
 
     skills = loader.list_skills(filter_unavailable=False)
     names = {skill["name"] for skill in skills}
@@ -14,8 +16,7 @@ def test_workspace_ai_news_digest_skill_is_discoverable() -> None:
 
 
 def test_workspace_ai_news_digest_skill_loads_content() -> None:
-    workspace = Path(__file__).resolve().parents[1]
-    loader = SkillsLoader(workspace)
+    loader = SkillsLoader(EXAMPLE_WORKSPACE)
 
     content = loader.load_skill("ai-news-digest")
 
@@ -43,9 +44,8 @@ def test_workspace_ai_news_digest_skill_loads_content() -> None:
 
 
 def test_workspace_ai_news_digest_skill_references_sources_file() -> None:
-    workspace = Path(__file__).resolve().parents[1]
-    skill_path = workspace / "skills" / "ai-news-digest" / "SKILL.md"
-    sources_path = workspace / "skills" / "ai-news-digest" / "references" / "sources.md"
+    skill_path = EXAMPLE_WORKSPACE / "skills" / "ai-news-digest" / "SKILL.md"
+    sources_path = EXAMPLE_WORKSPACE / "skills" / "ai-news-digest" / "references" / "sources.md"
 
     assert sources_path.exists()
 
