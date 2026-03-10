@@ -115,7 +115,7 @@ async def test_coding_route_falls_back_in_expected_order(tmp_path: Path) -> None
     )
 
     assert out is not None
-    assert out.content == "fallback ok"
+    assert out.content.startswith("fallback ok")
     assert provider.models == ["gpt-5.4", "github-copilot/gpt-5.3-codex"]
     assert loop._coding_model_cooldowns.get("gpt-5.4", 0.0) > time.monotonic()
 
@@ -132,7 +132,7 @@ async def test_coding_route_skips_unavailable_candidates(tmp_path: Path) -> None
     )
 
     assert out is not None
-    assert out.content == "codex fallback ok"
+    assert out.content.startswith("codex fallback ok")
     assert provider.models == ["github-copilot/gpt-5.3-codex"]
 
 

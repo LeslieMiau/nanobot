@@ -5,15 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import time
 import weakref
 from contextlib import AsyncExitStack
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
 from loguru import logger
 
+from nanobot.agent.coding.guard import CodingGuardController
+from nanobot.agent.coding.routing import CodingRouteCandidate, CodingRouteController
+from nanobot.agent.coding.summary import CodingSummaryController, TurnExecutionState
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.image_flow import ImageFlowController
 from nanobot.agent.tools.image_generate import ImageGenerateTool
@@ -33,7 +34,6 @@ from nanobot.bus.queue import MessageBus
 from nanobot.persona.engine import PersonaEngine
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.catalog import AvailableModel
-from nanobot.providers.registry import find_by_name
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -46,28 +46,6 @@ if TYPE_CHECKING:
         TokenGuardConfig,
     )
     from nanobot.cron.service import CronService
-
-
-@dataclass
-class _TurnExecutionState:
-    files_read: set[str] = field(default_factory=set)
-    files_edited: set[str] = field(default_factory=set)
-    commands_run: list[str] = field(default_factory=list)
-    verification_notes: list[str] = field(default_factory=list)
-    edit_generation: int = 0
-    verification_generation: int = 0
-    verification_prompted: bool = False
-
-
-@dataclass(frozen=True)
-class _CodingRouteCandidate:
-    source_model: str
-    normalized_model: str
-    provider: LLMProvider
-    model: str
-    provider_name: str | None
-    normalization_note: str | None = None
-
 
 class AgentLoop:
     """
@@ -222,10 +200,20 @@ class AgentLoop:
         self._last_coding_route_skipped: list[str] = []
         self._last_dispatch_error_signatures: dict[str, str] = {}
         self._processing_lock = asyncio.Lock()
+        self._coding_guard = CodingGuardController(self)
+        self._coding_route = CodingRouteController(self)
+        self._coding_summary = CodingSummaryController(self)
         self._image_flow = ImageFlowController(self)
         self._model_selection = ModelSelectionController(self)
         self._token_guard_controller = TokenGuardController(self)
         self._register_default_tools()
+
+    def _coding_summary_controller(self) -> CodingSummaryController:
+        controller = getattr(self, "_coding_summary", None)
+        if controller is None:
+            controller = CodingSummaryController(self)
+            self._coding_summary = controller
+        return controller
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -319,22 +307,15 @@ class AgentLoop:
         return mode if mode in cls._CODING_SESSION_MODES else "auto"
 
     def _workspace_has_repo_markers(self) -> bool:
-        return any((self.workspace / marker).exists() for marker in self._REPO_MARKERS)
+        return self._coding_guard.workspace_has_repo_markers()
 
     @classmethod
     def _looks_like_shell_command(cls, text: str) -> bool:
-        lowered = text.strip().lower()
-        return any(lowered.startswith(prefix) for prefix in cls._SHELL_COMMAND_PREFIXES)
+        return CodingGuardController.looks_like_shell_command(text, cls._SHELL_COMMAND_PREFIXES)
 
     @classmethod
     def _looks_like_path_or_code(cls, text: str) -> bool:
-        if "```" in text:
-            return True
-        if re.search(r"(?:^|\s)(?:\./|\.\./|/)?[\w.-]+/[\w./-]+", text):
-            return True
-        return bool(
-            re.search(r"\b[\w./-]+\.(?:py|ts|tsx|js|jsx|json|toml|ya?ml|md|rs|go|java|c|cc|cpp|h)\b", text)
-        )
+        return CodingGuardController.looks_like_path_or_code(text)
 
     @classmethod
     def _looks_like_coding_request(cls, text: str) -> bool:
@@ -348,20 +329,7 @@ class AgentLoop:
         return cls._looks_like_path_or_code(text)
 
     def _resolve_coding_mode(self, session: Session, user_text: str) -> tuple[str, bool]:
-        setting = self._session_coding_mode(session)
-        if not self.coding_config.enabled:
-            return setting, False
-        if setting == "on":
-            return setting, True
-        if setting == "off":
-            return setting, False
-        if not self.coding_config.auto_detect:
-            return setting, False
-        if self._looks_like_coding_request(user_text):
-            return setting, True
-        return setting, self._workspace_has_repo_markers() and any(
-            token in user_text.lower() for token in ("help me", "帮我", "请你", "how do i", "怎么", "如何")
-        )
+        return self._coding_guard.resolve_coding_mode(session, user_text)
 
     @classmethod
     def _looks_like_large_change_request(cls, text: str) -> bool:
@@ -377,49 +345,10 @@ class AgentLoop:
         msg: InboundMessage,
         coding_enabled: bool,
     ) -> str:
-        planning_request = (
-            f"{msg.content}\n\n"
-            "[Planning guard] This looks like a larger coding change. "
-            "Before making edits, provide a short implementation plan only. "
-            "Do not call tools, do not claim work is done, and keep it concise."
-        )
-        messages = self.context.build_messages(
+        return await self._coding_guard.build_large_change_plan(
             history=history,
-            current_message=planning_request,
-            media=msg.media if msg.media else None,
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            persona_runtime_hints=self._persona_hints_for_turn(msg.content, coding_enabled=coding_enabled),
-            coding_mode=coding_enabled,
-        )
-        try:
-            response = await self.provider.chat(
-                messages=messages,
-                tools=None,
-                model=self.model,
-                temperature=min(self._temperature_for_turn(msg.content, coding_enabled=coding_enabled), 0.1),
-                max_tokens=min(self.max_tokens, 1024),
-                reasoning_effort=self.reasoning_effort,
-            )
-            candidate = self._strip_think(response.content)
-            if (
-                response.finish_reason == "error"
-                or not candidate
-                or candidate.startswith("Error:")
-            ):
-                raise RuntimeError(candidate or "Failed to generate plan")
-            plan = candidate
-        except Exception:
-            plan = (
-                "Planned steps:\n"
-                "1. Inspect the relevant files and tests.\n"
-                "2. Implement the change with minimal edits.\n"
-                "3. Run the narrowest verification and report any remaining risk."
-            )
-        return (
-            f"{plan}\n\n"
-            f"Reply `{self._PLAN_CONFIRM_COMMAND}` to execute this larger change, "
-            f"or `{self._PLAN_CANCEL_COMMAND}` to cancel."
+            msg=msg,
+            coding_enabled=coding_enabled,
         )
 
     def _persona_hints_for_turn(self, user_text: str, *, coding_enabled: bool) -> str | None:
@@ -737,148 +666,40 @@ class AgentLoop:
         return self._model_selection.resolve_model_selection_argument(session, arg)
 
     def _coding_route_raw_models(self) -> list[str]:
-        primary = str(getattr(self.coding_config, "primary_model", "")).strip()
-        fallbacks = list(getattr(self.coding_config, "fallback_models", []) or [])
-        ordered = [primary, *(str(m).strip() for m in fallbacks)]
-        return [m for m in ordered if m]
+        return self._coding_route.raw_models()
 
     @staticmethod
     def _normalize_coding_model_name(model_name: str) -> tuple[str | None, str | None]:
-        model = model_name.strip()
-        if not model:
-            return None, "empty model name"
-
-        if "/" in model:
-            prefix = model.split("/", 1)[0].lower().replace("-", "_")
-            if not find_by_name(prefix):
-                return None, f"unknown provider prefix `{prefix}`"
-            return model, None
-
-        lowered = model.lower()
-        if "codex" in lowered:
-            return f"github-copilot/{model}", "normalized bare codex model to github-copilot prefix"
-        if lowered.startswith("claude"):
-            return f"anthropic/{model}", "normalized bare claude model to anthropic prefix"
-        return model, None
+        return CodingRouteController.normalize_model_name(model_name)
 
     def _coding_model_cooldown_remaining(self, normalized_model: str) -> int:
-        until = self._coding_model_cooldowns.get(normalized_model, 0.0)
-        if until <= 0.0:
-            return 0
-        remaining = int(until - time.monotonic())
-        return remaining if remaining > 0 else 0
+        return self._coding_route.cooldown_remaining(normalized_model)
 
     def _mark_coding_model_failure(self, normalized_model: str) -> None:
-        cooldown = max(0, int(getattr(self.coding_config, "model_fail_cooldown_seconds", 0)))
-        if cooldown <= 0:
-            self._coding_model_cooldowns.pop(normalized_model, None)
-            return
-        self._coding_model_cooldowns[normalized_model] = time.monotonic() + cooldown
+        self._coding_route.mark_failure(normalized_model)
 
-    def _resolve_coding_route_candidates(self) -> tuple[list[_CodingRouteCandidate], list[str], list[str]]:
-        candidates: list[_CodingRouteCandidate] = []
-        resolved_lines: list[str] = []
-        skipped_lines: list[str] = []
-        seen_models: set[str] = set()
+    def _resolve_coding_route_candidates(self) -> tuple[list[CodingRouteCandidate], list[str], list[str]]:
+        return self._coding_route.resolve_candidates()
 
-        for source_model in self._coding_route_raw_models():
-            normalized_model, normalization_note = self._normalize_coding_model_name(source_model)
-            if not normalized_model:
-                skipped_lines.append(f"- `{source_model}`: invalid ({normalization_note})")
-                continue
-            if normalized_model in seen_models:
-                continue
-            seen_models.add(normalized_model)
-
-            if remaining := self._coding_model_cooldown_remaining(normalized_model):
-                skipped_lines.append(
-                    f"- `{source_model}` -> `{normalized_model}`: cooling down ({remaining}s remaining)"
-                )
-                continue
-
-            if self._provider_switcher:
-                try:
-                    provider, model, provider_name = self._provider_switcher(normalized_model)
-                except Exception as e:
-                    skipped_lines.append(
-                        f"- `{source_model}` -> `{normalized_model}`: unavailable ({e})"
-                    )
-                    continue
-            elif normalized_model == self.model:
-                provider = self.provider
-                model = self.model
-                provider_name = self.provider_name
-            else:
-                skipped_lines.append(
-                    f"- `{source_model}` -> `{normalized_model}`: unavailable (provider switcher not configured)"
-                )
-                continue
-
-            candidate = _CodingRouteCandidate(
-                source_model=source_model,
-                normalized_model=normalized_model,
-                provider=provider,
-                model=model,
-                provider_name=provider_name,
-                normalization_note=normalization_note,
-            )
-            candidates.append(candidate)
-            note = f"; {normalization_note}" if normalization_note else ""
-            resolved_lines.append(
-                f"- `{source_model}` -> `{candidate.model}` (provider: `{candidate.provider_name or 'unknown'}`{note})"
-            )
-
-        self._last_coding_route_resolved = list(resolved_lines)
-        self._last_coding_route_skipped = list(skipped_lines)
-        return candidates, resolved_lines, skipped_lines
-
-    @classmethod
-    def _has_tool_side_effects(cls, turn_state: _TurnExecutionState, tools_used: list[str]) -> bool:
-        if turn_state.files_edited or turn_state.commands_run:
-            return True
-        return any(name in cls._CODING_SIDE_EFFECT_TOOLS for name in tools_used)
+    def _has_tool_side_effects(self, turn_state: TurnExecutionState, tools_used: list[str]) -> bool:
+        return self._coding_summary_controller().has_tool_side_effects(turn_state, tools_used)
 
     def _track_path(self, raw_path: Any) -> str | None:
-        if not isinstance(raw_path, str) or not raw_path.strip():
-            return None
-        path = Path(raw_path).expanduser()
-        if not path.is_absolute():
-            path = self.workspace / path
-        try:
-            return str(path.resolve())
-        except Exception:
-            return str(path)
+        return self._coding_summary_controller().track_path(raw_path)
 
     def _guard_coding_tool_call(
         self,
         tool_name: str,
         arguments: dict[str, Any],
-        turn_state: _TurnExecutionState,
+        turn_state: TurnExecutionState,
         *,
         coding_enabled: bool,
     ) -> str | None:
-        if not coding_enabled or not self.coding_config.enforce_read_before_write:
-            return None
-        if tool_name not in {"write_file", "edit_file"}:
-            return None
-
-        tracked_path = self._track_path(arguments.get("path"))
-        if not tracked_path:
-            return None
-
-        if tool_name == "write_file":
-            try:
-                if not Path(tracked_path).exists():
-                    return None
-            except Exception:
-                return None
-
-        if tracked_path in turn_state.files_read:
-            return None
-
-        return (
-            "Error: Coding mode requires reading a file before modifying it. "
-            f"Call `read_file` for `{arguments.get('path')}` first."
+        return self._coding_summary_controller().guard_tool_call(
+            tool_name,
+            arguments,
+            turn_state,
+            coding_enabled=coding_enabled,
         )
 
     def _record_tool_execution(
@@ -886,49 +707,24 @@ class AgentLoop:
         tool_name: str,
         arguments: dict[str, Any],
         result: str,
-        turn_state: _TurnExecutionState,
+        turn_state: TurnExecutionState,
     ) -> None:
-        tracked_path = self._track_path(arguments.get("path"))
-        if tool_name == "read_file" and tracked_path and not result.startswith("Error:"):
-            turn_state.files_read.add(tracked_path)
-            return
-
-        if tool_name in {"write_file", "edit_file"} and tracked_path and not result.startswith("Error:"):
-            turn_state.files_edited.add(tracked_path)
-            turn_state.edit_generation += 1
-            return
-
-        if tool_name == "exec":
-            command = str(arguments.get("command", "")).strip()
-            if command:
-                turn_state.commands_run.append(command)
-            if turn_state.edit_generation > 0:
-                turn_state.verification_generation = turn_state.edit_generation
-                if result.startswith("Error:") or "\nExit code:" in result:
-                    turn_state.verification_notes.append(
-                        f"Verification command reported a problem: `{command or 'exec'}`"
-                    )
+        self._coding_summary_controller().record_tool_execution(tool_name, arguments, result, turn_state)
 
     def _needs_verification_follow_up(
         self,
-        turn_state: _TurnExecutionState,
+        turn_state: TurnExecutionState,
         *,
         coding_enabled: bool,
     ) -> bool:
-        return (
-            coding_enabled
-            and self.coding_config.require_verification_after_edits
-            and turn_state.edit_generation > turn_state.verification_generation
-            and not turn_state.verification_prompted
+        return self._coding_summary_controller().needs_verification_follow_up(
+            turn_state,
+            coding_enabled=coding_enabled,
         )
 
     @staticmethod
     def _verification_follow_up_message() -> str:
-        return (
-            "[Coding mode guard] You edited files in this turn but did not attempt verification.\n"
-            "Use the `exec` tool to run the narrowest relevant test/build/check, or reply with a clear "
-            "note explaining why verification could not be run and what remains unverified."
-        )
+        return CodingSummaryController.verification_follow_up_message()
 
     async def _run_agent_loop(
         self,
@@ -937,15 +733,15 @@ class AgentLoop:
         temperature_override: float | None = None,
         *,
         coding_enabled: bool = False,
-    ) -> tuple[str | None, list[str], list[dict], _TurnExecutionState]:
+    ) -> tuple[str | None, list[str], list[dict], TurnExecutionState]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages, turn_state)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
         temperature = self.temperature if temperature_override is None else temperature_override
-        turn_state = _TurnExecutionState()
-        route_candidates: list[_CodingRouteCandidate] = []
+        turn_state = TurnExecutionState()
+        route_candidates: list[CodingRouteCandidate] = []
         route_index = 0
         active_provider = self.provider
         active_model = self.model
@@ -1060,52 +856,20 @@ class AgentLoop:
         return final_content, tools_used, messages, turn_state
 
     def _display_path(self, path_str: str) -> str:
-        path = Path(path_str)
-        try:
-            return str(path.relative_to(self.workspace))
-        except ValueError:
-            return str(path)
+        return self._coding_summary_controller().display_path(path_str)
 
     def _apply_coding_summary(
         self,
         content: str | None,
-        turn_state: _TurnExecutionState,
+        turn_state: TurnExecutionState,
         *,
         coding_enabled: bool,
     ) -> str | None:
-        if not content or not coding_enabled:
-            return content
-        if not (turn_state.files_edited or turn_state.commands_run or turn_state.verification_notes):
-            return content
-        lowered = content.lower()
-        if all(label in lowered for label in ("changed:", "verified:", "unverified:")):
-            return content
-
-        changed = (
-            "\n".join(f"- {self._display_path(path)}" for path in sorted(turn_state.files_edited))
-            if turn_state.files_edited
-            else "- No files changed."
+        return self._coding_summary_controller().apply_summary(
+            content,
+            turn_state,
+            coding_enabled=coding_enabled,
         )
-        verified = (
-            "\n".join(f"- `{cmd}`" for cmd in turn_state.commands_run)
-            if turn_state.commands_run
-            else "- No verification command recorded."
-        )
-
-        unverified_items: list[str] = []
-        if turn_state.files_edited and turn_state.verification_generation < turn_state.edit_generation:
-            unverified_items.append("- Edits were not verified with an exec command.")
-        if turn_state.verification_notes:
-            unverified_items.extend(f"- {note}" for note in turn_state.verification_notes)
-        if not unverified_items:
-            unverified_items.append("- None noted.")
-
-        summary = (
-            f"\n\nChanged:\n{changed}\n\n"
-            f"Verified:\n{verified}\n\n"
-            f"Unverified:\n" + "\n".join(unverified_items)
-        )
-        return content.rstrip() + summary
 
     async def _apply_persona_output_controls(
         self,
