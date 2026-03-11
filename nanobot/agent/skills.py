@@ -1,5 +1,6 @@
 """Skills loader for agent capabilities."""
 
+from dataclasses import dataclass
 import json
 import os
 import re
@@ -8,6 +9,17 @@ from pathlib import Path
 
 # Default builtin skills directory (relative to this file)
 BUILTIN_SKILLS_DIR = Path(__file__).parent.parent / "skills"
+
+
+@dataclass(frozen=True)
+class SkillSourceEntry:
+    """Structured source-registry entry extracted from a skill reference file."""
+
+    tier: str
+    source: str
+    label: str
+    url: str
+    priority: str
 
 
 class SkillsLoader:
@@ -79,6 +91,100 @@ class SkillsLoader:
 
         return None
 
+    def load_skill_reference(self, name: str, relative_path: str) -> str | None:
+        """Load a file relative to a skill directory."""
+        skill_dir = self._resolve_skill_dir(name)
+        if not skill_dir:
+            return None
+        ref_path = skill_dir / relative_path
+        if not ref_path.exists() or not ref_path.is_file():
+            return None
+        return ref_path.read_text(encoding="utf-8")
+
+    def load_source_registry(
+        self,
+        name: str,
+        relative_path: str = "references/sources.md",
+    ) -> list[SkillSourceEntry]:
+        """Parse a skill's source registry into structured prioritized entries."""
+        raw = self.load_skill_reference(name, relative_path)
+        if not raw:
+            return []
+
+        tier = ""
+        source = ""
+        entries: list[SkillSourceEntry] = []
+        for line in raw.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("## "):
+                tier = stripped[3:].strip()
+                source = ""
+                continue
+            if stripped.startswith("### "):
+                source = stripped[4:].strip()
+                continue
+
+            match = re.match(r"^- ([^:]+):\s+(https?://\S+)$", stripped)
+            if not match or not tier or not source:
+                continue
+
+            label = match.group(1).strip()
+            url = match.group(2).strip().rstrip(")")
+            entries.append(
+                SkillSourceEntry(
+                    tier=tier,
+                    source=source,
+                    label=label,
+                    url=url,
+                    priority=self._classify_source_priority(label, url),
+                )
+            )
+
+        return entries
+
+    def build_source_registry_summary(
+        self,
+        name: str,
+        relative_path: str = "references/sources.md",
+    ) -> str:
+        """Build a compact priority-ordered source summary for prompts."""
+        entries = self.load_source_registry(name, relative_path)
+        if not entries:
+            return ""
+
+        grouped: dict[str, list[SkillSourceEntry]] = {
+            "primary": [],
+            "fallback": [],
+            "signal-only": [],
+        }
+        for entry in entries:
+            grouped.setdefault(entry.priority, []).append(entry)
+
+        lines = [
+            f"Skill: {name}",
+            "Priority order: primary -> fallback -> signal-only",
+        ]
+        for priority in ("primary", "fallback", "signal-only"):
+            if not grouped.get(priority):
+                continue
+            lines.append(f"{priority}:")
+            for entry in grouped[priority]:
+                lines.append(
+                    f"- {entry.source} | {entry.label} | {entry.priority} | {entry.url}"
+                )
+        return "\n".join(lines)
+
+    def detect_skill_references(self, text: str) -> list[str]:
+        """Detect skill names explicitly mentioned in free-form text."""
+        lowered = text.lower()
+        detected: list[str] = []
+        for skill in self.list_skills(filter_unavailable=False):
+            name = skill["name"]
+            pattern = rf"(?<![A-Za-z0-9_])\$?{re.escape(name.lower())}(?![A-Za-z0-9_])"
+            if re.search(pattern, lowered):
+                detected.append(name)
+        return detected
+
     def load_skills_for_context(self, skill_names: list[str]) -> str:
         """
         Load specific skills for inclusion in agent context.
@@ -139,6 +245,19 @@ class SkillsLoader:
 
         return "\n".join(lines)
 
+    def _resolve_skill_dir(self, name: str) -> Path | None:
+        """Resolve a skill directory from workspace or built-in skills."""
+        workspace_dir = self.workspace_skills / name
+        if workspace_dir.is_dir():
+            return workspace_dir
+
+        if self.builtin_skills:
+            builtin_dir = self.builtin_skills / name
+            if builtin_dir.is_dir():
+                return builtin_dir
+
+        return None
+
     def _get_missing_requirements(self, skill_meta: dict) -> str:
         """Get a description of missing requirements."""
         missing = []
@@ -150,6 +269,18 @@ class SkillsLoader:
             if not os.environ.get(env):
                 missing.append(f"ENV: {env}")
         return ", ".join(missing)
+
+    @staticmethod
+    def _classify_source_priority(label: str, url: str) -> str:
+        """Infer whether a source is primary, fallback, or signal-only."""
+        normalized = f"{label} {url}".lower()
+        signal_markers = ("signal-only", "(signal", "signal)")
+        if any(marker in normalized for marker in signal_markers):
+            return "signal-only"
+        fallback_markers = ("rsshub", "mirror", "fallback", "reader")
+        if any(marker in normalized for marker in fallback_markers):
+            return "fallback"
+        return "primary"
 
     def _get_skill_description(self, name: str) -> str:
         """Get the description of a skill from its frontmatter."""

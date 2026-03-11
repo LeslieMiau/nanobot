@@ -510,12 +510,9 @@ class AgentLoop:
             session.metadata.pop(self._OPERATOR_ACTION_KEY, None)
         self.sessions.save(session)
 
-    @staticmethod
-    def _cron_retry_execution_message(job_name: str, instruction: str) -> str:
+    def _cron_retry_execution_message(self, job_name: str, instruction: str) -> str:
         """Build the scheduled-task prompt for operator-confirmed cron retries."""
-        from nanobot.app.prompts import build_cron_execution_message
-
-        return build_cron_execution_message(job_name, instruction)
+        return self.context.build_cron_prompt(job_name, instruction)
 
     async def _run_operator_cron_retry(
         self,

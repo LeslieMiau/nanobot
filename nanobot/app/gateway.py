@@ -14,11 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable, Sequence
 from rich.console import Console
 
 from nanobot import __logo__
-from nanobot.app.prompts import (
-    build_cron_execution_message,
-    build_heartbeat_execution_message,
-    should_deliver_heartbeat_response,
-)
+from nanobot.app.prompts import build_heartbeat_execution_message, should_deliver_heartbeat_response
 from nanobot.app.runtime import build_agent_runtime, load_runtime_config, make_provider
 from nanobot.utils.helpers import sync_workspace_templates
 
@@ -247,7 +243,7 @@ def run_gateway(
             from nanobot.agent.tools.cron import CronTool
             from nanobot.agent.tools.message import MessageTool
 
-            reminder_note = build_cron_execution_message(job.name, job.payload.message)
+            reminder_note = agent.context.build_cron_prompt(job.name, job.payload.message)
 
             async def _silent(*_args, **_kwargs):
                 pass

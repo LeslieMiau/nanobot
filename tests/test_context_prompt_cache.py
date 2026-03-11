@@ -9,6 +9,8 @@ import datetime as datetime_module
 
 from nanobot.agent.context import ContextBuilder
 
+EXAMPLE_WORKSPACE = Path(__file__).resolve().parents[1] / "examples" / "workspace"
+
 
 class _FakeDatetime(real_datetime):
     current = real_datetime(2026, 2, 24, 13, 59)
@@ -108,3 +110,28 @@ def test_coding_prompt_is_injected_only_when_coding_mode_enabled(tmp_path) -> No
 
     assert "Always inspect files before editing." not in normal[0]["content"]
     assert "Always inspect files before editing." in coding[0]["content"]
+
+
+def test_requested_skills_are_injected_into_system_prompt() -> None:
+    builder = ContextBuilder(EXAMPLE_WORKSPACE)
+
+    prompt = builder.build_system_prompt(skill_names=["ai-news-digest"])
+
+    assert "# Requested Skills" in prompt
+    assert "### Skill: ai-news-digest" in prompt
+    assert "AI Builder Signal Radar" in prompt
+
+
+def test_cron_prompt_includes_structured_source_priorities_for_referenced_skill() -> None:
+    builder = ContextBuilder(EXAMPLE_WORKSPACE)
+
+    prompt = builder.build_cron_prompt(
+        "每日 AI 要闻",
+        "Use ai-news-digest to generate the AI Builder Signal Radar daily digest.",
+    )
+
+    assert "Structured source priorities" in prompt
+    assert "Skill: ai-news-digest" in prompt
+    assert "Priority order: primary -> fallback -> signal-only" in prompt
+    assert "OpenAI (official) | News RSS | primary" in prompt
+    assert "Andrej Karpathy | X (signal) | signal-only" in prompt

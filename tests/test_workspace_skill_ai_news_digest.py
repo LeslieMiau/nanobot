@@ -73,3 +73,29 @@ def test_workspace_ai_news_digest_skill_references_sources_file() -> None:
     assert "Treat OpenAI News RSS as the canonical scheduled source" in sources_content
     assert "Major Event Trigger Watchlist" in sources_content
     assert "Noise Filter Baseline" in sources_content
+
+
+def test_workspace_ai_news_digest_source_registry_parses_priorities() -> None:
+    loader = SkillsLoader(EXAMPLE_WORKSPACE)
+
+    entries = loader.load_source_registry("ai-news-digest")
+
+    assert entries
+    openai_feed = next(
+        entry for entry in entries
+        if entry.source == "OpenAI (official)" and entry.label == "News RSS"
+    )
+    assert openai_feed.url == "https://openai.com/news/rss.xml"
+    assert openai_feed.priority == "primary"
+
+    karpathy_x = next(
+        entry for entry in entries
+        if entry.source == "Andrej Karpathy" and entry.label == "X (signal)"
+    )
+    assert karpathy_x.priority == "signal-only"
+
+    latent_space_rsshub = next(
+        entry for entry in entries
+        if entry.source == "Latent Space Podcast" and entry.label == "YouTube RSSHub"
+    )
+    assert latent_space_rsshub.priority == "fallback"

@@ -37,7 +37,6 @@ from nanobot.app.gateway import (
     run_gateway,
 )
 from nanobot.app.prompts import (
-    build_cron_execution_message as _build_cron_execution_message,
     build_heartbeat_execution_message as _build_heartbeat_execution_message,
     should_deliver_heartbeat_response as _should_deliver_heartbeat_response,
 )
@@ -702,7 +701,7 @@ def retry_cron(
             return None
 
         response = await agent_loop.process_direct(
-            _build_cron_execution_message(run_job.name, run_job.payload.message),
+            agent_loop.context.build_cron_prompt(run_job.name, run_job.payload.message),
             session_key=f"cron:{run_job.id}:manual",
             channel="cli",
             chat_id=f"cron-retry:{run_job.id}",

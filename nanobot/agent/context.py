@@ -47,6 +47,11 @@ class ContextBuilder:
         if memory:
             parts.append(f"# Memory\n\n{memory}")
 
+        if skill_names:
+            requested_content = self.skills.load_skills_for_context(skill_names)
+            if requested_content:
+                parts.append(f"# Requested Skills\n\n{requested_content}")
+
         always_skills = self.skills.get_always_skills()
         if always_skills:
             always_content = self.skills.load_skills_for_context(always_skills)
@@ -63,6 +68,23 @@ Skills with available="false" need dependencies installed first - you can try in
 {skills_summary}""")
 
         return "\n\n---\n\n".join(parts)
+
+    def build_cron_prompt(self, job_name: str, instruction: str) -> str:
+        """Build a cron execution prompt with source-priority hints for referenced skills."""
+        from nanobot.app.prompts import build_cron_execution_message
+
+        prompt = build_cron_execution_message(job_name, instruction)
+        skill_names = self.skills.detect_skill_references(instruction)
+        summaries = [self.skills.build_source_registry_summary(name) for name in skill_names]
+        summaries = [summary for summary in summaries if summary]
+        if not summaries:
+            return prompt
+
+        return (
+            f"{prompt}\n\n"
+            "Structured source priorities:\n"
+            + "\n\n".join(summaries)
+        )
 
     def _get_identity(self) -> str:
         """Get the core identity section."""
