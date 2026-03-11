@@ -149,7 +149,9 @@ Sections:
 
 ## Tooling Notes
 
-- Use `web_search` for discovery and `web_fetch` for source verification.
+- For scheduled daily and weekly digests, prefer direct source pages and feeds.
+- Use `web_fetch` for source verification and feed extraction.
+- Use `web_search` only as a last-resort supplement when direct sources are missing and the run is not blocked by search availability.
 - For YouTube channel URLs, prefer public RSS/Atom feeds (`feeds/videos.xml?channel_id=...`); if channel ID is unknown, RSSHub handle routes are acceptable before trying the channel shell page.
 - Treat X as a secondary signal and prefer official post / paper / repo / release pages.
 - Do not treat RSSHub Twitter/X mirrors as a primary cron source; they are fallback signal only.
@@ -163,7 +165,7 @@ If user asks for automation, suggest these two jobs:
 ```python
 cron(
     action="add",
-    message="Use ai-news-digest to generate the AI Builder Signal Radar daily digest. Focus on high-signal builder content, score candidates with the defined model, include exactly 4 modules (Must Know, Builder Takeaway, One Deep Read / Listen, Action Items), and filter low-signal generic news.",
+    message="Use ai-news-digest to generate the AI Builder Signal Radar daily digest. Focus on high-signal builder content, start from direct source pages and feeds in references/sources.md, use web_search only as a last-resort supplement, include exactly 4 modules (Must Know, Builder Takeaway, One Deep Read / Listen, Action Items), and filter low-signal generic news.",
     cron_expr="0 8 * * *",
     tz="Asia/Shanghai",
 )
@@ -172,7 +174,7 @@ cron(
 ```python
 cron(
     action="add",
-    message="Use ai-news-digest to generate AI Builder Weekly Calibration with 5 key signals, 2 deep interviews, 3 experiments, noise to ignore, and 3 watchpoints for next week.",
+    message="Use ai-news-digest to generate AI Builder Weekly Calibration with 5 key signals, 2 deep interviews, 3 experiments, noise to ignore, and 3 watchpoints for next week. Prefer direct source pages and feeds before any search supplement.",
     cron_expr="0 9 * * 6",
     tz="Asia/Shanghai",
 )

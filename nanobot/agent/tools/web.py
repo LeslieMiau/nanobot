@@ -5,7 +5,7 @@ import json
 import os
 import re
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree
 
 import httpx
@@ -16,6 +16,23 @@ from nanobot.agent.tools.base import Tool
 # Shared constants
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7_2) AppleWebKit/537.36"
 MAX_REDIRECTS = 5  # Limit redirects to prevent DoS attacks
+FEED_LINK_TYPES = {
+    "application/rss+xml",
+    "application/atom+xml",
+    "application/feed+json",
+}
+SOURCE_LANDING_SEGMENTS = {
+    "announcements",
+    "blog",
+    "changelog",
+    "newsletter",
+    "news",
+    "podcast",
+    "release-notes",
+    "releases",
+    "research",
+    "updates",
+}
 
 
 def _strip_tags(text: str) -> str:
@@ -30,6 +47,24 @@ def _normalize(text: str) -> str:
     """Normalize whitespace."""
     text = re.sub(r'[ \t]+', ' ', text)
     return re.sub(r'\n{3,}', '\n\n', text).strip()
+
+
+def _looks_like_feed_url(url: str) -> bool:
+    """Heuristic for alternate links that are likely feeds even without explicit MIME type."""
+    lower = url.lower()
+    return any(
+        token in lower
+        for token in (
+            "/feed",
+            "rss",
+            "atom",
+            "jsonfeed",
+            "feed.xml",
+            "rss.xml",
+            "atom.xml",
+            "feed.json",
+        )
+    ) or lower.endswith((".xml", ".atom", ".rss", ".json"))
 
 
 def _extract_hn_items(html_text: str, max_items: int = 10) -> str | None:
@@ -139,6 +174,44 @@ def _extract_rss_atom_items(feed_text: str, max_items: int = 10) -> str | None:
     if not items:
         return None
     heading = feed_title or "RSS/Atom Feed"
+    return f"# {heading}\n\n" + "\n".join(items)
+
+
+def _extract_json_feed_items(feed_text: str, max_items: int = 10) -> str | None:
+    """Extract concrete entries from a JSON Feed payload."""
+    try:
+        payload = json.loads(feed_text)
+    except json.JSONDecodeError:
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    version = str(payload.get("version") or "")
+    items_data = payload.get("items")
+    if "jsonfeed.org" not in version or not isinstance(items_data, list):
+        return None
+
+    feed_title = _normalize(str(payload.get("title") or "").strip())
+    items: list[str] = []
+    for item in items_data:
+        if not isinstance(item, dict):
+            continue
+        title = _normalize(str(item.get("title") or "").strip())
+        link = str(item.get("url") or item.get("external_url") or item.get("id") or "").strip()
+        published = _normalize(str(item.get("date_published") or item.get("date_modified") or "").strip())
+        if not title or not link:
+            continue
+        line = f"- [{title}]({link})"
+        if published:
+            line += f" ({published})"
+        items.append(line)
+        if len(items) >= max_items:
+            break
+
+    if not items:
+        return None
+    heading = feed_title or "JSON Feed"
     return f"# {heading}\n\n" + "\n".join(items)
 
 
@@ -279,6 +352,51 @@ class WebFetchTool(Tool):
         return None
 
     @staticmethod
+    def _discover_feed_urls(raw_html: str, base_url: str) -> list[str]:
+        """Discover alternate RSS/Atom/JSON feeds exposed in page metadata."""
+        if not raw_html:
+            return []
+
+        urls: list[str] = []
+        seen: set[str] = set()
+        for attrs in re.findall(r"<link\b([^>]+)>", raw_html, flags=re.IGNORECASE):
+            href_match = re.search(r"""\bhref\s*=\s*["']([^"']+)["']""", attrs, flags=re.IGNORECASE)
+            if not href_match:
+                continue
+            href = html.unescape(href_match.group(1)).strip()
+            if not href:
+                continue
+
+            rel_match = re.search(r"""\brel\s*=\s*["']([^"']+)["']""", attrs, flags=re.IGNORECASE)
+            rel_tokens = {
+                token.strip().lower()
+                for token in re.split(r"\s+", rel_match.group(1))
+                if token.strip()
+            } if rel_match else set()
+            if "alternate" not in rel_tokens:
+                continue
+
+            type_match = re.search(r"""\btype\s*=\s*["']([^"']+)["']""", attrs, flags=re.IGNORECASE)
+            link_type = (type_match.group(1).strip().lower() if type_match else "")
+            if link_type not in FEED_LINK_TYPES and not _looks_like_feed_url(href):
+                continue
+
+            resolved = urljoin(base_url, href)
+            if resolved not in seen:
+                seen.add(resolved)
+                urls.append(resolved)
+
+        return urls
+
+    @staticmethod
+    def _is_source_landing_path(path: str) -> bool:
+        """Detect landing pages that often act as stable source registries."""
+        normalized = path.lower().strip("/")
+        if not normalized:
+            return False
+        return normalized.split("/")[-1] in SOURCE_LANDING_SEGMENTS
+
+    @staticmethod
     def _reader_fallback_url(url: str) -> str:
         """Build a public reader mirror URL for a login-gated page."""
         parsed = urlparse(url)
@@ -305,16 +423,27 @@ class WebFetchTool(Tool):
         host = parsed.netloc.lower()
         path = parsed.path or "/"
         candidates: list[tuple[str, str]] = []
+        discovered_feeds = cls._discover_feed_urls(raw_html, url)
+        seen_urls: set[str] = set()
+
+        def add_candidate(strategy: str, candidate_url: str) -> None:
+            if candidate_url in seen_urls:
+                return
+            seen_urls.add(candidate_url)
+            candidates.append((strategy, candidate_url))
 
         if host.endswith("youtube.com"):
             channel_id = cls._extract_youtube_channel_id(path) or cls._extract_youtube_channel_id_from_html(raw_html)
             if channel_id:
-                candidates.append(
-                    ("youtube-rss", f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}")
-                )
-            candidates.append(("reader", cls._reader_fallback_url(url)))
+                add_candidate("youtube-rss", f"https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}")
+            for discovered_feed in discovered_feeds:
+                add_candidate("discovered-feed", discovered_feed)
+            add_candidate("reader", cls._reader_fallback_url(url))
         elif host.endswith("x.com"):
-            candidates.append(("reader", cls._reader_fallback_url(url)))
+            add_candidate("reader", cls._reader_fallback_url(url))
+        else:
+            for discovered_feed in discovered_feeds:
+                add_candidate("discovered-feed", discovered_feed)
 
         return candidates
 
@@ -393,6 +522,15 @@ class WebFetchTool(Tool):
         if host.endswith("github.com") and path == "/trending" and "see what the github community is most excited about today" in normalized:
             return "GitHub Trending page returned only the directory shell without repository entries"
 
+        discovered_feeds = WebFetchTool._discover_feed_urls(raw_html, url)
+        concrete_links = re.findall(r"\[[^\]]+\]\((https?://[^)]+)\)", text)
+        if (
+            discovered_feeds
+            and WebFetchTool._is_source_landing_path(path)
+            and len(concrete_links) < 2
+        ):
+            return "Source landing page exposed feed metadata but returned no concrete entries"
+
         return None
 
     def _extract_response(
@@ -406,7 +544,10 @@ class WebFetchTool(Tool):
         ctype = response.headers.get("content-type", "")
         final_url = str(response.url)
 
-        if "application/json" in ctype:
+        if "application/feed+json" in ctype or "application/json" in ctype:
+            extracted = _extract_json_feed_items(response.text)
+            if extracted:
+                return extracted, "json-feed-list", None
             text = json.dumps(response.json(), indent=2, ensure_ascii=False)
             unusable_reason = self._detect_unusable_page(final_url, response.text, text)
             if unusable_reason:

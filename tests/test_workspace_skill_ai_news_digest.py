@@ -41,6 +41,9 @@ def test_workspace_ai_news_digest_skill_loads_content() -> None:
     assert "cron_expr=\"0 8 * * *\"" in content
     assert "cron_expr=\"0 9 * * 6\"" in content
     assert "Before creating a new schedule, list existing cron jobs first to avoid duplicates." in content
+    assert "For scheduled daily and weekly digests, prefer direct source pages and feeds." in content
+    assert "Use `web_search` only as a last-resort supplement" in content
+    assert "Use `web_search` for discovery and `web_fetch` for source verification." not in content
 
 
 def test_workspace_ai_news_digest_skill_references_sources_file() -> None:
@@ -67,5 +70,6 @@ def test_workspace_ai_news_digest_skill_references_sources_file() -> None:
     assert "https://rsshub.app/youtube/user/@dwarkeshpatel" in sources_content
     assert "https://rsshub.app/youtube/user/@LatentSpaceTV" in sources_content
     assert "Do not rely on RSSHub Twitter/X routes as a primary scheduled source" in sources_content
+    assert "Treat OpenAI News RSS as the canonical scheduled source" in sources_content
     assert "Major Event Trigger Watchlist" in sources_content
     assert "Noise Filter Baseline" in sources_content

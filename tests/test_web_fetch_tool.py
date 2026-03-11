@@ -78,6 +78,29 @@ def test_web_fetch_extracts_rss_items_from_xml() -> None:
     assert "[Pricing update](https://openai.com/news/pricing-update)" in text
 
 
+def test_web_fetch_extracts_json_feed_items() -> None:
+    feed = """
+    {
+      "version": "https://jsonfeed.org/version/1.1",
+      "title": "Research Updates",
+      "items": [
+        {
+          "title": "Model update",
+          "url": "https://example.com/model-update",
+          "date_published": "2026-03-08T01:00:00Z"
+        }
+      ]
+    }
+    """
+
+    text = web_tool._extract_json_feed_items(feed, max_items=10)
+
+    assert text is not None
+    assert text.startswith("# Research Updates")
+    assert "[Model update](https://example.com/model-update)" in text
+    assert "(2026-03-08T01:00:00Z)" in text
+
+
 @pytest.mark.asyncio
 async def test_web_fetch_returns_error_for_empty_rss_instead_of_raw_xml(monkeypatch) -> None:
     class _FakeResponse:
@@ -158,6 +181,38 @@ def test_web_fetch_builds_youtube_rss_fallback_from_handle_page_html() -> None:
         ("youtube-rss", "https://www.youtube.com/feeds/videos.xml?channel_id=UCvi5jNRoRVm436TVAXet1kQ"),
         ("reader", "https://r.jina.ai/http://www.youtube.com/@LatentSpaceTV/videos"),
     ]
+
+
+def test_web_fetch_builds_discovered_feed_fallbacks_for_source_pages() -> None:
+    html = """
+    <html><head>
+      <link rel="alternate" type="application/rss+xml" title="RSS" href="/news/rss.xml">
+      <link rel="alternate" type="application/atom+xml" href="https://example.com/blog/atom.xml">
+    </head></html>
+    """
+
+    candidates = WebFetchTool._fallback_candidates("https://example.com/news", html)
+
+    assert candidates == [
+        ("discovered-feed", "https://example.com/news/rss.xml"),
+        ("discovered-feed", "https://example.com/blog/atom.xml"),
+    ]
+
+
+def test_web_fetch_flags_source_landing_pages_with_feed_metadata() -> None:
+    html = """
+    <html><head>
+      <link rel="alternate" type="application/rss+xml" title="RSS" href="/news/rss.xml">
+    </head><body>Latest company updates</body></html>
+    """
+
+    reason = WebFetchTool._detect_unusable_page(
+        "https://example.com/news",
+        html,
+        "# Example News\n\nLatest company updates",
+    )
+
+    assert reason == "Source landing page exposed feed metadata but returned no concrete entries"
 
 
 @pytest.mark.asyncio
@@ -349,6 +404,66 @@ async def test_web_fetch_falls_back_to_youtube_rss_for_handle_pages_using_html_m
     assert payload["usedFallback"] is True
     assert payload["fallbackUrl"] == "https://www.youtube.com/feeds/videos.xml?channel_id=UCvi5jNRoRVm436TVAXet1kQ"
     assert "[Agent update](https://www.youtube.com/watch?v=abc123)" in payload["text"]
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_falls_back_to_discovered_feed_for_source_pages(monkeypatch) -> None:
+    class _FakeResponse:
+        def __init__(self, url: str, headers: dict[str, str], text: str, status_code: int = 200):
+            self.url = url
+            self.headers = headers
+            self.text = text
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url: str, headers: dict[str, str]):  # noqa: ARG002
+            if url == "https://example.com/news":
+                return _FakeResponse(
+                    url,
+                    {"content-type": "text/html"},
+                    """
+                    <html><head>
+                      <link rel="alternate" type="application/rss+xml" title="RSS" href="/news/rss.xml">
+                    </head><body>Latest company updates</body></html>
+                    """,
+                )
+            if url == "https://example.com/news/rss.xml":
+                return _FakeResponse(
+                    url,
+                    {"content-type": "application/rss+xml"},
+                    """<?xml version="1.0"?>
+                    <rss version="2.0">
+                      <channel>
+                        <title>Example News</title>
+                        <item>
+                          <title>Launch update</title>
+                          <link>https://example.com/news/launch-update</link>
+                          <pubDate>Sun, 08 Mar 2026 02:19:13 GMT</pubDate>
+                        </item>
+                      </channel>
+                    </rss>""",
+                )
+            raise AssertionError(f"unexpected url: {url}")
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda *args, **kwargs: _FakeClient())
+
+    tool = WebFetchTool()
+    result = await tool.execute("https://example.com/news")
+    payload = json.loads(result)
+
+    assert payload["extractor"] == "discovered-feed-fallback"
+    assert payload["usedFallback"] is True
+    assert payload["fallbackUrl"] == "https://example.com/news/rss.xml"
+    assert "[Launch update](https://example.com/news/launch-update)" in payload["text"]
 
 
 @pytest.mark.asyncio

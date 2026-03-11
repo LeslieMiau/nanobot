@@ -73,6 +73,7 @@ Default-filter:
 ## Maintenance Rules
 
 - Prefer first-hand sources over aggregators.
+- Treat OpenAI News RSS as the canonical scheduled source when the newsroom page or linked article body is partially blocked.
 - For YouTube, prefer official RSS/Atom when channel ID is known; otherwise use RSSHub handle routes before scraping channel shell pages.
 - Do not rely on RSSHub Twitter/X routes as a primary scheduled source; keep them signal-only because auth and stability vary by instance.
 - Prioritize builder relevance, practicality, and workflow/product impact.
