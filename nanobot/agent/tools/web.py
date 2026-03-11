@@ -4,6 +4,7 @@ import html
 import json
 import os
 import re
+import time
 from typing import Any
 from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree
@@ -226,6 +227,115 @@ def _validate_url(url: str) -> tuple[bool, str]:
         return True, ""
     except Exception as e:
         return False, str(e)
+
+
+class _SourceHealthTracker:
+    """Track short-lived fetch failures so bad fallback sources can cool down."""
+
+    SOFT_SOURCE_COOLDOWN_SECONDS = 10 * 60
+    HARD_SOURCE_COOLDOWN_SECONDS = 60 * 60
+    DOMAIN_FAILURE_WINDOW_SECONDS = 10 * 60
+    DOMAIN_FAILURE_THRESHOLD = 2
+    DOMAIN_BACKOFF_SECONDS = 30 * 60
+
+    def __init__(self) -> None:
+        self._source_cooldowns: dict[str, tuple[float, str]] = {}
+        self._domain_failures: dict[str, list[float]] = {}
+        self._domain_backoffs: dict[str, tuple[float, str]] = {}
+
+    def reset(self) -> None:
+        self._source_cooldowns.clear()
+        self._domain_failures.clear()
+        self._domain_backoffs.clear()
+
+    def _prune(self, now: float) -> None:
+        self._source_cooldowns = {
+            url: entry for url, entry in self._source_cooldowns.items() if entry[0] > now
+        }
+        self._domain_backoffs = {
+            host: entry for host, entry in self._domain_backoffs.items() if entry[0] > now
+        }
+
+        kept_failures: dict[str, list[float]] = {}
+        for host, failures in self._domain_failures.items():
+            recent = [ts for ts in failures if now - ts <= self.DOMAIN_FAILURE_WINDOW_SECONDS]
+            if recent:
+                kept_failures[host] = recent
+        self._domain_failures = kept_failures
+
+    @staticmethod
+    def _domain(url: str) -> str:
+        return urlparse(url).netloc.lower()
+
+    @staticmethod
+    def _is_hard_failure(reason: str) -> bool:
+        normalized = reason.lower()
+        hard_markers = (
+            "http 401",
+            "http 403",
+            "http 429",
+            "http 500",
+            "http 502",
+            "http 503",
+            "http 504",
+            "placeholder error page",
+            "login or missing-page shell",
+            "proxy error",
+            "timed out",
+            "connection refused",
+            "connection reset",
+        )
+        return any(marker in normalized for marker in hard_markers)
+
+    def record_failure(self, url: str, reason: str) -> None:
+        now = time.monotonic()
+        self._prune(now)
+        host = self._domain(url)
+        cooldown = (
+            self.HARD_SOURCE_COOLDOWN_SECONDS
+            if self._is_hard_failure(reason)
+            else self.SOFT_SOURCE_COOLDOWN_SECONDS
+        )
+        self._source_cooldowns[url] = (now + cooldown, reason)
+
+        failures = self._domain_failures.setdefault(host, [])
+        failures.append(now)
+        failures = [ts for ts in failures if now - ts <= self.DOMAIN_FAILURE_WINDOW_SECONDS]
+        self._domain_failures[host] = failures
+        if len(failures) >= self.DOMAIN_FAILURE_THRESHOLD:
+            self._domain_backoffs[host] = (
+                now + self.DOMAIN_BACKOFF_SECONDS,
+                "domain backoff active for "
+                f"{host} after repeated fetch failures",
+            )
+
+    def record_success(self, url: str) -> None:
+        now = time.monotonic()
+        self._prune(now)
+        host = self._domain(url)
+        self._source_cooldowns.pop(url, None)
+        self._domain_failures.pop(host, None)
+        self._domain_backoffs.pop(host, None)
+
+    def should_skip(self, url: str) -> str | None:
+        now = time.monotonic()
+        self._prune(now)
+        host = self._domain(url)
+        domain_backoff = self._domain_backoffs.get(host)
+        if domain_backoff:
+            return domain_backoff[1]
+
+        source_cooldown = self._source_cooldowns.get(url)
+        if source_cooldown:
+            return (
+                "source cooldown active after recent fetch failure: "
+                f"{source_cooldown[1]}"
+            )
+
+        return None
+
+
+_SOURCE_HEALTH = _SourceHealthTracker()
 
 
 class WebSearchTool(Tool):
@@ -601,10 +711,22 @@ class WebFetchTool(Tool):
                 r = await client.get(url, headers={"User-Agent": USER_AGENT})
                 r.raise_for_status()
                 text, extractor, error = self._extract_response(r, extractMode)
+                skipped_fallbacks: list[dict[str, str]] = []
 
                 if error:
                     attempts: list[dict[str, str]] = []
                     for strategy, fallback_url in self._fallback_candidates(str(r.url), r.text):
+                        skip_reason = _SOURCE_HEALTH.should_skip(fallback_url)
+                        if skip_reason:
+                            skipped_fallbacks.append(
+                                {
+                                    "strategy": strategy,
+                                    "url": fallback_url,
+                                    "reason": skip_reason,
+                                }
+                            )
+                            continue
+
                         attempts.append({"strategy": strategy, "url": fallback_url})
                         try:
                             fallback_response = await client.get(
@@ -617,13 +739,28 @@ class WebFetchTool(Tool):
                                 extractMode,
                             )
                             if fallback_error or not fallback_text or not fallback_extractor:
+                                _SOURCE_HEALTH.record_failure(
+                                    fallback_url,
+                                    fallback_error or "fallback returned no extractable content",
+                                )
                                 continue
 
                             text = fallback_text
                             extractor = f"{strategy}-fallback"
                             r = fallback_response
+                            _SOURCE_HEALTH.record_success(fallback_url)
                             break
+                        except httpx.HTTPStatusError as fallback_exc:
+                            status_code = fallback_exc.response.status_code if fallback_exc.response else 0
+                            _SOURCE_HEALTH.record_failure(fallback_url, f"HTTP {status_code}")
+                            logger.warning(
+                                "WebFetch fallback {} failed for {} with status {}",
+                                strategy,
+                                fallback_url,
+                                status_code,
+                            )
                         except Exception as fallback_exc:
+                            _SOURCE_HEALTH.record_failure(fallback_url, str(fallback_exc))
                             logger.warning(
                                 "WebFetch fallback {} failed for {}: {}",
                                 strategy,
@@ -631,16 +768,16 @@ class WebFetchTool(Tool):
                                 fallback_exc,
                             )
                     else:
-                        return json.dumps(
-                            {
-                                "error": error,
-                                "url": url,
-                                "finalUrl": str(r.url),
-                                "status": r.status_code,
-                                "attemptedFallbacks": attempts,
-                            },
-                            ensure_ascii=False,
-                        )
+                        payload = {
+                            "error": error,
+                            "url": url,
+                            "finalUrl": str(r.url),
+                            "status": r.status_code,
+                            "attemptedFallbacks": attempts,
+                        }
+                        if skipped_fallbacks:
+                            payload["skippedFallbacks"] = skipped_fallbacks
+                        return json.dumps(payload, ensure_ascii=False)
                 else:
                     assert text is not None
                     assert extractor is not None
@@ -661,6 +798,8 @@ class WebFetchTool(Tool):
             if str(r.url) != url and extractor.endswith("-fallback"):
                 payload["usedFallback"] = True
                 payload["fallbackUrl"] = str(r.url)
+            if skipped_fallbacks:
+                payload["skippedFallbacks"] = skipped_fallbacks
 
             return json.dumps(payload, ensure_ascii=False)
         except httpx.ProxyError as e:

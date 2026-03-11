@@ -6,6 +6,13 @@ from nanobot.agent.tools import web as web_tool
 from nanobot.agent.tools.web import WebFetchTool
 
 
+@pytest.fixture(autouse=True)
+def reset_source_health() -> None:
+    web_tool._SOURCE_HEALTH.reset()
+    yield
+    web_tool._SOURCE_HEALTH.reset()
+
+
 def test_web_fetch_extracts_hn_items_from_html() -> None:
     html = """
     <html><body>
@@ -99,6 +106,26 @@ def test_web_fetch_extracts_json_feed_items() -> None:
     assert text.startswith("# Research Updates")
     assert "[Model update](https://example.com/model-update)" in text
     assert "(2026-03-08T01:00:00Z)" in text
+
+
+def test_source_health_tracker_uses_shorter_cooldown_for_empty_feeds_than_http_403(monkeypatch) -> None:
+    now = {"value": 100.0}
+    monkeypatch.setattr(web_tool.time, "monotonic", lambda: now["value"])
+    tracker = web_tool._SourceHealthTracker()
+    url = "https://example.com/feed.xml"
+
+    tracker.record_failure(url, "RSS/Atom feed returned no extractable entries")
+    assert tracker.should_skip(url) is not None
+
+    now["value"] += tracker.SOFT_SOURCE_COOLDOWN_SECONDS + 1
+    assert tracker.should_skip(url) is None
+
+    tracker.record_failure(url, "HTTP 403")
+    now["value"] += tracker.SOFT_SOURCE_COOLDOWN_SECONDS + 1
+    assert tracker.should_skip(url) is not None
+
+    now["value"] += tracker.HARD_SOURCE_COOLDOWN_SECONDS - tracker.SOFT_SOURCE_COOLDOWN_SECONDS
+    assert tracker.should_skip(url) is None
 
 
 @pytest.mark.asyncio
@@ -464,6 +491,120 @@ async def test_web_fetch_falls_back_to_discovered_feed_for_source_pages(monkeypa
     assert payload["usedFallback"] is True
     assert payload["fallbackUrl"] == "https://example.com/news/rss.xml"
     assert "[Launch update](https://example.com/news/launch-update)" in payload["text"]
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_skips_cooled_down_fallback_candidates(monkeypatch) -> None:
+    web_tool._SOURCE_HEALTH.record_failure(
+        "https://example.com/news/rss.xml",
+        "RSS/Atom feed returned no extractable entries",
+    )
+
+    class _FakeResponse:
+        def __init__(self, url: str, headers: dict[str, str], text: str, status_code: int = 200):
+            self.url = url
+            self.headers = headers
+            self.text = text
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url: str, headers: dict[str, str]):  # noqa: ARG002
+            if url == "https://example.com/news":
+                return _FakeResponse(
+                    url,
+                    {"content-type": "text/html"},
+                    """
+                    <html><head>
+                      <link rel="alternate" type="application/rss+xml" title="RSS" href="/news/rss.xml">
+                    </head><body>Latest company updates</body></html>
+                    """,
+                )
+            raise AssertionError(f"unexpected url: {url}")
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda *args, **kwargs: _FakeClient())
+
+    tool = WebFetchTool()
+    result = await tool.execute("https://example.com/news")
+    payload = json.loads(result)
+
+    assert payload["error"] == "Source landing page exposed feed metadata but returned no concrete entries"
+    assert payload["attemptedFallbacks"] == []
+    assert payload["skippedFallbacks"] == [
+        {
+            "strategy": "discovered-feed",
+            "url": "https://example.com/news/rss.xml",
+            "reason": "source cooldown active after recent fetch failure: RSS/Atom feed returned no extractable entries",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_web_fetch_enters_same_domain_backoff_after_repeated_fallback_failures(monkeypatch) -> None:
+    class _FakeResponse:
+        def __init__(self, url: str, headers: dict[str, str], text: str, status_code: int = 200):
+            self.url = url
+            self.headers = headers
+            self.text = text
+            self.status_code = status_code
+
+        def raise_for_status(self) -> None:
+            return None
+
+    class _FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url: str, headers: dict[str, str]):  # noqa: ARG002
+            if url == "https://example.com/news":
+                return _FakeResponse(
+                    url,
+                    {"content-type": "text/html"},
+                    """
+                    <html><head>
+                      <link rel="alternate" type="application/rss+xml" href="https://feeds.example.com/a.xml">
+                      <link rel="alternate" type="application/rss+xml" href="https://feeds.example.com/b.xml">
+                      <link rel="alternate" type="application/rss+xml" href="https://feeds.example.com/c.xml">
+                    </head><body>Latest company updates</body></html>
+                    """,
+                )
+            if url in {"https://feeds.example.com/a.xml", "https://feeds.example.com/b.xml"}:
+                return _FakeResponse(
+                    url,
+                    {"content-type": "application/rss+xml"},
+                    """<?xml version="1.0"?><rss version="2.0"><channel><title>Empty</title></channel></rss>""",
+                )
+            raise AssertionError(f"unexpected url: {url}")
+
+    monkeypatch.setattr("nanobot.agent.tools.web.httpx.AsyncClient", lambda *args, **kwargs: _FakeClient())
+
+    tool = WebFetchTool()
+    result = await tool.execute("https://example.com/news")
+    payload = json.loads(result)
+
+    assert payload["error"] == "Source landing page exposed feed metadata but returned no concrete entries"
+    assert payload["attemptedFallbacks"] == [
+        {"strategy": "discovered-feed", "url": "https://feeds.example.com/a.xml"},
+        {"strategy": "discovered-feed", "url": "https://feeds.example.com/b.xml"},
+    ]
+    assert payload["skippedFallbacks"] == [
+        {
+            "strategy": "discovered-feed",
+            "url": "https://feeds.example.com/c.xml",
+            "reason": "domain backoff active for feeds.example.com after repeated fetch failures",
+        }
+    ]
 
 
 @pytest.mark.asyncio
