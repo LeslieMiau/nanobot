@@ -45,6 +45,7 @@ async def test_openai_codex_provider_forwards_verbosity_and_limits(monkeypatch: 
     assert isinstance(body, dict)
     assert body["model"] == "gpt-5.1"
     assert body["text"] == {"verbosity": "low"}
-    assert body["max_output_tokens"] == 321
-    assert body["temperature"] == 0.2
+    assert "max_output_tokens" not in body
+    assert "max_tokens" not in body
+    assert "temperature" not in body
     assert body["parallel_tool_calls"] is False

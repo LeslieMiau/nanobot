@@ -71,12 +71,10 @@ class OpenAICodexProvider(LLMProvider):
             "input": input_items,
             "text": {"verbosity": response_verbosity or self.response_verbosity},
             "include": ["reasoning.encrypted_content"],
-            "max_output_tokens": max(1, int(max_tokens)),
             "prompt_cache_key": _prompt_cache_key(messages),
             "tool_choice": "auto",
             "parallel_tool_calls": self.parallel_tool_calls if parallel_tool_calls is None else parallel_tool_calls,
         }
-        body["temperature"] = max(0.0, min(2.0, float(temperature)))
 
         if reasoning_effort:
             body["reasoning"] = {"effort": reasoning_effort}
