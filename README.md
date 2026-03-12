@@ -178,7 +178,8 @@ Add or merge these **two parts** into your config (other options have defaults).
 {
   "agents": {
     "defaults": {
-      "model": "anthropic/claude-opus-4-5",
+      "model": "anthropic/claude-sonnet-4-5",
+      "automationModel": "anthropic/claude-sonnet-4-5",
       "provider": "openrouter"
     }
   }
@@ -743,7 +744,12 @@ nanobot provider login openai-codex
 {
   "agents": {
     "defaults": {
-      "model": "openai-codex/gpt-5.4"
+      "model": "gpt-5.1",
+      "automationModel": "gpt-5.1",
+      "responseVerbosity": "low",
+      "coding": {
+        "primaryModel": "gpt-5.4"
+      }
     }
   }
 }

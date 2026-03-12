@@ -100,6 +100,21 @@ def test_system_prompt_requests_direct_non_coding_answers(tmp_path) -> None:
     assert "Do not reveal hidden reasoning" in prompt
 
 
+def test_system_prompt_omits_heavy_bootstrap_and_skill_catalog_by_default(tmp_path) -> None:
+    workspace = _make_workspace(tmp_path)
+    (workspace / "SOUL.md").write_text("persona", encoding="utf-8")
+    (workspace / "USER.md").write_text("profile", encoding="utf-8")
+    (workspace / "TOOLS.md").write_text("tool notes", encoding="utf-8")
+    builder = ContextBuilder(workspace)
+
+    prompt = builder.build_system_prompt()
+
+    assert "## SOUL.md" not in prompt
+    assert "## USER.md" not in prompt
+    assert "## TOOLS.md" not in prompt
+    assert "# Skills" not in prompt
+
+
 def test_coding_prompt_is_injected_only_when_coding_mode_enabled(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     (workspace / "CODING.md").write_text("Always inspect files before editing.", encoding="utf-8")

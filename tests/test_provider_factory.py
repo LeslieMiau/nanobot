@@ -68,10 +68,11 @@ def test_create_provider_uses_openai_codex_for_default_config() -> None:
     provider = create_provider(config)
 
     assert isinstance(provider, OpenAICodexProvider)
-    assert provider.get_default_model() == "openai-codex/gpt-5.4"
+    assert provider.get_default_model() == "gpt-5.1"
+    assert provider.response_verbosity == "low"
 
 
-def test_build_available_models_uses_openai_codex_gpt_5_4_as_default_entry() -> None:
+def test_build_available_models_uses_openai_codex_for_default_entry() -> None:
     config = Config()
 
     models = build_available_models(
@@ -82,7 +83,20 @@ def test_build_available_models_uses_openai_codex_gpt_5_4_as_default_entry() -> 
     )
 
     assert any(
-        model.model == "openai-codex/gpt-5.4" and model.provider_name == "openai_codex"
+        model.model == "gpt-5.1" and model.provider_name == "openai_codex"
         for model in models
     )
     assert not any(model.model == "openai-codex/gpt-5.1-codex" for model in models)
+
+
+def test_resolve_switch_selection_reuses_default_openai_codex_for_bare_gpt_model() -> None:
+    config = Config()
+
+    selection = resolve_switch_selection(
+        config,
+        "gpt-5.1",
+        default_model="gpt-5.1",
+        default_provider_name="openai_codex",
+    )
+
+    assert selection.provider_name == "openai_codex"

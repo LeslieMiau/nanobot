@@ -29,6 +29,10 @@ class ContextBuilder:
         skill_names: list[str] | None = None,
         persona_runtime_hints: str | None = None,
         coding_mode: bool = False,
+        include_soul: bool = False,
+        include_user_profile: bool = False,
+        include_tool_notes: bool = False,
+        include_skills_catalog: bool = False,
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
@@ -39,7 +43,14 @@ class ContextBuilder:
         if coding_mode and (coding_prompt := self._load_optional_file("CODING.md")):
             parts.append(f"# Coding Mode\n\n{coding_prompt}")
 
-        bootstrap = self._load_bootstrap_files()
+        bootstrap_files = ["AGENTS.md"]
+        if include_soul:
+            bootstrap_files.append("SOUL.md")
+        if include_user_profile:
+            bootstrap_files.append("USER.md")
+        if include_tool_notes:
+            bootstrap_files.append("TOOLS.md")
+        bootstrap = self._load_bootstrap_files(bootstrap_files)
         if bootstrap:
             parts.append(bootstrap)
 
@@ -58,7 +69,7 @@ class ContextBuilder:
             if always_content:
                 parts.append(f"# Active Skills\n\n{always_content}")
 
-        skills_summary = self.skills.build_skills_summary()
+        skills_summary = self.skills.build_skills_summary() if include_skills_catalog else ""
         if skills_summary:
             parts.append(f"""# Skills
 
@@ -92,19 +103,6 @@ Skills with available="false" need dependencies installed first - you can try in
         system = platform.system()
         runtime = f"{'macOS' if system == 'Darwin' else system} {platform.machine()}, Python {platform.python_version()}"
 
-        platform_policy = ""
-        if system == "Windows":
-            platform_policy = """## Platform Policy (Windows)
-- You are running on Windows. Do not assume GNU tools like `grep`, `sed`, or `awk` exist.
-- Prefer Windows-native commands or file tools when they are more reliable.
-- If terminal output is garbled, retry with UTF-8 output enabled.
-"""
-        else:
-            platform_policy = """## Platform Policy (POSIX)
-- You are running on a POSIX system. Prefer UTF-8 and standard shell tools.
-- Use file tools when they are simpler or more reliable than shell commands.
-"""
-
         return f"""# nanobot 🐈
 
 You are nanobot, a helpful AI assistant.
@@ -118,13 +116,9 @@ Your workspace is at: {workspace_path}
 - History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
 
-{platform_policy}
-
 ## nanobot Guidelines
-- State intent before tool calls, but NEVER predict or claim results before receiving them.
 - Before modifying a file, read it first. Do not assume files or directories exist.
-- After writing or editing a file, re-read it if accuracy matters.
-- If a tool call fails, analyze the error before retrying with a different approach.
+- Keep tool narration and process chatter brief unless the user explicitly asks for it.
 - Ask for clarification when the request is ambiguous.
 - For non-coding conversations, answer with the final result first. Keep preambles, method explanations, and process narration to a minimum unless the user asks for them.
 - Do not reveal hidden reasoning or describe internal thought process.
@@ -141,11 +135,11 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
 
-    def _load_bootstrap_files(self) -> str:
-        """Load all bootstrap files from workspace."""
+    def _load_bootstrap_files(self, filenames: list[str] | None = None) -> str:
+        """Load selected bootstrap files from workspace."""
         parts = []
 
-        for filename in self.BOOTSTRAP_FILES:
+        for filename in filenames or self.BOOTSTRAP_FILES:
             if content := self._load_optional_file(filename):
                 parts.append(f"## {filename}\n\n{content}")
 

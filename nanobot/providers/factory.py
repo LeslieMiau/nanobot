@@ -35,7 +35,10 @@ def create_provider(config: Config, model: str | None = None, provider_name: str
     _ensure_provider_ready(provider_name)
 
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
-        return OpenAICodexProvider(default_model=model)
+        return OpenAICodexProvider(
+            default_model=model,
+            response_verbosity=config.agents.defaults.response_verbosity,
+        )
 
     if provider_name == "custom":
         from nanobot.providers.custom_provider import CustomProvider
@@ -94,6 +97,8 @@ def resolve_switch_selection(
         return ProviderSelection(model=model, provider_name=explicit_provider)
 
     lowered = model.lower()
+    if lowered.startswith("gpt-") and default_provider_name == "openai_codex":
+        return ProviderSelection(model=model, provider_name=default_provider_name)
     if "codex" in lowered and default_provider_name in {"github_copilot", "openai_codex"}:
         return ProviderSelection(model=model, provider_name=default_provider_name)
 

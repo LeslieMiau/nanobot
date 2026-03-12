@@ -14,7 +14,11 @@ from typing import TYPE_CHECKING, Any, Callable, Sequence
 from rich.console import Console
 
 from nanobot import __logo__
-from nanobot.app.prompts import build_heartbeat_execution_message, should_deliver_heartbeat_response
+from nanobot.app.prompts import (
+    build_cron_execution_message,
+    build_heartbeat_execution_message,
+    should_deliver_heartbeat_response,
+)
 from nanobot.app.runtime import build_agent_runtime, load_runtime_config, make_provider
 from nanobot.utils.helpers import sync_workspace_templates
 
@@ -243,7 +247,10 @@ def run_gateway(
             from nanobot.agent.tools.cron import CronTool
             from nanobot.agent.tools.message import MessageTool
 
-            reminder_note = agent.context.build_cron_prompt(job.name, job.payload.message)
+            if hasattr(agent, "context") and hasattr(agent.context, "build_cron_prompt"):
+                reminder_note = agent.context.build_cron_prompt(job.name, job.payload.message)
+            else:
+                reminder_note = build_cron_execution_message(job.name, job.payload.message)
 
             async def _silent(*_args, **_kwargs):
                 pass
@@ -253,13 +260,25 @@ def run_gateway(
             if isinstance(cron_tool, CronTool):
                 cron_token = cron_tool.set_cron_context(True)
             try:
-                response = await agent.process_direct(
-                    reminder_note,
-                    session_key=f"cron:{job.id}",
-                    channel=job.payload.channel or "cli",
-                    chat_id=job.payload.to or "direct",
-                    on_progress=_silent,
-                )
+                if hasattr(agent, "process_system_turn"):
+                    response = await agent.process_system_turn(
+                        reminder_note,
+                        session_key=f"cron:{job.id}",
+                        channel=job.payload.channel or "cli",
+                        chat_id=job.payload.to or "direct",
+                        on_progress=_silent,
+                        stateless=True,
+                        disable_persona=True,
+                        model=getattr(agent, "automation_model", None),
+                    )
+                else:
+                    response = await agent.process_direct(
+                        content=reminder_note,
+                        session_key=f"cron:{job.id}",
+                        channel=job.payload.channel or "cli",
+                        chat_id=job.payload.to or "direct",
+                        on_progress=_silent,
+                    )
             finally:
                 if isinstance(cron_tool, CronTool) and cron_token is not None:
                     cron_tool.reset_cron_context(cron_token)
@@ -337,12 +356,15 @@ def run_gateway(
             async def _silent(*_args, **_kwargs):
                 pass
 
-            return await agent.process_direct(
+            return await agent.process_system_turn(
                 prompt,
                 session_key="heartbeat",
                 channel=channel_name,
                 chat_id=chat_id,
                 on_progress=_silent,
+                stateless=True,
+                disable_persona=True,
+                model=agent.automation_model,
             )
 
         async def on_heartbeat_notify(response: str) -> None:
@@ -423,10 +445,14 @@ def run_gateway(
             )
 
         hb_cfg = config.gateway.heartbeat
+        try:
+            heartbeat_provider, heartbeat_model, _ = agent._resolve_provider_for_model(agent.automation_model)
+        except Exception:
+            heartbeat_provider, heartbeat_model = provider, agent.model
         heartbeat = HeartbeatService(
             workspace=config.workspace_path,
-            provider=provider,
-            model=agent.model,
+            provider=heartbeat_provider,
+            model=heartbeat_model,
             on_execute=on_heartbeat_execute,
             on_notify=on_heartbeat_notify,
             on_error=on_heartbeat_error,

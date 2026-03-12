@@ -24,46 +24,16 @@ class TurnExecutorController:
 
     async def execute_system_message(self, msg: InboundMessage) -> OutboundMessage:
         channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id else ("cli", msg.chat_id))
-        logger.info("Processing system message from {}", msg.sender_id)
         key = msg.session_key_override or f"{channel}:{chat_id}"
-        session = self.loop.sessions.get_or_create(key)
-        self.loop._restore_session_model_provider(session)
-        _, coding_enabled = self.loop._resolve_coding_mode(session, msg.content)
-        self.loop._set_tool_context(
-            channel,
-            chat_id,
-            msg.metadata.get("message_id"),
-            coding_enabled=coding_enabled,
+        logger.info("Processing system message from {}", msg.sender_id)
+        final_content = await self.loop.process_system_turn(
+            msg.content,
             session_key=key,
-        )
-        history = session.get_history(max_messages=self.loop.memory_window)
-        persona_hints = self.loop._persona_hints_for_turn(msg.content, coding_enabled=coding_enabled)
-        turn_temperature = self.loop._temperature_for_turn(msg.content, coding_enabled=coding_enabled)
-        messages = self.loop.context.build_messages(
-            history=history,
-            current_message=msg.content,
             channel=channel,
             chat_id=chat_id,
-            persona_runtime_hints=persona_hints,
-            coding_mode=coding_enabled,
+            stateless=False,
+            disable_persona=True,
         )
-        final_content, _, all_msgs, turn_state = await self.loop._run_agent_loop(
-            messages,
-            temperature_override=turn_temperature,
-            coding_enabled=coding_enabled,
-        )
-        final_content = await self.loop._apply_persona_output_controls(
-            final_content,
-            all_msgs,
-            coding_enabled=coding_enabled,
-        )
-        final_content = self.loop._apply_coding_summary(
-            final_content,
-            turn_state,
-            coding_enabled=coding_enabled,
-        )
-        self.loop._save_turn(session, all_msgs, 1 + len(history))
-        self.loop.sessions.save(session)
         return OutboundMessage(
             channel=channel,
             chat_id=chat_id,
@@ -171,6 +141,7 @@ class TurnExecutorController:
             final_content,
             all_msgs,
             coding_enabled=coding_enabled,
+            user_text=msg.content,
         )
         final_content = self.loop._apply_coding_summary(
             final_content,

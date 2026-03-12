@@ -54,6 +54,16 @@ def test_persona_adaptive_temperature_by_scene() -> None:
     assert engine.recommended_temperature("这个医疗建议是否有风险", 0.1) == 0.25
 
 
+def test_persona_chat_only_applies_only_to_chat_scene() -> None:
+    engine = PersonaEngine(
+        PersonaConfig(mode="shinchan_tw_s1", dialect="tw_s1", script="simplified", intensity="adaptive")
+    )
+
+    assert engine.should_apply("今天要不要吃饼干") is True
+    assert engine.should_apply("请帮我修复这个报错") is False
+    assert engine.should_apply("帮我执行定时任务", system_turn=True) is False
+
+
 async def test_normalize_output_converts_to_simplified_locally() -> None:
     engine = PersonaEngine(
         PersonaConfig(mode="shinchan_tw_s1", dialect="tw_s1", script="simplified", intensity="adaptive")

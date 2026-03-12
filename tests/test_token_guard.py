@@ -76,7 +76,7 @@ def _seed_long_session(loop: AgentLoop, session_key: str = "cli:direct") -> None
 
 
 @pytest.mark.asyncio
-async def test_token_guard_allows_normal_message_and_appends_estimate(tmp_path: Path) -> None:
+async def test_token_guard_allows_normal_message_without_estimate_for_low_risk(tmp_path: Path) -> None:
     loop, provider = _make_loop(tmp_path)
 
     out = await loop._process_message(
@@ -84,8 +84,7 @@ async def test_token_guard_allows_normal_message_and_appends_estimate(tmp_path: 
     )
 
     assert out is not None
-    assert out.content.startswith("ok")
-    assert "Token Guard：原始体量" in out.content
+    assert out.content == "ok"
     assert provider.calls == 1
 
 
@@ -121,8 +120,7 @@ async def test_token_guard_does_not_block_short_follow_up_in_long_session(tmp_pa
     )
 
     assert out is not None
-    assert out.content.startswith("ok")
-    assert "Token Guard：原始体量" in out.content
+    assert out.content == "ok"
     assert provider.calls == 1
 
 
@@ -237,4 +235,39 @@ async def test_token_guard_off_mode_skips_interception_and_estimate(tmp_path: Pa
 
     assert out is not None
     assert out.content == "ok"
+    assert provider.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_token_guard_budget_changes_same_task_behavior(tmp_path: Path) -> None:
+    request = (
+        "请在 multiple files 范围内查看 nanobot/agent/loop.py、"
+        "nanobot/agent/token_guard.py、nanobot/agent/turn_executor.py、"
+        "nanobot/agent/context.py、nanobot/app/gateway.py、"
+        "nanobot/persona/engine.py 这些文件之间的衔接关系。必要时可以结合 "
+        "bash 和 web 线索，但这次先不要修改代码，也不要做 repo-wide 扫描。"
+        "我只想让你围绕 token guard、persona、system turn 这三条链路做一次详细总结，"
+        "说明它们现在是如何协作的、哪几处最容易互相影响、哪些地方看起来更像边界条件、"
+        "哪些地方更像主干路径。"
+    )
+
+    low_budget_loop, _ = _make_loop(tmp_path / "low", budget_k=10, coding_enabled=False)
+    high_budget_loop, provider = _make_loop(tmp_path / "high", budget_k=40, coding_enabled=False)
+    for loop in (low_budget_loop, high_budget_loop):
+        session = loop.sessions.get_or_create("cli:direct")
+        for i in range(12):
+            session.messages.append({"role": "user", "content": f"history-user-{i} " + ("A" * 350)})
+            session.messages.append({"role": "assistant", "content": "history-assistant " + ("B" * 350)})
+
+    blocked = await low_budget_loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content=request)
+    )
+    allowed = await high_budget_loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content=request)
+    )
+
+    assert blocked is not None
+    assert "⚠️ Token Guard 拦截" in blocked.content
+    assert allowed is not None
+    assert allowed.content == "ok"
     assert provider.calls == 1

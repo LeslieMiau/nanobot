@@ -18,4 +18,5 @@ Get USER_ID and CHANNEL from the current session (e.g., `8281248569` and `telegr
 - **Remove**: `edit_file` to delete completed tasks
 - **Rewrite**: `write_file` to replace all tasks
 
-When the user asks for a recurring/periodic task, update `HEARTBEAT.md` instead of creating a one-time cron reminder.
+Use `HEARTBEAT.md` for fuzzy recurring checks, inbox sweeps, or conditional follow-ups.
+Use the built-in `cron` tool for strict scheduled delivery at a specific time.

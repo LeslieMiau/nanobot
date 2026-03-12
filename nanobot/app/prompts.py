@@ -13,6 +13,7 @@ def build_heartbeat_execution_message(tasks_summary: str, heartbeat_content: str
         "Re-evaluate the full HEARTBEAT.md below before acting.\n"
         "Check any referenced marker or output files before execution.\n"
         "Execute only tasks that are actually due right now.\n"
+        "Heartbeat is for fuzzy recurring checks or conditional tasks, not strict clock-time delivery.\n"
         "Return only the final user-facing content that should be delivered right now.\n"
         "Do not include execution notes, phase labels, methods, thought process, task recap, or tool narration.\n"
         "If no task is due right now, return exactly NOOP and nothing else.\n\n"

@@ -115,3 +115,29 @@ async def test_apply_persona_output_controls_skips_when_coding_mode_disables_per
     assert normalized == "這樣喔，你賴東東不錯喔"
     assert all_messages[0]["content"] == "這樣喔，你賴東東不錯喔"
     assert provider.temperatures == []
+
+
+async def test_apply_persona_output_controls_skips_task_scene_when_chat_only() -> None:
+    provider = _Provider()
+    loop = AgentLoop.__new__(AgentLoop)
+    loop.persona = PersonaEngine(
+        PersonaConfig(mode="shinchan_tw_s1", dialect="tw_s1", script="simplified", intensity="adaptive")
+    )
+    loop.provider = provider
+    loop.model = "dummy"
+    loop.max_tokens = 512
+    loop.reasoning_effort = None
+
+    class _CodingConfig:
+        disable_persona = False
+
+    loop.coding_config = _CodingConfig()
+    all_messages = [{"role": "assistant", "content": "這樣喔，你賴東東不錯喔"}]
+    normalized = await loop._apply_persona_output_controls(
+        all_messages[0]["content"],
+        all_messages,
+        user_text="请帮我修复这个报错",
+    )
+
+    assert normalized == "這樣喔，你賴東東不錯喔"
+    assert provider.temperatures == []

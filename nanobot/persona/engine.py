@@ -57,6 +57,26 @@ class PersonaEngine:
     def enabled(self) -> bool:
         return bool(self.config and self.config.mode == "shinchan_tw_s1")
 
+    def should_apply(
+        self,
+        user_text: str,
+        *,
+        coding_enabled: bool = False,
+        system_turn: bool = False,
+    ) -> bool:
+        """Return True when persona should influence this turn."""
+        if not self.enabled or not self.config:
+            return False
+        if self.config.apply_to == "off":
+            return False
+        if coding_enabled:
+            return False
+        if system_turn:
+            return self.config.apply_to == "all"
+        if self.config.apply_to == "all":
+            return True
+        return self.classify_scene(user_text) == self._SCENE_CHAT
+
     def classify_scene(self, text: str) -> str:
         if self._contains_any(text, self._HIGH_RISK_KEYWORDS):
             return self._SCENE_HIGH_RISK

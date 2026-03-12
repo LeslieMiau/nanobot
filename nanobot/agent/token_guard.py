@@ -78,6 +78,18 @@ class TokenGuardController:
     def risk_from_index(cls, index: int) -> str:
         return ("minimal", "small", "medium", "large", "extreme")[max(0, min(4, index))]
 
+    @classmethod
+    def risk_from_budget_k(cls, budget_k: int) -> str:
+        if budget_k <= 2:
+            return "minimal"
+        if budget_k <= 8:
+            return "small"
+        if budget_k <= 25:
+            return "medium"
+        if budget_k <= 60:
+            return "large"
+        return "extreme"
+
     @staticmethod
     def flatten_message_text(content: Any) -> str:
         if isinstance(content, str):
@@ -214,6 +226,7 @@ class TokenGuardController:
         parsed_cmd: str,
     ) -> TokenGuardAssessment:
         lowered = msg.content.lower()
+        budget_k = self.state(session)["budget_k"]
         history_tokens = self.estimate_tokens(history)
         current_tokens = self.estimate_tokens(
             [{"role": "user", "content": {"text": msg.content, "media": ["[attachment]"] * len(msg.media or [])}}]
@@ -399,6 +412,7 @@ class TokenGuardController:
         )
 
         final_index = self.band_index(raw_risk)
+        budget_pressure = False
         if hard_triggered:
             final_index = self.band_index("extreme")
         else:
@@ -412,6 +426,10 @@ class TokenGuardController:
                 final_index += 1
             elif mode == "relaxed":
                 final_index -= 1
+            budget_index = self.band_index(self.risk_from_budget_k(budget_k))
+            if final_index > budget_index or (final_index == budget_index and budget_k <= 12 and final_index >= 2):
+                final_index += 1
+                budget_pressure = True
         final_risk = self.risk_from_index(final_index)
         _, effective_range = self.band_from_score(
             {self.risk_from_index(i): score for i, score in enumerate((0, 6, 10, 15, 20))}[final_risk]
@@ -436,6 +454,8 @@ class TokenGuardController:
             driver_candidates.append((signal_a, f"当前输入本身已经较长，粗估约 {current_tokens} tokens。"))
         if signal_g >= 2:
             driver_candidates.append((signal_g, "当前前缀缓存友好度较低，重复成本更高。"))
+        if budget_pressure:
+            driver_candidates.append((3, f"当前 TokenBudget 只有 {budget_k}k，和预计体量已经开始相撞。"))
         drivers = [text for _, text in sorted(driver_candidates, key=lambda item: item[0], reverse=True)[:3]]
         if not drivers:
             drivers = ["当前请求没有明显的高成本模式。"]
@@ -501,6 +521,11 @@ class TokenGuardController:
         assessment: TokenGuardAssessment,
     ) -> str | None:
         if not content:
+            return content
+        silent_below = str(getattr(self.loop.token_guard, "silent_below", "large")).strip().lower()
+        if silent_below not in {"minimal", "small", "medium", "large", "extreme"}:
+            silent_below = "large"
+        if self.band_index(assessment.final_risk) < self.band_index(silent_below):
             return content
         risk = "低风险" if assessment.final_risk in {"minimal", "small"} else "中风险"
         line = (

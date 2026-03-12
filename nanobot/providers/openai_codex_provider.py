@@ -20,9 +20,31 @@ DEFAULT_ORIGINATOR = "nanobot"
 class OpenAICodexProvider(LLMProvider):
     """Use Codex OAuth to call the Responses API."""
 
-    def __init__(self, default_model: str = "openai-codex/gpt-5.4"):
+    def __init__(
+        self,
+        default_model: str = "openai-codex/gpt-5.4",
+        *,
+        response_verbosity: str = "low",
+        parallel_tool_calls: bool = True,
+    ):
         super().__init__(api_key=None, api_base=None)
         self.default_model = default_model
+        self.response_verbosity = response_verbosity
+        self.parallel_tool_calls = parallel_tool_calls
+
+    def with_profile(
+        self,
+        *,
+        default_model: str | None = None,
+        response_verbosity: str | None = None,
+        parallel_tool_calls: bool | None = None,
+    ) -> "OpenAICodexProvider":
+        """Return a copy with per-lane request defaults."""
+        return OpenAICodexProvider(
+            default_model=default_model or self.default_model,
+            response_verbosity=response_verbosity or self.response_verbosity,
+            parallel_tool_calls=self.parallel_tool_calls if parallel_tool_calls is None else parallel_tool_calls,
+        )
 
     async def chat(
         self,
@@ -32,6 +54,8 @@ class OpenAICodexProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        response_verbosity: str | None = None,
+        parallel_tool_calls: bool | None = None,
     ) -> LLMResponse:
         model = model or self.default_model
         system_prompt, input_items = _convert_messages(messages)
@@ -45,12 +69,14 @@ class OpenAICodexProvider(LLMProvider):
             "stream": True,
             "instructions": system_prompt,
             "input": input_items,
-            "text": {"verbosity": "medium"},
+            "text": {"verbosity": response_verbosity or self.response_verbosity},
             "include": ["reasoning.encrypted_content"],
+            "max_output_tokens": max(1, int(max_tokens)),
             "prompt_cache_key": _prompt_cache_key(messages),
             "tool_choice": "auto",
-            "parallel_tool_calls": True,
+            "parallel_tool_calls": self.parallel_tool_calls if parallel_tool_calls is None else parallel_tool_calls,
         }
+        body["temperature"] = max(0.0, min(2.0, float(temperature)))
 
         if reasoning_effort:
             body["reasoning"] = {"effort": reasoning_effort}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import re
 import weakref
@@ -36,6 +37,7 @@ from nanobot.bus.queue import MessageBus
 from nanobot.persona.engine import PersonaEngine
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.catalog import AvailableModel
+from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
@@ -81,7 +83,9 @@ class AgentLoop:
     _CODING_KEYWORDS = (
         "code", "coding", "implement", "implementation", "fix", "bug", "debug", "refactor",
         "test", "tests", "compile", "build", "error", "stack trace", "exception",
+        "script", "cli", "tool", "tools", "automation", "workflow", "cron", "heartbeat",
         "代码", "编码", "实现", "修复", "报错", "错误", "测试", "重构", "编译", "构建",
+        "脚本", "小工具", "工具", "自动化", "工作流", "定时任务",
     )
     _LARGE_CHANGE_KEYWORDS = (
         "refactor", "rewrite", "redesign", "overhaul", "migration", "migrate", "architecture",
@@ -117,10 +121,12 @@ class AgentLoop:
         provider: LLMProvider,
         workspace: Path,
         model: str | None = None,
+        automation_model: str | None = None,
         max_iterations: int = 40,
         temperature: float = 0.1,
         max_tokens: int = 4096,
         memory_window: int = 100,
+        response_verbosity: str = "low",
         reasoning_effort: str | None = None,
         brave_api_key: str | None = None,
         web_proxy: str | None = None,
@@ -148,6 +154,7 @@ class AgentLoop:
         self.provider_name = provider_name
         self.workspace = workspace
         self.model = model or provider.get_default_model()
+        self.automation_model = automation_model or self.model
         self._default_model = self.model
         self._default_provider = provider
         self._default_provider_name = provider_name
@@ -155,6 +162,7 @@ class AgentLoop:
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.memory_window = memory_window
+        self.response_verbosity = response_verbosity
         self.reasoning_effort = reasoning_effort
         self.brave_api_key = brave_api_key
         self.web_proxy = web_proxy
@@ -179,6 +187,7 @@ class AgentLoop:
             model=self.model,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
+            response_verbosity=self.response_verbosity,
             reasoning_effort=reasoning_effort,
             brave_api_key=brave_api_key,
             web_proxy=web_proxy,
@@ -355,14 +364,30 @@ class AgentLoop:
             coding_enabled=coding_enabled,
         )
 
-    def _persona_hints_for_turn(self, user_text: str, *, coding_enabled: bool) -> str | None:
+    def _persona_hints_for_turn(
+        self,
+        user_text: str,
+        *,
+        coding_enabled: bool,
+        system_turn: bool = False,
+    ) -> str | None:
         if coding_enabled and self.coding_config.disable_persona:
+            return None
+        if not self.persona.should_apply(user_text, coding_enabled=coding_enabled, system_turn=system_turn):
             return None
         return self.persona.build_runtime_hints(user_text)
 
-    def _temperature_for_turn(self, user_text: str, *, coding_enabled: bool) -> float:
+    def _temperature_for_turn(
+        self,
+        user_text: str,
+        *,
+        coding_enabled: bool,
+        system_turn: bool = False,
+    ) -> float:
         if coding_enabled:
             return min(float(self.temperature), 0.1)
+        if not self.persona.should_apply(user_text, coding_enabled=coding_enabled, system_turn=system_turn):
+            return self.temperature
         return self.persona.recommended_temperature(user_text, self.temperature)
 
     @staticmethod
@@ -554,12 +579,15 @@ class AgentLoop:
             async def _silent(*_args, **_kwargs):
                 return None
 
-            response = await self.process_direct(
+            response = await self.process_system_turn(
                 self._cron_retry_execution_message(run_job.name, run_job.payload.message),
                 session_key=f"cron:{run_job.id}:manual",
                 channel="cli",
                 chat_id=f"cron-retry:{run_job.id}",
                 on_progress=_silent,
+                stateless=True,
+                disable_persona=True,
+                model=self.automation_model,
             )
             if response:
                 outputs.append(response)
@@ -648,6 +676,29 @@ class AgentLoop:
     def _restore_session_model_provider(self, session: Session) -> None:
         self._model_selection.restore_session_model_provider(session)
 
+    def _resolve_provider_for_model(
+        self,
+        requested_model: str | None,
+        requested_provider_name: str | None = None,
+    ) -> tuple[LLMProvider, str, str | None]:
+        """Resolve a runtime provider/model tuple without mutating loop state."""
+        target_model = (requested_model or self.model).strip()
+        if (
+            target_model == self.model
+            and (requested_provider_name is None or requested_provider_name == self.provider_name)
+        ):
+            return self.provider, self.model, self.provider_name
+        if self._provider_switcher:
+            if requested_provider_name is None:
+                return self._provider_switcher(target_model)
+            try:
+                return self._provider_switcher(target_model, requested_provider_name)
+            except TypeError:
+                return self._provider_switcher(target_model)
+        if requested_provider_name and requested_provider_name != self.provider_name:
+            raise ValueError(f"provider switcher is not configured for `{requested_provider_name}`")
+        return self.provider, target_model, self.provider_name
+
     def _available_models_for_session(self, session: Session) -> list[AvailableModel]:
         return self._model_selection.available_models_for_session(session)
 
@@ -715,6 +766,44 @@ class AgentLoop:
         )
 
     @staticmethod
+    def _provider_accepts_kwarg(provider: LLMProvider, name: str) -> bool:
+        """Return True when the provider.chat signature accepts the keyword."""
+        try:
+            signature = inspect.signature(provider.chat)
+        except (TypeError, ValueError):
+            return False
+        if any(param.kind == inspect.Parameter.VAR_KEYWORD for param in signature.parameters.values()):
+            return True
+        return name in signature.parameters
+
+    async def _chat_with_provider(
+        self,
+        provider: LLMProvider,
+        *,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None,
+        model: str | None,
+        temperature: float,
+        max_tokens: int,
+        reasoning_effort: str | None,
+        response_verbosity: str | None = None,
+        parallel_tool_calls: bool | None = None,
+    ):
+        kwargs: dict[str, Any] = {
+            "messages": messages,
+            "tools": tools,
+            "model": model,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "reasoning_effort": reasoning_effort,
+        }
+        if response_verbosity is not None and self._provider_accepts_kwarg(provider, "response_verbosity"):
+            kwargs["response_verbosity"] = response_verbosity
+        if parallel_tool_calls is not None and self._provider_accepts_kwarg(provider, "parallel_tool_calls"):
+            kwargs["parallel_tool_calls"] = parallel_tool_calls
+        return await provider.chat(**kwargs)
+
+    @staticmethod
     def _verification_follow_up_message() -> str:
         return CodingSummaryController.verification_follow_up_message()
 
@@ -725,6 +814,10 @@ class AgentLoop:
         temperature_override: float | None = None,
         *,
         coding_enabled: bool = False,
+        provider_override: LLMProvider | None = None,
+        model_override: str | None = None,
+        response_verbosity_override: str | None = None,
+        parallel_tool_calls: bool | None = None,
     ) -> tuple[str | None, list[str], list[dict], TurnExecutionState]:
         """Run the agent iteration loop. Returns (final_content, tools_used, messages, turn_state)."""
         messages = initial_messages
@@ -735,8 +828,8 @@ class AgentLoop:
         turn_state = TurnExecutionState()
         route_candidates: list[CodingRouteCandidate] = []
         route_index = 0
-        active_provider = self.provider
-        active_model = self.model
+        active_provider = provider_override or self.provider
+        active_model = model_override or self.model
 
         if coding_enabled:
             route_candidates, _, _ = self._resolve_coding_route_candidates()
@@ -747,13 +840,17 @@ class AgentLoop:
         while iteration < self.max_iterations:
             iteration += 1
 
-            response = await active_provider.chat(
+            response_verbosity = response_verbosity_override or getattr(self, "response_verbosity", "low")
+            response = await self._chat_with_provider(
+                active_provider,
                 messages=messages,
                 tools=self.tools.get_definitions(),
                 model=active_model,
                 temperature=temperature,
                 max_tokens=self.max_tokens,
                 reasoning_effort=self.reasoning_effort,
+                response_verbosity=response_verbosity,
+                parallel_tool_calls=parallel_tool_calls,
             )
 
             if response.has_tool_calls:
@@ -869,11 +966,15 @@ class AgentLoop:
         all_messages: list[dict[str, Any]],
         *,
         coding_enabled: bool = False,
+        user_text: str = "",
+        system_turn: bool = False,
     ) -> str | None:
         """Apply persona postprocessing (e.g. script normalization) to final text."""
         if not content:
             return content
         if coding_enabled and self.coding_config.disable_persona:
+            return content
+        if not self.persona.should_apply(user_text, coding_enabled=coding_enabled, system_turn=system_turn):
             return content
 
         normalized = await self.persona.normalize_output(
@@ -1109,3 +1210,96 @@ class AgentLoop:
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(msg, session_key=session_key, on_progress=on_progress)
         return response.content if response else ""
+
+    async def process_system_turn(
+        self,
+        content: str,
+        *,
+        session_key: str = "system:direct",
+        channel: str = "cli",
+        chat_id: str = "direct",
+        on_progress: Callable[[str], Awaitable[None]] | None = None,
+        stateless: bool = True,
+        bypass_token_guard: bool = True,
+        bypass_plan_guard: bool = True,
+        disable_persona: bool = True,
+        model: str | None = None,
+    ) -> str:
+        """Run an internal automation/system turn without the normal user-turn guards."""
+        del bypass_token_guard, bypass_plan_guard
+
+        await self._connect_mcp()
+        response_verbosity = getattr(self, "response_verbosity", "low")
+        requested_model = model
+        requested_provider_name: str | None = None
+
+        session: Session | None = None
+        history: list[dict[str, Any]] = []
+        if not stateless:
+            session = self.sessions.get_or_create(session_key)
+            history = session.get_history(max_messages=self.memory_window)
+            if requested_model is None:
+                requested_model, requested_provider_name = self._effective_session_model(session)
+        try:
+            provider, active_model, _ = self._resolve_provider_for_model(
+                requested_model or self.automation_model,
+                requested_provider_name,
+            )
+        except Exception:
+            provider, active_model = self.provider, (requested_model or self.model)
+        if isinstance(provider, OpenAICodexProvider):
+            provider = provider.with_profile(
+                default_model=active_model,
+                response_verbosity=response_verbosity,
+                parallel_tool_calls=False,
+            )
+
+        self._set_tool_context(
+            channel,
+            chat_id,
+            None,
+            coding_enabled=False,
+            session_key=session_key,
+        )
+        if message_tool := self.tools.get("message"):
+            if isinstance(message_tool, MessageTool):
+                message_tool.start_turn()
+
+        persona_hints = None if disable_persona else self._persona_hints_for_turn(content, coding_enabled=False)
+        messages = self.context.build_messages(
+            history=history,
+            current_message=content,
+            channel=channel,
+            chat_id=chat_id,
+            persona_runtime_hints=persona_hints,
+            coding_mode=False,
+        )
+        final_content, _, all_msgs, turn_state = await self._run_agent_loop(
+            messages,
+            on_progress=on_progress,
+            temperature_override=self.temperature,
+            coding_enabled=False,
+            provider_override=provider,
+            model_override=active_model,
+            response_verbosity_override=response_verbosity,
+            parallel_tool_calls=False,
+        )
+        if not disable_persona:
+            final_content = await self._apply_persona_output_controls(
+                final_content,
+                all_msgs,
+                coding_enabled=False,
+                user_text=content,
+                system_turn=True,
+            )
+        final_content = self._apply_coding_summary(
+            final_content,
+            turn_state,
+            coding_enabled=False,
+        )
+
+        if session is not None:
+            self._save_turn(session, all_msgs, 1 + len(history))
+            self.sessions.save(session)
+
+        return final_content or ""

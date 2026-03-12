@@ -226,6 +226,7 @@ class PersonaConfig(Base):
     script: Literal["simplified", "traditional"] = "simplified"
     intensity: Literal["adaptive", "high", "medium"] = "adaptive"
     quote_retrieval: bool = True
+    apply_to: Literal["chat_only", "all", "off"] = "chat_only"
 
     @model_validator(mode="before")
     @classmethod
@@ -253,6 +254,7 @@ class TokenGuardConfig(Base):
     enabled: bool = True
     default_mode: Literal["on", "off", "strict", "relaxed"] = "on"
     default_budget_k: int = 20
+    silent_below: Literal["minimal", "small", "medium", "large", "extreme"] = "large"
     threshold_tokens: int = 24_000  # Deprecated: legacy threshold guard.
     confirm_command: str = "/confirm"  # Deprecated: legacy token-guard confirm command.
     cancel_command: str = "/cancel"  # Deprecated: legacy token-guard cancel command.
@@ -282,7 +284,9 @@ class AgentDefaults(Base):
     """Default agent configuration."""
 
     workspace: str = "~/.nanobot/workspace"
-    model: str = "openai-codex/gpt-5.4"
+    model: str = "gpt-5.1"
+    general_model: str | None = None
+    automation_model: str | None = None
     provider: str = (
         "auto"  # Provider name (e.g. "anthropic", "openrouter") or "auto" for auto-detection
     )
@@ -290,10 +294,21 @@ class AgentDefaults(Base):
     temperature: float = 0.1
     max_tool_iterations: int = 40
     memory_window: int = 100
+    response_verbosity: Literal["low", "medium", "high"] = "low"
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
     persona: PersonaConfig = Field(default_factory=PersonaConfig)
     token_guard: TokenGuardConfig = Field(default_factory=TokenGuardConfig)
     coding: CodingConfig = Field(default_factory=CodingConfig)
+
+    @model_validator(mode="after")
+    def _sync_lane_models(self) -> "AgentDefaults":
+        """Keep legacy `model` aligned with the general conversation lane."""
+        general = str(self.general_model or self.model or "").strip() or "gpt-5.1"
+        automation = str(self.automation_model or general).strip() or general
+        self.general_model = general
+        self.model = general
+        self.automation_model = automation
+        return self
 
 
 class AgentsConfig(Base):
@@ -482,6 +497,10 @@ class Config(BaseSettings):
             p = getattr(self.providers, spec.name, None)
             if p and p.api_key:
                 return p, spec.name
+        if model_lower.startswith("gpt-"):
+            p = getattr(self.providers, "openai_codex", None)
+            if p is not None:
+                return p, "openai_codex"
         return None, None
 
     def get_provider(self, model: str | None = None) -> ProviderConfig | None:

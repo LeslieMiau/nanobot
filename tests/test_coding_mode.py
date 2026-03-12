@@ -91,6 +91,15 @@ def test_coding_auto_detect_does_not_trigger_for_plain_chat(tmp_path: Path) -> N
     assert active is False
 
 
+def test_coding_auto_detect_triggers_for_small_tool_requests(tmp_path: Path) -> None:
+    loop, _ = _make_loop(tmp_path)
+    session = loop.sessions.get_or_create("cli:direct")
+
+    _, active = loop._resolve_coding_mode(session, "帮我写个小工具，读取 CSV 生成日报")
+
+    assert active is True
+
+
 def test_explicit_coding_off_overrides_auto_detection(tmp_path: Path) -> None:
     loop, _ = _make_loop(tmp_path)
     session = loop.sessions.get_or_create("cli:direct")
@@ -116,3 +125,29 @@ async def test_coding_requests_skip_persona_hints_and_clamp_temperature(tmp_path
     system_prompt = provider.messages[0][0]["content"]
     assert "Use coding guardrails." in system_prompt
     assert "Persona Runtime Directive" not in system_prompt
+
+
+@pytest.mark.asyncio
+async def test_process_system_turn_is_stateless_and_skips_persona(tmp_path: Path) -> None:
+    (tmp_path / "AGENTS.md").write_text("Follow AGENTS", encoding="utf-8")
+    loop, provider = _make_loop(tmp_path)
+    session = loop.sessions.get_or_create("cron:job-1")
+    session.messages.extend(
+        [
+            {"role": "user", "content": "old task"},
+            {"role": "assistant", "content": "old result"},
+        ]
+    )
+
+    out = await loop.process_system_turn(
+        "请执行定时任务并返回结果",
+        session_key="cron:job-1",
+        channel="cli",
+        chat_id="direct",
+        stateless=True,
+        disable_persona=True,
+    )
+
+    assert out == "ok"
+    assert len(session.messages) == 2
+    assert "Persona Runtime Directive" not in provider.messages[-1][0]["content"]

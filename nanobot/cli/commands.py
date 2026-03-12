@@ -37,6 +37,7 @@ from nanobot.app.gateway import (
     run_gateway,
 )
 from nanobot.app.prompts import (
+    build_cron_execution_message as _build_cron_execution_message,
     build_heartbeat_execution_message as _build_heartbeat_execution_message,
     should_deliver_heartbeat_response as _should_deliver_heartbeat_response,
 )
@@ -251,6 +252,11 @@ def gateway(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Start the nanobot gateway."""
+    def _lock_path() -> Path:
+        if config:
+            return Path(config).expanduser().resolve().parent / "gateway.lock"
+        return _gateway_lock_path()
+
     run_gateway(
         port=port,
         workspace=workspace,
@@ -263,7 +269,7 @@ def gateway(
         provider_factory=_make_provider,
         find_other_gateway_processes=_find_other_gateway_processes,
         gateway_lock_cls=_GatewayInstanceLock,
-        gateway_lock_path_factory=_gateway_lock_path,
+        gateway_lock_path_factory=_lock_path,
     )
 
 
@@ -700,13 +706,29 @@ def retry_cron(
         async def _silent(*_args, **_kwargs):
             return None
 
-        response = await agent_loop.process_direct(
-            agent_loop.context.build_cron_prompt(run_job.name, run_job.payload.message),
-            session_key=f"cron:{run_job.id}:manual",
-            channel="cli",
-            chat_id=f"cron-retry:{run_job.id}",
-            on_progress=_silent,
-        )
+        if hasattr(agent_loop, "context") and hasattr(agent_loop.context, "build_cron_prompt"):
+            prompt = agent_loop.context.build_cron_prompt(run_job.name, run_job.payload.message)
+        else:
+            prompt = _build_cron_execution_message(run_job.name, run_job.payload.message)
+        if hasattr(agent_loop, "process_system_turn"):
+            response = await agent_loop.process_system_turn(
+                prompt,
+                session_key=f"cron:{run_job.id}:manual",
+                channel="cli",
+                chat_id=f"cron-retry:{run_job.id}",
+                on_progress=_silent,
+                stateless=True,
+                disable_persona=True,
+                model=getattr(agent_loop, "automation_model", None),
+            )
+        else:
+            response = await agent_loop.process_direct(
+                message=prompt,
+                session_key=f"cron:{run_job.id}:manual",
+                channel="cli",
+                chat_id=f"cron-retry:{run_job.id}",
+                on_progress=_silent,
+            )
         if response:
             outputs.append(response)
         return response
@@ -755,13 +777,17 @@ def status():
     if config_path.exists():
         from nanobot.providers.registry import PROVIDERS
 
-        console.print(f"Model: {config.agents.defaults.model}")
+        console.print(f"General model: {config.agents.defaults.general_model}")
+        console.print(f"Automation model: {config.agents.defaults.automation_model}")
+        console.print(f"Coding model: {config.agents.defaults.coding.primary_model}")
+        console.print(f"Response verbosity: {config.agents.defaults.response_verbosity}")
         persona = config.agents.defaults.persona
         console.print(
             "Persona: "
             f"{persona.mode} "
             f"(dialect={persona.dialect}, script={persona.script}, "
-            f"intensity={persona.intensity}, quoteRetrieval={persona.quote_retrieval})"
+            f"intensity={persona.intensity}, quoteRetrieval={persona.quote_retrieval}, "
+            f"applyTo={persona.apply_to})"
         )
 
         # Check API keys from registry

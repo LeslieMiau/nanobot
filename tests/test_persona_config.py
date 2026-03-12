@@ -6,7 +6,9 @@ def test_persona_defaults_are_backward_compatible() -> None:
     persona = config.agents.defaults.persona
     coding = config.agents.defaults.coding
 
-    assert config.agents.defaults.model == "openai-codex/gpt-5.4"
+    assert config.agents.defaults.model == "gpt-5.1"
+    assert config.agents.defaults.general_model == "gpt-5.1"
+    assert config.agents.defaults.automation_model == "gpt-5.1"
     assert config.agents.defaults.provider == "auto"
     assert config.get_provider_name() == "openai_codex"
     assert persona.mode == "default"
@@ -14,6 +16,7 @@ def test_persona_defaults_are_backward_compatible() -> None:
     assert persona.script == "simplified"
     assert persona.intensity == "adaptive"
     assert persona.quote_retrieval is True
+    assert persona.apply_to == "chat_only"
     assert config.channels.send_progress is False
     assert config.channels.send_tool_hints is False
     assert coding.enabled is True
@@ -75,6 +78,8 @@ def test_coding_defaults_are_backward_compatible_when_missing_from_input() -> No
         }
     )
 
+    assert config.agents.defaults.general_model == "gpt-5.4"
+    assert config.agents.defaults.automation_model == "gpt-5.4"
     coding = config.agents.defaults.coding
     assert coding.enabled is True
     assert coding.auto_detect is True
