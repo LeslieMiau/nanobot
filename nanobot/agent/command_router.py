@@ -228,7 +228,7 @@ class CommandRouterController:
                 response=OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
-                    content=self.loop._SHINCHAN_WELCOME,
+                    content=self.loop._WELCOME_MESSAGE,
                 )
             )
         if cmd == "/new":

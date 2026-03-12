@@ -223,7 +223,7 @@ class TelegramChannel(BaseChannel):
         BotCommand("restart", "Restart nanobot"),
         BotCommand("help", "Show available commands"),
     ]
-    _SHINCHAN_WELCOME = "哟～你来啦！我是 nanobot 小新版，今天也一起把事情搞定吧～"
+    _WELCOME_MESSAGE = "你好，我是 nanobot。直接发消息告诉我你想处理的事就行。"
 
     def __init__(
         self,
@@ -489,8 +489,8 @@ class TelegramChannel(BaseChannel):
 
         user = update.effective_user
         await update.message.reply_text(
-            f"{self._SHINCHAN_WELCOME}\n\n"
-            f"嘿嘿，{user.first_name}，直接发消息给我就好～\n"
+            f"{self._WELCOME_MESSAGE}\n\n"
+            f"{user.first_name}，直接发消息给我就好。\n"
             "Type /help to see available commands."
         )
 

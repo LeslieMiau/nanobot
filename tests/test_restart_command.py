@@ -60,8 +60,8 @@ async def test_restart_command_calls_callback(tmp_path: Path) -> None:
 
     cb.assert_awaited_once()
     assert out is not None
-    assert "我是 nanobot 小新版" in out.content
-    assert "重启回来" in out.content
+    assert "我是 nanobot" in out.content
+    assert "正在重启" in out.content
 
 
 @pytest.mark.asyncio
@@ -74,8 +74,8 @@ async def test_restart_alias_in_chinese_calls_callback(tmp_path: Path) -> None:
 
     cb.assert_awaited_once()
     assert out is not None
-    assert "我是 nanobot 小新版" in out.content
-    assert "重启回来" in out.content
+    assert "我是 nanobot" in out.content
+    assert "正在重启" in out.content
 
 
 @pytest.mark.asyncio
@@ -122,8 +122,8 @@ async def test_restart_alias_works_in_run_loop_while_token_guard_pending(tmp_pat
         )
         restarted = await asyncio.wait_for(bus.consume_outbound(), timeout=2.0)
         cb.assert_awaited_once()
-        assert "我是 nanobot 小新版" in restarted.content
-        assert "重启回来" in restarted.content
+        assert "我是 nanobot" in restarted.content
+        assert "正在重启" in restarted.content
         assert loop.sessions.get_or_create(session_key).metadata["token_guard"]["pending_message"] is None
     finally:
         loop.stop()
@@ -179,7 +179,7 @@ async def test_restart_has_highest_priority_while_session_task_is_running(tmp_pa
         )
         restarted = await asyncio.wait_for(bus.consume_outbound(), timeout=2.0)
         cb.assert_awaited_once()
-        assert "我是 nanobot 小新版" in restarted.content
+        assert "我是 nanobot" in restarted.content
         await asyncio.wait_for(cancelled.wait(), timeout=2.0)
     finally:
         release.set()
@@ -188,11 +188,11 @@ async def test_restart_has_highest_priority_while_session_task_is_running(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_start_command_returns_shinchan_welcome(tmp_path: Path) -> None:
+async def test_start_command_returns_neutral_welcome(tmp_path: Path) -> None:
     loop = _make_loop(tmp_path)
     msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/start")
 
     out = await loop._process_message(msg)
 
     assert out is not None
-    assert "我是 nanobot 小新版" in out.content
+    assert out.content == "你好，我是 nanobot。直接告诉我你想处理的事就行。"

@@ -123,7 +123,6 @@ async def test_retry_cron_confirm_executes_in_current_chat(tmp_path) -> None:
     assert kwargs["channel"] == "cli"
     assert kwargs["chat_id"] == "cron-retry:job-1"
     assert kwargs["stateless"] is True
-    assert kwargs["disable_persona"] is True
     session = loop.sessions.get_or_create("telegram:chat-1")
     assert "operator_action" not in session.metadata
 

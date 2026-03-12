@@ -112,7 +112,7 @@ def test_explicit_coding_off_overrides_auto_detection(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_coding_requests_skip_persona_hints_and_clamp_temperature(tmp_path: Path) -> None:
+async def test_coding_requests_clamp_temperature_and_include_coding_prompt(tmp_path: Path) -> None:
     (tmp_path / "CODING.md").write_text("Use coding guardrails.", encoding="utf-8")
     loop, provider = _make_loop(tmp_path)
 
@@ -124,11 +124,10 @@ async def test_coding_requests_skip_persona_hints_and_clamp_temperature(tmp_path
     assert provider.temperatures == [0.1]
     system_prompt = provider.messages[0][0]["content"]
     assert "Use coding guardrails." in system_prompt
-    assert "Persona Runtime Directive" not in system_prompt
 
 
 @pytest.mark.asyncio
-async def test_process_system_turn_is_stateless_and_skips_persona(tmp_path: Path) -> None:
+async def test_process_system_turn_is_stateless(tmp_path: Path) -> None:
     (tmp_path / "AGENTS.md").write_text("Follow AGENTS", encoding="utf-8")
     loop, provider = _make_loop(tmp_path)
     session = loop.sessions.get_or_create("cron:job-1")
@@ -145,9 +144,7 @@ async def test_process_system_turn_is_stateless_and_skips_persona(tmp_path: Path
         channel="cli",
         chat_id="direct",
         stateless=True,
-        disable_persona=True,
     )
 
     assert out == "ok"
     assert len(session.messages) == 2
-    assert "Persona Runtime Directive" not in provider.messages[-1][0]["content"]

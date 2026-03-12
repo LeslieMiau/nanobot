@@ -87,7 +87,7 @@ def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]
         dest.write_text(src.read_text(encoding="utf-8") if src else "", encoding="utf-8")
         added.append(str(dest.relative_to(workspace)))
 
-    for name in ("AGENTS.md", "CODING.md", "HEARTBEAT.md", "CONTENT_FACTORY.md"):
+    for name in ("AGENTS.md", "SOUL.md", "USER.md", "CODING.md", "HEARTBEAT.md", "CONTENT_FACTORY.md"):
         _write(tpl / name, workspace / name)
     _write(tpl / "memory" / "MEMORY.md", workspace / "memory" / "MEMORY.md")
     _write(None, workspace / "memory" / "HISTORY.md")

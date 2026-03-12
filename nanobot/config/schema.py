@@ -1,7 +1,8 @@
 """Configuration schema using Pydantic."""
 
+from copy import deepcopy
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
@@ -218,36 +219,6 @@ class ChannelsConfig(Base):
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
-class PersonaConfig(Base):
-    """Persona/styling configuration."""
-
-    mode: Literal["default", "shinchan_tw_s1"] = "default"
-    dialect: Literal["tw_s1"] = "tw_s1"
-    script: Literal["simplified", "traditional"] = "simplified"
-    intensity: Literal["adaptive", "high", "medium"] = "adaptive"
-    quote_retrieval: bool = True
-    apply_to: Literal["chat_only", "all", "off"] = "chat_only"
-
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_language_to_script(cls, data):
-        """Backward-compatible migration: legacy `language` -> `script`."""
-        if not isinstance(data, dict):
-            return data
-        if "script" in data and data["script"]:
-            return data
-
-        legacy = str(data.get("language", "")).strip().lower()
-        if not legacy:
-            return data
-
-        if legacy in {"zh-tw", "zh_hant", "traditional", "繁体", "繁體"}:
-            data["script"] = "traditional"
-        elif legacy in {"zh-cn", "zh_hans", "simplified", "简体", "簡體"}:
-            data["script"] = "simplified"
-        return data
-
-
 class TokenGuardConfig(Base):
     """Token guard for large requests."""
 
@@ -265,7 +236,6 @@ class CodingConfig(Base):
 
     enabled: bool = True
     auto_detect: bool = True
-    disable_persona: bool = True
     require_plan_for_large_changes: bool = True
     enforce_read_before_write: bool = True
     require_verification_after_edits: bool = True
@@ -278,6 +248,16 @@ class CodingConfig(Base):
         ]
     )
     model_fail_cooldown_seconds: int = 600
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_legacy_persona_flags(cls, data: Any) -> Any:
+        """Ignore deprecated coding flags from older configs."""
+        if not isinstance(data, dict):
+            return data
+        cleaned = dict(data)
+        cleaned.pop("disable_persona", None)
+        return cleaned
 
 
 class AgentDefaults(Base):
@@ -296,9 +276,18 @@ class AgentDefaults(Base):
     memory_window: int = 100
     response_verbosity: Literal["low", "medium", "high"] = "low"
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
-    persona: PersonaConfig = Field(default_factory=PersonaConfig)
     token_guard: TokenGuardConfig = Field(default_factory=TokenGuardConfig)
     coding: CodingConfig = Field(default_factory=CodingConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_legacy_persona_config(cls, data: Any) -> Any:
+        """Ignore deprecated persona config while keeping older files loadable."""
+        if not isinstance(data, dict):
+            return data
+        cleaned = dict(data)
+        cleaned.pop("persona", None)
+        return cleaned
 
     @model_validator(mode="after")
     def _sync_lane_models(self) -> "AgentDefaults":
@@ -449,6 +438,28 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _strip_deprecated_persona_sections(cls, data: Any) -> Any:
+        """Drop deprecated persona fields from nested config input."""
+        if not isinstance(data, dict):
+            return data
+
+        cleaned = deepcopy(data)
+        agents = cleaned.get("agents")
+        if not isinstance(agents, dict):
+            return cleaned
+
+        defaults = agents.get("defaults")
+        if not isinstance(defaults, dict):
+            return cleaned
+
+        defaults.pop("persona", None)
+        coding = defaults.get("coding")
+        if isinstance(coding, dict):
+            coding.pop("disable_persona", None)
+        return cleaned
 
     @property
     def workspace_path(self) -> Path:

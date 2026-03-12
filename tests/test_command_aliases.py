@@ -46,7 +46,7 @@ async def test_start_alias_works(tmp_path: Path) -> None:
     out = await loop._process_message(msg)
 
     assert out is not None
-    assert "我是 nanobot 小新版" in out.content
+    assert out.content == "你好，我是 nanobot。直接告诉我你想处理的事就行。"
 
 
 @pytest.mark.asyncio

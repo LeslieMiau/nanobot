@@ -244,9 +244,9 @@ async def test_token_guard_budget_changes_same_task_behavior(tmp_path: Path) -> 
         "请在 multiple files 范围内查看 nanobot/agent/loop.py、"
         "nanobot/agent/token_guard.py、nanobot/agent/turn_executor.py、"
         "nanobot/agent/context.py、nanobot/app/gateway.py、"
-        "nanobot/persona/engine.py 这些文件之间的衔接关系。必要时可以结合 "
+        "nanobot/agent/coding/guard.py 这些文件之间的衔接关系。必要时可以结合 "
         "bash 和 web 线索，但这次先不要修改代码，也不要做 repo-wide 扫描。"
-        "我只想让你围绕 token guard、persona、system turn 这三条链路做一次详细总结，"
+        "我只想让你围绕 token guard、coding guard、system turn 这三条链路做一次详细总结，"
         "说明它们现在是如何协作的、哪几处最容易互相影响、哪些地方看起来更像边界条件、"
         "哪些地方更像主干路径。"
     )

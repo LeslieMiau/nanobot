@@ -19,6 +19,7 @@ from nanobot.cron.types import CronPayload
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_model
+from nanobot.utils.helpers import sync_workspace_templates
 
 runner = CliRunner()
 
@@ -65,6 +66,8 @@ def test_onboard_fresh_install(mock_paths):
     assert "nanobot is ready" in result.stdout
     assert config_file.exists()
     assert (workspace_dir / "AGENTS.md").exists()
+    assert (workspace_dir / "SOUL.md").exists()
+    assert (workspace_dir / "USER.md").exists()
     assert (workspace_dir / "CODING.md").exists()
     assert (workspace_dir / "CONTENT_FACTORY.md").exists()
     assert (workspace_dir / "memory" / "MEMORY.md").exists()
@@ -108,11 +111,26 @@ def test_onboard_existing_workspace_safe_create(mock_paths):
     assert result.exit_code == 0
     assert "Created workspace" not in result.stdout
     assert "Created AGENTS.md" in result.stdout
+    assert "Created SOUL.md" in result.stdout
+    assert "Created USER.md" in result.stdout
     assert "Created CODING.md" in result.stdout
     assert "Created CONTENT_FACTORY.md" in result.stdout
     assert (workspace_dir / "AGENTS.md").exists()
+    assert (workspace_dir / "SOUL.md").exists()
+    assert (workspace_dir / "USER.md").exists()
     assert (workspace_dir / "CODING.md").exists()
     assert (workspace_dir / "CONTENT_FACTORY.md").exists()
+
+
+def test_sync_workspace_templates_adds_user_and_soul(tmp_path: Path) -> None:
+    added = sync_workspace_templates(tmp_path, silent=True)
+
+    assert "AGENTS.md" in added
+    assert "SOUL.md" in added
+    assert "USER.md" in added
+    assert (tmp_path / "AGENTS.md").exists()
+    assert (tmp_path / "SOUL.md").exists()
+    assert (tmp_path / "USER.md").exists()
 
 
 def test_config_matches_github_copilot_codex_with_hyphen_prefix():

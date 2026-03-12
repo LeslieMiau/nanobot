@@ -32,7 +32,6 @@ class TurnExecutorController:
             channel=channel,
             chat_id=chat_id,
             stateless=False,
-            disable_persona=True,
         )
         return OutboundMessage(
             channel=channel,
@@ -65,7 +64,6 @@ class TurnExecutorController:
                 message_tool.start_turn()
 
         history = session.get_history(max_messages=self.loop.memory_window)
-        persona_hints = self.loop._persona_hints_for_turn(msg.content, coding_enabled=coding_enabled)
         turn_temperature = self.loop._temperature_for_turn(msg.content, coding_enabled=coding_enabled)
         initial_messages = self.loop.context.build_messages(
             history=history,
@@ -73,7 +71,6 @@ class TurnExecutorController:
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
-            persona_runtime_hints=persona_hints,
             coding_mode=coding_enabled,
         )
 
@@ -136,12 +133,6 @@ class TurnExecutorController:
             on_progress=on_progress or _bus_progress,
             temperature_override=turn_temperature,
             coding_enabled=coding_enabled,
-        )
-        final_content = await self.loop._apply_persona_output_controls(
-            final_content,
-            all_msgs,
-            coding_enabled=coding_enabled,
-            user_text=msg.content,
         )
         final_content = self.loop._apply_coding_summary(
             final_content,

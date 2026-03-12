@@ -718,7 +718,6 @@ def retry_cron(
                 chat_id=f"cron-retry:{run_job.id}",
                 on_progress=_silent,
                 stateless=True,
-                disable_persona=True,
                 model=getattr(agent_loop, "automation_model", None),
             )
         else:
@@ -781,14 +780,6 @@ def status():
         console.print(f"Automation model: {config.agents.defaults.automation_model}")
         console.print(f"Coding model: {config.agents.defaults.coding.primary_model}")
         console.print(f"Response verbosity: {config.agents.defaults.response_verbosity}")
-        persona = config.agents.defaults.persona
-        console.print(
-            "Persona: "
-            f"{persona.mode} "
-            f"(dialect={persona.dialect}, script={persona.script}, "
-            f"intensity={persona.intensity}, quoteRetrieval={persona.quote_retrieval}, "
-            f"applyTo={persona.apply_to})"
-        )
 
         # Check API keys from registry
         for spec in PROVIDERS:

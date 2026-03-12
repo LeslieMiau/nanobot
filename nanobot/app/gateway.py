@@ -268,7 +268,6 @@ def run_gateway(
                         chat_id=job.payload.to or "direct",
                         on_progress=_silent,
                         stateless=True,
-                        disable_persona=True,
                         model=getattr(agent, "automation_model", None),
                     )
                 else:
@@ -363,7 +362,6 @@ def run_gateway(
                 chat_id=chat_id,
                 on_progress=_silent,
                 stateless=True,
-                disable_persona=True,
                 model=agent.automation_model,
             )
 

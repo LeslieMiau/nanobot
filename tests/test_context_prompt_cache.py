@@ -74,22 +74,6 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "Chat ID: direct" in user_content
     assert "Return exactly: OK" in user_content
 
-
-def test_persona_runtime_hints_are_injected_into_system_prompt(tmp_path) -> None:
-    workspace = _make_workspace(tmp_path)
-    builder = ContextBuilder(workspace)
-
-    messages = builder.build_messages(
-        history=[],
-        current_message="你好",
-        persona_runtime_hints="文字要求：最终输出必须全部使用简体中文。",
-    )
-
-    assert messages[0]["role"] == "system"
-    assert "Persona Runtime Directive" in messages[0]["content"]
-    assert "最终输出必须全部使用简体中文" in messages[0]["content"]
-
-
 def test_system_prompt_requests_direct_non_coding_answers(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
@@ -102,7 +86,7 @@ def test_system_prompt_requests_direct_non_coding_answers(tmp_path) -> None:
 
 def test_system_prompt_omits_heavy_bootstrap_and_skill_catalog_by_default(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
-    (workspace / "SOUL.md").write_text("persona", encoding="utf-8")
+    (workspace / "SOUL.md").write_text("default style", encoding="utf-8")
     (workspace / "USER.md").write_text("profile", encoding="utf-8")
     (workspace / "TOOLS.md").write_text("tool notes", encoding="utf-8")
     builder = ContextBuilder(workspace)

@@ -34,7 +34,6 @@ from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.persona.engine import PersonaEngine
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.catalog import AvailableModel
 from nanobot.providers.openai_codex_provider import OpenAICodexProvider
@@ -46,7 +45,6 @@ if TYPE_CHECKING:
         CodingConfig,
         ExecToolConfig,
         ImageGenerationConfig,
-        PersonaConfig,
         TokenGuardConfig,
     )
     from nanobot.cron.service import CronService
@@ -78,7 +76,7 @@ class AgentLoop:
         "/image-skip": {"/image-skip", "image-skip", "跳过图片", "跳过生图"},
     }
     _TOKEN_GUARD_EXIT_ALIASES = {"exit", "quit", "/exit", "/quit", ":q", "退出", "退出吧", "结束"}
-    _SHINCHAN_WELCOME = "哟～你来啦！我是 nanobot 小新版，今天也一起把事情搞定吧～"
+    _WELCOME_MESSAGE = "你好，我是 nanobot。直接告诉我你想处理的事就行。"
     _CODING_SESSION_MODES = {"auto", "on", "off"}
     _CODING_KEYWORDS = (
         "code", "coding", "implement", "implementation", "fix", "bug", "debug", "refactor",
@@ -137,7 +135,6 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         image_config: ImageGenerationConfig | None = None,
-        persona_config: PersonaConfig | None = None,
         token_guard_config: TokenGuardConfig | None = None,
         coding_config: CodingConfig | None = None,
         restart_callback: Callable[[], Awaitable[None]] | None = None,
@@ -169,7 +166,6 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.token_guard = token_guard_config or TokenGuardConfig()
         self.coding_config = coding_config or CodingConfig()
-        self.persona = PersonaEngine(persona_config)
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
         self._restart_callback = restart_callback
@@ -364,31 +360,16 @@ class AgentLoop:
             coding_enabled=coding_enabled,
         )
 
-    def _persona_hints_for_turn(
-        self,
-        user_text: str,
-        *,
-        coding_enabled: bool,
-        system_turn: bool = False,
-    ) -> str | None:
-        if coding_enabled and self.coding_config.disable_persona:
-            return None
-        if not self.persona.should_apply(user_text, coding_enabled=coding_enabled, system_turn=system_turn):
-            return None
-        return self.persona.build_runtime_hints(user_text)
-
     def _temperature_for_turn(
         self,
         user_text: str,
         *,
         coding_enabled: bool,
-        system_turn: bool = False,
     ) -> float:
+        del user_text
         if coding_enabled:
             return min(float(self.temperature), 0.1)
-        if not self.persona.should_apply(user_text, coding_enabled=coding_enabled, system_turn=system_turn):
-            return self.temperature
-        return self.persona.recommended_temperature(user_text, self.temperature)
+        return self.temperature
 
     @staticmethod
     def _strip_think(text: str | None) -> str | None:
@@ -586,7 +567,6 @@ class AgentLoop:
                 chat_id=f"cron-retry:{run_job.id}",
                 on_progress=_silent,
                 stateless=True,
-                disable_persona=True,
                 model=self.automation_model,
             )
             if response:
@@ -960,37 +940,6 @@ class AgentLoop:
             coding_enabled=coding_enabled,
         )
 
-    async def _apply_persona_output_controls(
-        self,
-        content: str | None,
-        all_messages: list[dict[str, Any]],
-        *,
-        coding_enabled: bool = False,
-        user_text: str = "",
-        system_turn: bool = False,
-    ) -> str | None:
-        """Apply persona postprocessing (e.g. script normalization) to final text."""
-        if not content:
-            return content
-        if coding_enabled and self.coding_config.disable_persona:
-            return content
-        if not self.persona.should_apply(user_text, coding_enabled=coding_enabled, system_turn=system_turn):
-            return content
-
-        normalized = await self.persona.normalize_output(
-            text=content,
-            provider=self.provider,
-            model=self.model,
-            max_tokens=self.max_tokens,
-            reasoning_effort=self.reasoning_effort,
-        )
-        if normalized != content:
-            for msg in reversed(all_messages):
-                if msg.get("role") == "assistant" and not msg.get("tool_calls"):
-                    msg["content"] = normalized
-                    break
-        return normalized
-
     async def run(self) -> None:
         """Run the agent loop, prioritizing stop/restart over normal message dispatch."""
         self._running = True
@@ -1052,7 +1001,7 @@ class AgentLoop:
             out = OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=f"{self._SHINCHAN_WELCOME}\n我先转一圈，马上重启回来喔～",
+                content=f"{self._WELCOME_MESSAGE}\n正在重启，我稍后回来继续。",
             )
         if publish:
             await self.bus.publish_outbound(out)
@@ -1242,7 +1191,6 @@ class AgentLoop:
         stateless: bool = True,
         bypass_token_guard: bool = True,
         bypass_plan_guard: bool = True,
-        disable_persona: bool = True,
         model: str | None = None,
     ) -> str:
         """Run an internal automation/system turn without the normal user-turn guards."""
@@ -1285,13 +1233,11 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        persona_hints = None if disable_persona else self._persona_hints_for_turn(content, coding_enabled=False)
         messages = self.context.build_messages(
             history=history,
             current_message=content,
             channel=channel,
             chat_id=chat_id,
-            persona_runtime_hints=persona_hints,
             coding_mode=False,
         )
         final_content, _, all_msgs, turn_state = await self._run_agent_loop(
@@ -1304,14 +1250,6 @@ class AgentLoop:
             response_verbosity_override=response_verbosity,
             parallel_tool_calls=False,
         )
-        if not disable_persona:
-            final_content = await self._apply_persona_output_controls(
-                final_content,
-                all_msgs,
-                coding_enabled=False,
-                user_text=content,
-                system_turn=True,
-            )
         final_content = self._apply_coding_summary(
             final_content,
             turn_state,

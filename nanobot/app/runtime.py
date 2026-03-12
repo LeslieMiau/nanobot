@@ -159,7 +159,6 @@ def build_agent_runtime(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         image_config=config.tools.images,
-        persona_config=config.agents.defaults.persona,
         token_guard_config=config.agents.defaults.token_guard,
         coding_config=config.agents.defaults.coding,
         restart_callback=restart_callback,

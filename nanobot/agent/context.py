@@ -27,7 +27,6 @@ class ContextBuilder:
     def build_system_prompt(
         self,
         skill_names: list[str] | None = None,
-        persona_runtime_hints: str | None = None,
         coding_mode: bool = False,
         include_soul: bool = False,
         include_user_profile: bool = False,
@@ -36,9 +35,6 @@ class ContextBuilder:
     ) -> str:
         """Build the system prompt from identity, bootstrap files, memory, and skills."""
         parts = [self._get_identity()]
-
-        if persona_runtime_hints:
-            parts.append(f"# Persona Runtime Directive\n\n{persona_runtime_hints}")
 
         if coding_mode and (coding_prompt := self._load_optional_file("CODING.md")):
             parts.append(f"# Coding Mode\n\n{coding_prompt}")
@@ -159,7 +155,6 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         media: list[str] | None = None,
         channel: str | None = None,
         chat_id: str | None = None,
-        persona_runtime_hints: str | None = None,
         coding_mode: bool = False,
     ) -> list[dict[str, Any]]:
         """Build the complete message list for an LLM call."""
@@ -178,7 +173,6 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
                 "role": "system",
                 "content": self.build_system_prompt(
                     skill_names=skill_names,
-                    persona_runtime_hints=persona_runtime_hints,
                     coding_mode=coding_mode,
                 ),
             },

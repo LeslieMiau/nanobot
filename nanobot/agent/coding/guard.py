@@ -90,7 +90,6 @@ class CodingGuardController:
             media=msg.media if msg.media else None,
             channel=msg.channel,
             chat_id=msg.chat_id,
-            persona_runtime_hints=self.loop._persona_hints_for_turn(msg.content, coding_enabled=coding_enabled),
             coding_mode=coding_enabled,
         )
         try:
