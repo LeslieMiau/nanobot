@@ -182,7 +182,7 @@ class TurnExecutorController:
         async def _consolidate_and_unlock() -> None:
             try:
                 async with lock:
-                    await self.loop._consolidate_memory(
+                    await self.loop._invoke_consolidate_memory(
                         session,
                         provider=consolidation_provider,
                         model=consolidation_model,

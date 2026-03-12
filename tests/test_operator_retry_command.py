@@ -102,7 +102,7 @@ async def test_retry_cron_accepts_natural_language_trigger(tmp_path) -> None:
 async def test_retry_cron_confirm_executes_in_current_chat(tmp_path) -> None:
     cron = _FakeCronService()
     loop = _make_loop(tmp_path, cron)
-    loop.process_direct = AsyncMock(return_value="digest ready")
+    loop.process_system_turn = AsyncMock(return_value="digest ready")
 
     await loop._process_message(
         InboundMessage(channel="telegram", sender_id="u1", chat_id="chat-1", content="/retry-cron job-1")
@@ -115,11 +115,15 @@ async def test_retry_cron_confirm_executes_in_current_chat(tmp_path) -> None:
     assert "Retried cron job `job-1` (Daily AI News):" in out.content
     assert "digest ready" in out.content
     assert cron.run_calls == [("job-1", True)]
-    loop.process_direct.assert_awaited_once()
-    kwargs = loop.process_direct.await_args.kwargs
+    loop.process_system_turn.assert_awaited_once()
+    args = loop.process_system_turn.await_args.args
+    kwargs = loop.process_system_turn.await_args.kwargs
+    assert "Daily AI News" in args[0]
     assert kwargs["session_key"] == "cron:job-1:manual"
     assert kwargs["channel"] == "cli"
     assert kwargs["chat_id"] == "cron-retry:job-1"
+    assert kwargs["stateless"] is True
+    assert kwargs["disable_persona"] is True
     session = loop.sessions.get_or_create("telegram:chat-1")
     assert "operator_action" not in session.metadata
 
@@ -128,7 +132,7 @@ async def test_retry_cron_confirm_executes_in_current_chat(tmp_path) -> None:
 async def test_retry_cron_accepts_natural_confirmation(tmp_path) -> None:
     cron = _FakeCronService()
     loop = _make_loop(tmp_path, cron)
-    loop.process_direct = AsyncMock(return_value="digest ready")
+    loop.process_system_turn = AsyncMock(return_value="digest ready")
 
     await loop._process_message(
         InboundMessage(channel="telegram", sender_id="u1", chat_id="chat-1", content="/retry-cron job-1")

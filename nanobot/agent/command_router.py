@@ -286,7 +286,7 @@ class CommandRouterController:
                 if snapshot:
                     temp = Session(key=session.key)
                     temp.messages = list(snapshot)
-                    if not await self.loop._consolidate_memory(
+                    if not await self.loop._invoke_consolidate_memory(
                         temp,
                         provider=self.loop.provider,
                         model=self.loop.model,

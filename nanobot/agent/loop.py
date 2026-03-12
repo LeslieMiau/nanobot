@@ -1197,6 +1197,26 @@ class AgentLoop:
             archive_all=archive_all, memory_window=self.memory_window,
         )
 
+    async def _invoke_consolidate_memory(
+        self,
+        session,
+        *,
+        provider: LLMProvider | None = None,
+        model: str | None = None,
+        archive_all: bool = False,
+    ) -> bool:
+        """Call consolidation with compatibility for monkeypatched test doubles."""
+        kwargs: dict[str, Any] = {"archive_all": archive_all}
+        try:
+            params = inspect.signature(self._consolidate_memory).parameters
+        except (TypeError, ValueError):
+            params = {}
+        if "provider" in params:
+            kwargs["provider"] = provider or self.provider
+        if "model" in params:
+            kwargs["model"] = model or self.model
+        return await self._consolidate_memory(session, **kwargs)
+
     async def process_direct(
         self,
         content: str,
