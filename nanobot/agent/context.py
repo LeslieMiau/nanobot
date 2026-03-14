@@ -28,8 +28,8 @@ class ContextBuilder:
         self,
         skill_names: list[str] | None = None,
         coding_mode: bool = False,
-        include_soul: bool = False,
-        include_user_profile: bool = False,
+        include_soul: bool = True,
+        include_user_profile: bool = True,
         include_tool_notes: bool = False,
         include_skills_catalog: bool = False,
     ) -> str:

@@ -84,8 +84,9 @@ def test_system_prompt_requests_direct_non_coding_answers(tmp_path) -> None:
     assert "Do not reveal hidden reasoning" in prompt
 
 
-def test_system_prompt_omits_heavy_bootstrap_and_skill_catalog_by_default(tmp_path) -> None:
+def test_system_prompt_loads_agents_soul_and_user_but_omits_tools_by_default(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
+    (workspace / "AGENTS.md").write_text("agent rules", encoding="utf-8")
     (workspace / "SOUL.md").write_text("default style", encoding="utf-8")
     (workspace / "USER.md").write_text("profile", encoding="utf-8")
     (workspace / "TOOLS.md").write_text("tool notes", encoding="utf-8")
@@ -93,8 +94,12 @@ def test_system_prompt_omits_heavy_bootstrap_and_skill_catalog_by_default(tmp_pa
 
     prompt = builder.build_system_prompt()
 
-    assert "## SOUL.md" not in prompt
-    assert "## USER.md" not in prompt
+    assert "## AGENTS.md" in prompt
+    assert "agent rules" in prompt
+    assert "## SOUL.md" in prompt
+    assert "default style" in prompt
+    assert "## USER.md" in prompt
+    assert "profile" in prompt
     assert "## TOOLS.md" not in prompt
     assert "# Skills" not in prompt
 
