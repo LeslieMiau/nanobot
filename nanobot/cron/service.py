@@ -189,11 +189,23 @@ class CronService:
         """Start the cron service."""
         self._running = True
         self._load_store()
+        missed = self._collect_missed_jobs()
         self._recompute_next_runs()
         self._save_store()
         self._arm_timer()
         self._start_watch_loop()
         logger.info("Cron service started with {} jobs", len(self._store.jobs if self._store else []))
+
+        # Catch up missed jobs after full startup
+        if missed:
+            logger.info("Cron: {} missed job(s) detected, catching up", len(missed))
+            for job in missed:
+                logger.info("Cron: catching up missed job '{}' ({})", job.name, job.id)
+                error = await self._execute_job(job)
+                if error:
+                    await self._report_job_error(job, error)
+            self._save_store()
+            self._arm_timer()
 
     def stop(self) -> None:
         """Stop the cron service."""
@@ -204,6 +216,55 @@ class CronService:
         if self._watch_task:
             self._watch_task.cancel()
             self._watch_task = None
+
+    def _collect_missed_jobs(self) -> list[CronJob]:
+        """Detect cron jobs that missed their last scheduled run while the service was down.
+
+        A job is considered missed if:
+        1. It's enabled and uses a cron schedule
+        2. The most recent scheduled fire time (before now) is AFTER last_run_at_ms
+           (meaning the service was down when it should have fired)
+        3. The missed time is within 24 hours (don't catch up ancient misses)
+        """
+        if not self._store:
+            return []
+
+        missed: list[CronJob] = []
+        now_ms = _now_ms()
+        max_catchup_ms = 24 * 60 * 60 * 1000  # 24 hours
+
+        for job in self._store.jobs:
+            if not job.enabled or job.schedule.kind != "cron" or not job.schedule.expr:
+                continue
+
+            try:
+                from zoneinfo import ZoneInfo
+
+                from croniter import croniter
+
+                tz = ZoneInfo(job.schedule.tz) if job.schedule.tz else datetime.now().astimezone().tzinfo
+                now_dt = datetime.fromtimestamp(now_ms / 1000, tz=tz)
+                cron = croniter(job.schedule.expr, now_dt)
+                # Get the most recent scheduled time BEFORE now
+                prev_dt = cron.get_prev(datetime)
+                prev_ms = int(prev_dt.timestamp() * 1000)
+
+                last_run = job.state.last_run_at_ms or 0
+
+                # Missed if: last run was before the previous scheduled time
+                # and the miss is within 24 hours
+                if last_run < prev_ms and (now_ms - prev_ms) < max_catchup_ms:
+                    logger.info(
+                        "Cron: job '{}' missed scheduled run at {} (last run: {})",
+                        job.name,
+                        prev_dt.isoformat(),
+                        datetime.fromtimestamp(last_run / 1000, tz=tz).isoformat() if last_run else "never",
+                    )
+                    missed.append(job)
+            except Exception as e:
+                logger.warning("Cron: failed to check missed status for '{}': {}", job.name, e)
+
+        return missed
 
     def _recompute_next_runs(self) -> None:
         """Recompute next run times for all enabled jobs."""
