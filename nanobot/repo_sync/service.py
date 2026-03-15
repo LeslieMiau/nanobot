@@ -2,10 +2,13 @@
 
 import asyncio
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Awaitable, Callable
 
 from loguru import logger
+
+CONFLICT_LOG_DIR = Path.home() / ".nanobot" / "logs"
 
 
 async def _run_git(repo: Path, *args: str, env: dict | None = None) -> tuple[int, str, str]:
@@ -23,6 +26,81 @@ async def _run_git(repo: Path, *args: str, env: dict | None = None) -> tuple[int
     return proc.returncode, out.decode("utf-8", errors="replace").strip(), err.decode(
         "utf-8", errors="replace"
     ).strip()
+
+
+async def _collect_conflict_info(
+    repo: Path,
+    branch: str,
+    upstream_remote: str,
+    local_ahead: int,
+    upstream_ahead: int,
+    rebase_err: str,
+) -> Path:
+    """Collect conflict details and write to a log file for later diagnosis."""
+    now = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    log_file = CONFLICT_LOG_DIR / f"repo-sync-conflict-{now}.log"
+    CONFLICT_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+    lines: list[str] = [
+        f"# Repo Sync Conflict Report",
+        f"# Time: {datetime.now(timezone.utc).isoformat()}",
+        f"# Repo: {repo}",
+        f"# Branch: {branch} ({local_ahead} ahead, {upstream_ahead} behind {upstream_remote}/{branch})",
+        "",
+        "## Rebase error output",
+        rebase_err or "(empty)",
+        "",
+    ]
+
+    # Conflicting files
+    code, diff_out, _ = await _run_git(repo, "diff", "--name-only", "--diff-filter=U")
+    if code == 0 and diff_out.strip():
+        lines.append("## Conflicting files")
+        for f in diff_out.strip().splitlines():
+            lines.append(f"  - {f}")
+        lines.append("")
+
+        # Show conflict markers for each file (first 50 lines)
+        for f in diff_out.strip().splitlines()[:10]:
+            fpath = repo / f
+            if fpath.exists():
+                lines.append(f"## Conflict detail: {f}")
+                try:
+                    content = fpath.read_text(encoding="utf-8", errors="replace")
+                    # Extract only sections with conflict markers
+                    in_conflict = False
+                    for line in content.splitlines():
+                        if line.startswith("<<<<<<<"):
+                            in_conflict = True
+                        if in_conflict:
+                            lines.append(f"  {line}")
+                        if line.startswith(">>>>>>>"):
+                            in_conflict = False
+                except Exception:
+                    lines.append("  (could not read file)")
+                lines.append("")
+
+    # Local commits that were being rebased
+    code, log_out, _ = await _run_git(
+        repo, "log", "--oneline", f"{upstream_remote}/{branch}..{branch}", "--max-count=20"
+    )
+    if code == 0 and log_out.strip():
+        lines.append("## Local commits being rebased")
+        lines.append(log_out)
+        lines.append("")
+
+    # Upstream commits being integrated
+    code, log_out, _ = await _run_git(
+        repo, "log", "--oneline", f"{branch}..{upstream_remote}/{branch}", "--max-count=20"
+    )
+    if code == 0 and log_out.strip():
+        lines.append("## Upstream commits being integrated")
+        lines.append(log_out)
+        lines.append("")
+
+    log_file.write_text("\n".join(lines), encoding="utf-8")
+    logger.warning("Repo sync conflict report saved to {}", log_file)
+    return log_file
 
 
 async def sync_fork_once(
@@ -147,11 +225,12 @@ async def _do_sync(
         # Local has own commits → rebase onto upstream
         code, _, err = await _run_git(repo, "rebase", f"{upstream_remote}/{branch}")
         if code != 0:
-            # Abort failed rebase to keep repo clean
+            # Collect conflict details before aborting
+            conflict_report = await _collect_conflict_info(repo, branch, upstream_remote, left_ahead, right_ahead, err)
             await _run_git(repo, "rebase", "--abort")
             return (
-                f"Repo sync failed: rebase failed ({left_ahead} local, {right_ahead} upstream). "
-                f"Manual resolution needed: {err or 'unknown error'}"
+                f"Repo sync failed: rebase conflict ({left_ahead} local, {right_ahead} upstream). "
+                f"Conflict log saved to {conflict_report}. Manual resolution needed."
             )
         result_msg = f"rebased {left_ahead} local commit(s) onto {right_ahead} new upstream commit(s)"
 
