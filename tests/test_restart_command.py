@@ -22,6 +22,7 @@ class _Provider(LLMProvider):
         max_tokens=4096,
         temperature=0.7,
         reasoning_effort=None,
+        tool_choice=None,
     ) -> LLMResponse:
         return LLMResponse(content="ok")
 
@@ -196,3 +197,14 @@ async def test_start_command_returns_neutral_welcome(tmp_path: Path) -> None:
 
     assert out is not None
     assert out.content == "你好，我是 nanobot。直接告诉我你想处理的事就行。"
+
+
+@pytest.mark.asyncio
+async def test_help_includes_restart(tmp_path: Path) -> None:
+    loop = _make_loop(tmp_path)
+    msg = InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/help")
+
+    out = await loop._process_message(msg)
+
+    assert out is not None
+    assert "/restart" in out.content

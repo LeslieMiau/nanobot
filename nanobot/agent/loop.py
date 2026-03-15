@@ -6,7 +6,6 @@ import asyncio
 import inspect
 import json
 import re
-import weakref
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
@@ -19,10 +18,10 @@ from nanobot.agent.coding.routing import CodingRouteCandidate, CodingRouteContro
 from nanobot.agent.coding.summary import CodingSummaryController, TurnExecutionState
 from nanobot.agent.context import ContextBuilder
 from nanobot.agent.image_flow import ImageFlowController
-from nanobot.agent.turn_executor import TurnExecutorController
-from nanobot.agent.tools.image_generate import ImageGenerateTool
 from nanobot.agent.memory import MemoryStore
 from nanobot.agent.model_selection import ModelSelectionController
+from nanobot.agent.turn_executor import TurnExecutorController
+from nanobot.agent.tools.image_generate import ImageGenerateTool
 from nanobot.agent.subagent import SubagentManager
 from nanobot.agent.token_guard import TokenGuardAssessment, TokenGuardController
 from nanobot.agent.tools.cron import CronTool
@@ -46,6 +45,7 @@ if TYPE_CHECKING:
         ExecToolConfig,
         ImageGenerationConfig,
         TokenGuardConfig,
+        WebSearchConfig,
     )
     from nanobot.cron.service import CronService
 
@@ -61,7 +61,7 @@ class AgentLoop:
     5. Sends responses back
     """
 
-    _TOOL_RESULT_MAX_CHARS = 500
+    _TOOL_RESULT_MAX_CHARS = 16_000
     _COMMAND_ALIASES: dict[str, set[str]] = {
         "/start": {"/start", "start", "开始", "启动"},
         "/new": {"/new", "new", "新会话", "新建会话", "重新开始", "重开"},
@@ -127,6 +127,7 @@ class AgentLoop:
         response_verbosity: str = "low",
         reasoning_effort: str | None = None,
         brave_api_key: str | None = None,
+        web_search_config: WebSearchConfig | None = None,
         web_proxy: str | None = None,
         exec_config: ExecToolConfig | None = None,
         cron_service: CronService | None = None,
@@ -143,7 +144,7 @@ class AgentLoop:
         provider_switcher: Callable[[str | None, str | None], tuple[LLMProvider, str, str | None]] | None = None,
         available_models_provider: Callable[[str | None, str | None], list[AvailableModel]] | None = None,
     ):
-        from nanobot.config.schema import CodingConfig, ExecToolConfig, TokenGuardConfig
+        from nanobot.config.schema import CodingConfig, ExecToolConfig, TokenGuardConfig, WebSearchConfig
         self.bus = bus
         self.channels_config = channels_config
         self.image_config = image_config
@@ -162,6 +163,7 @@ class AgentLoop:
         self.response_verbosity = response_verbosity
         self.reasoning_effort = reasoning_effort
         self.brave_api_key = brave_api_key
+        self.web_search_config = web_search_config or WebSearchConfig(api_key=brave_api_key or "")
         self.web_proxy = web_proxy
         self.exec_config = exec_config or ExecToolConfig()
         self.token_guard = token_guard_config or TokenGuardConfig()
@@ -186,6 +188,7 @@ class AgentLoop:
             response_verbosity=self.response_verbosity,
             reasoning_effort=reasoning_effort,
             brave_api_key=brave_api_key,
+            web_search_config=self.web_search_config,
             web_proxy=web_proxy,
             exec_config=self.exec_config,
             restrict_to_workspace=restrict_to_workspace,
@@ -197,9 +200,6 @@ class AgentLoop:
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
         self._mcp_connecting = False
-        self._consolidating: set[str] = set()  # Session keys with consolidation in progress
-        self._consolidation_tasks: set[asyncio.Task] = set()  # Strong refs to in-flight tasks
-        self._consolidation_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
         self._active_tasks: dict[str, list[asyncio.Task]] = {}  # session_key -> tasks
         self._plan_guard_pending: dict[str, str] = {}  # session_key -> pending large coding request
         self._coding_model_cooldowns: dict[str, float] = {}
@@ -235,7 +235,7 @@ class AgentLoop:
             restrict_to_workspace=self.restrict_to_workspace,
             path_append=self.exec_config.path_append,
         ))
-        self.tools.register(WebSearchTool(api_key=self.brave_api_key, proxy=self.web_proxy))
+        self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         if self.image_config:
@@ -261,7 +261,7 @@ class AgentLoop:
             await self._mcp_stack.__aenter__()
             await connect_mcp_servers(self._mcp_servers, self.tools, self._mcp_stack)
             self._mcp_connected = True
-        except Exception as e:
+        except BaseException as e:
             logger.error("Failed to connect MCP servers (will retry next message): {}", e)
             if self._mcp_stack:
                 try:
@@ -838,17 +838,12 @@ class AgentLoop:
                     thought = self._strip_think(response.content)
                     if thought:
                         await on_progress(thought)
-                    await on_progress(self._tool_hint(response.tool_calls), tool_hint=True)
+                    tool_hint = self._tool_hint(response.tool_calls)
+                    tool_hint = self._strip_think(tool_hint)
+                    await on_progress(tool_hint, tool_hint=True)
 
                 tool_call_dicts = [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.name,
-                            "arguments": json.dumps(tc.arguments, ensure_ascii=False)
-                        }
-                    }
+                    tc.to_openai_tool_call()
                     for tc in response.tool_calls
                 ]
                 messages = self.context.add_assistant_message(
@@ -951,12 +946,17 @@ class AgentLoop:
                 msg = await asyncio.wait_for(self.bus.consume_inbound(), timeout=1.0)
             except asyncio.TimeoutError:
                 continue
+            except Exception as e:
+                logger.warning("Error consuming inbound message: {}, continuing...", e)
+                continue
 
             cmd, _ = self._parse_user_command(msg.content)
             if cmd == "/restart":
                 await self._handle_restart(msg)
             elif cmd == "/stop":
                 await self._handle_stop(msg)
+            elif cmd == "/restart":
+                await self._handle_restart(msg)
             else:
                 task = asyncio.create_task(self._dispatch(msg))
                 self._active_tasks.setdefault(msg.session_key, []).append(task)
@@ -1165,7 +1165,6 @@ class AgentLoop:
         if "model" in params:
             kwargs["model"] = model or self.model
         return await self._consolidate_memory(session, **kwargs)
-
     async def process_direct(
         self,
         content: str,

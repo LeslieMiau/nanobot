@@ -4,8 +4,7 @@ import pytest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
-from nanobot.channels.qq import QQ_MAX_MESSAGE_LEN, QQChannel
-from nanobot.config.schema import QQConfig
+from nanobot.channels.qq import QQ_MAX_MESSAGE_LEN, QQChannel, QQConfig
 
 
 class _FakeApi:
@@ -54,7 +53,7 @@ async def test_on_group_message_routes_to_group_chat_id() -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_group_message_uses_group_api_with_msg_seq() -> None:
+async def test_send_group_message_uses_plain_text_group_api_with_msg_seq() -> None:
     channel, client = _make_channel()
     channel._chat_type_cache["group123"] = "group"
 
@@ -68,15 +67,18 @@ async def test_send_group_message_uses_group_api_with_msg_seq() -> None:
     )
 
     assert len(client.api.group_calls) == 1
-    call = client.api.group_calls[0]
-    assert call["group_openid"] == "group123"
-    assert call["msg_id"] == "msg1"
-    assert call["msg_seq"] == 2
+    assert client.api.group_calls[0] == {
+        "group_openid": "group123",
+        "msg_type": 0,
+        "content": "hello",
+        "msg_id": "msg1",
+        "msg_seq": 2,
+    }
     assert not client.api.c2c_calls
 
 
 @pytest.mark.asyncio
-async def test_send_uses_metadata_message_id_for_c2c() -> None:
+async def test_send_c2c_message_uses_plain_text_c2c_api_with_msg_seq() -> None:
     channel, client = _make_channel()
 
     await channel.send(
@@ -89,10 +91,14 @@ async def test_send_uses_metadata_message_id_for_c2c() -> None:
     )
 
     assert len(client.api.c2c_calls) == 1
-    assert client.api.c2c_calls[0]["openid"] == "user_openid"
-    assert client.api.c2c_calls[0]["content"] == "hello"
-    assert client.api.c2c_calls[0]["msg_id"] == "msg-1"
-    assert client.api.c2c_calls[0]["msg_type"] == 0
+    assert client.api.c2c_calls[0] == {
+        "openid": "user_openid",
+        "msg_type": 0,
+        "content": "hello",
+        "msg_id": "msg-1",
+        "msg_seq": 2,
+    }
+    assert not client.api.group_calls
 
 
 @pytest.mark.asyncio
@@ -165,3 +171,31 @@ async def test_send_skips_empty_content_when_only_media_present() -> None:
 
     assert client.api.c2c_calls == []
     assert client.api.group_calls == []
+
+
+@pytest.mark.asyncio
+async def test_send_group_message_uses_markdown_when_configured() -> None:
+    channel = QQChannel(
+        QQConfig(app_id="app", secret="secret", allow_from=["*"], msg_format="markdown"),
+        MessageBus(),
+    )
+    channel._client = _FakeClient()
+    channel._chat_type_cache["group123"] = "group"
+
+    await channel.send(
+        OutboundMessage(
+            channel="qq",
+            chat_id="group123",
+            content="**hello**",
+            metadata={"message_id": "msg1"},
+        )
+    )
+
+    assert len(channel._client.api.group_calls) == 1
+    assert channel._client.api.group_calls[0] == {
+        "group_openid": "group123",
+        "msg_type": 2,
+        "markdown": {"content": "**hello**"},
+        "msg_id": "msg1",
+        "msg_seq": 2,
+    }

@@ -104,7 +104,7 @@ def _find_other_gateway_processes() -> list[tuple[int, str]]:
 
 def run_gateway(
     *,
-    port: int,
+    port: int | None,
     workspace: str | None,
     verbose: bool,
     config_path: str | None,
@@ -152,6 +152,7 @@ def run_gateway(
         gateway_lock_path_factory = _gateway_lock_path
 
     config = load_config_fn(config_path, workspace)
+    effective_port = port if port is not None else config.gateway.port
     if others := find_other_gateway_processes():
         console.print("[red]Another nanobot gateway instance is already running.[/red]")
         for pid, command in others:
@@ -166,7 +167,13 @@ def run_gateway(
         raise SystemExit(1) from exc
 
     try:
-        console.print(f"{__logo__} Starting nanobot gateway on port {port}...")
+        if config.agents.defaults.should_warn_deprecated_memory_window:
+            console.print(
+                "[yellow]Hint:[/yellow] Detected deprecated `memoryWindow` without "
+                "`contextWindowTokens`. `memoryWindow` is ignored; run "
+                "[cyan]nanobot onboard[/cyan] to refresh your config template."
+            )
+        console.print(f"{__logo__} Starting nanobot gateway on port {effective_port}...")
         sync_templates_fn(config.workspace_path)
         session_manager = SessionManager(config.workspace_path)
         repo_sync_cfg = config.gateway.repo_sync

@@ -3,14 +3,15 @@
 import asyncio
 import time
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Literal
 
 from loguru import logger
+from pydantic import Field
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
-from nanobot.config.schema import QQConfig
+from nanobot.config.schema import Base
 from nanobot.utils.helpers import split_message
 
 try:
@@ -55,12 +56,29 @@ def _make_bot_class(channel: "QQChannel") -> "type[botpy.Client]":
     return _Bot
 
 
+class QQConfig(Base):
+    """QQ channel configuration using botpy SDK."""
+
+    enabled: bool = False
+    app_id: str = ""
+    secret: str = ""
+    allow_from: list[str] = Field(default_factory=list)
+    msg_format: Literal["plain", "markdown"] = "plain"
+
+
 class QQChannel(BaseChannel):
     """QQ channel using botpy SDK with WebSocket connection."""
 
     name = "qq"
+    display_name = "QQ"
 
-    def __init__(self, config: QQConfig, bus: MessageBus):
+    @classmethod
+    def default_config(cls) -> dict[str, Any]:
+        return QQConfig().model_dump(by_alias=True)
+
+    def __init__(self, config: Any, bus: MessageBus):
+        if isinstance(config, dict):
+            config = QQConfig.model_validate(config)
         super().__init__(config, bus)
         self.config: QQConfig = config
         self._client: "botpy.Client | None" = None
@@ -128,24 +146,41 @@ class QQChannel(BaseChannel):
         msg_id = self._resolve_msg_id(msg)
         chunks = split_message(content, QQ_MAX_MESSAGE_LEN)
         try:
-            for chunk in chunks:
-                msg_seq = self._next_msg_seq()
+            if self.config.msg_format == "markdown":
+                payload = {
+                    "msg_type": 2,
+                    "markdown": {"content": content},
+                    "msg_id": msg_id,
+                    "msg_seq": self._next_msg_seq(),
+                }
                 if msg_type == "group":
                     await self._client.api.post_group_message(
                         group_openid=msg.chat_id,
-                        msg_type=0,
-                        content=chunk,
-                        msg_id=msg_id,
-                        msg_seq=msg_seq,
+                        **payload,
                     )
                 else:
                     await self._client.api.post_c2c_message(
                         openid=msg.chat_id,
-                        msg_type=0,
-                        content=chunk,
-                        msg_id=msg_id,
-                        msg_seq=msg_seq,
+                        **payload,
                     )
+            else:
+                for chunk in chunks:
+                    payload = {
+                        "msg_type": 0,
+                        "content": chunk,
+                        "msg_id": msg_id,
+                        "msg_seq": self._next_msg_seq(),
+                    }
+                    if msg_type == "group":
+                        await self._client.api.post_group_message(
+                            group_openid=msg.chat_id,
+                            **payload,
+                        )
+                    else:
+                        await self._client.api.post_c2c_message(
+                            openid=msg.chat_id,
+                            **payload,
+                        )
         except Exception as e:
             logger.error("Error sending QQ message: {}", e)
 

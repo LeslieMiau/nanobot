@@ -54,6 +54,7 @@ class OpenAICodexProvider(LLMProvider):
         max_tokens: int = 4096,
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
         response_verbosity: str | None = None,
         parallel_tool_calls: bool | None = None,
     ) -> LLMResponse:
@@ -72,7 +73,7 @@ class OpenAICodexProvider(LLMProvider):
             "text": {"verbosity": response_verbosity or self.response_verbosity},
             "include": ["reasoning.encrypted_content"],
             "prompt_cache_key": _prompt_cache_key(messages),
-            "tool_choice": "auto",
+            "tool_choice": tool_choice or "auto",
             "parallel_tool_calls": self.parallel_tool_calls if parallel_tool_calls is None else parallel_tool_calls,
         }
 
