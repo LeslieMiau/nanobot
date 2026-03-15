@@ -76,19 +76,25 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
 
 def test_system_prompt_requests_direct_non_coding_answers(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
+    # Copy AGENTS.md template so bootstrap loads it
+    template_dir = pkg_files("nanobot") / "templates"
+    (workspace / "AGENTS.md").write_text(
+        (template_dir / "AGENTS.md").read_text(encoding="utf-8"), encoding="utf-8"
+    )
     builder = ContextBuilder(workspace)
 
     prompt = builder.build_system_prompt()
 
-    assert "answer with the final result first" in prompt
-    assert "Do not reveal hidden reasoning" in prompt
+    # Core rules are in AGENTS.md (loaded as bootstrap)
+    assert "先给结果" in prompt
+    assert "不要暴露内部推理过程" in prompt
 
 
 def test_system_prompt_loads_agents_soul_and_user_but_omits_tools_by_default(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     (workspace / "AGENTS.md").write_text("agent rules", encoding="utf-8")
     (workspace / "SOUL.md").write_text("default style", encoding="utf-8")
-    (workspace / "USER.md").write_text("profile", encoding="utf-8")
+    (workspace / "USER.md").write_text("# User Profile\n\n- Name: Alice\n- Timezone: UTC", encoding="utf-8")
     (workspace / "TOOLS.md").write_text("tool notes", encoding="utf-8")
     builder = ContextBuilder(workspace)
 
@@ -99,7 +105,7 @@ def test_system_prompt_loads_agents_soul_and_user_but_omits_tools_by_default(tmp
     assert "## SOUL.md" in prompt
     assert "default style" in prompt
     assert "## USER.md" in prompt
-    assert "profile" in prompt
+    assert "Name: Alice" in prompt
     assert "## TOOLS.md" not in prompt
     assert "# Skills" not in prompt
 
