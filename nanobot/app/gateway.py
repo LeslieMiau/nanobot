@@ -128,6 +128,19 @@ def run_gateway(
     from nanobot.repo_sync.service import RepoSyncWatcher
     from nanobot.session.manager import SessionManager
 
+    # --- file logging ---------------------------------------------------
+    log_dir = Path.home() / ".nanobot" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logger.add(
+        log_dir / "nanobot.log",
+        rotation="5 MB",
+        retention=3,
+        encoding="utf-8",
+        backtrace=True,
+        diagnose=True,
+    )
+    # --------------------------------------------------------------------
+
     if verbose:
         import logging
 
