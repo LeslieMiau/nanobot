@@ -491,6 +491,7 @@ def run_gateway(
                 allow_dirty_worktree=repo_sync_cfg.allow_dirty_worktree,
                 interval_s=repo_sync_cfg.watch_interval_s,
                 run_on_start=repo_sync_cfg.run_on_start,
+                ssh_command=repo_sync_cfg.ssh_command,
             )
 
         if channels.enabled_channels:

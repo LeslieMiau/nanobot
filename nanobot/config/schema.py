@@ -177,6 +177,7 @@ class RepoSyncConfig(Base):
     allow_dirty_worktree: bool = False
     watch_interval_s: int = 60
     run_on_start: bool = True
+    ssh_command: str = ""  # e.g. "ssh -o ProxyCommand=none -p 443 -i ~/.ssh/dev"
     # Legacy fields kept for backward compatibility (no longer used by gateway repo sync).
     cron_expr: str = "0 9 * * *"
     tz: str = "Asia/Shanghai"

@@ -1,13 +1,15 @@
 """Deterministic git fork sync service."""
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Awaitable, Callable
 
 from loguru import logger
 
 
-async def _run_git(repo: Path, *args: str) -> tuple[int, str, str]:
+async def _run_git(repo: Path, *args: str, env: dict | None = None) -> tuple[int, str, str]:
+    full_env = {**os.environ, **(env or {})}
     proc = await asyncio.create_subprocess_exec(
         "git",
         "-C",
@@ -15,6 +17,7 @@ async def _run_git(repo: Path, *args: str) -> tuple[int, str, str]:
         *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        env=full_env,
     )
     out, err = await proc.communicate()
     return proc.returncode, out.decode("utf-8", errors="replace").strip(), err.decode(
@@ -31,8 +34,16 @@ async def sync_fork_once(
     push_remote: str = "origin",
     auto_push: bool = True,
     allow_dirty_worktree: bool = False,
+    ssh_command: str = "",
 ) -> str:
-    """Sync local fork with upstream branch using fast-forward only."""
+    """Sync local fork with upstream branch.
+
+    Strategy:
+    - If local is behind upstream: fast-forward merge.
+    - If local is ahead (has own commits): rebase local commits onto upstream.
+    - If worktree is dirty: stash → sync → stash pop.
+    - SSH push uses ssh_command to bypass proxy issues.
+    """
     repo = Path(repo_path).expanduser().resolve()
     if not repo.exists():
         return f"Repo sync skipped: repo path not found: {repo}"
@@ -41,19 +52,63 @@ async def sync_fork_once(
     if code != 0 or out.strip() != "true":
         return f"Repo sync skipped: not a git repository: {repo}"
 
-    if not allow_dirty_worktree:
-        code, out, _ = await _run_git(repo, "status", "--porcelain")
-        if code != 0:
-            return "Repo sync failed: cannot read git status."
-        if out.strip():
-            return "Repo sync skipped: working tree is dirty."
-
+    # Check current branch
     code, current_branch, _ = await _run_git(repo, "branch", "--show-current")
     if code != 0:
         return "Repo sync failed: cannot detect current branch."
     if current_branch.strip() != branch:
         return f"Repo sync skipped: current branch is '{current_branch.strip()}', expected '{branch}'."
 
+    # Handle dirty worktree: stash if allowed
+    stashed = False
+    code, status_out, _ = await _run_git(repo, "status", "--porcelain")
+    if code != 0:
+        return "Repo sync failed: cannot read git status."
+    is_dirty = bool(status_out.strip())
+
+    if is_dirty:
+        if not allow_dirty_worktree:
+            # Auto-stash instead of giving up
+            code, _, err = await _run_git(repo, "stash", "push", "-m", "repo-sync-auto-stash")
+            if code != 0:
+                return f"Repo sync skipped: worktree dirty and stash failed: {err or 'unknown error'}"
+            stashed = True
+        # If allow_dirty_worktree, proceed without stash
+
+    git_env = {}
+    if ssh_command:
+        git_env["GIT_SSH_COMMAND"] = ssh_command
+
+    try:
+        return await _do_sync(
+            repo=repo,
+            branch=branch,
+            upstream_remote=upstream_remote,
+            upstream_url=upstream_url,
+            push_remote=push_remote,
+            auto_push=auto_push,
+            git_env=git_env,
+        )
+    finally:
+        if stashed:
+            code, _, err = await _run_git(repo, "stash", "pop")
+            if code != 0:
+                logger.warning("Repo sync: stash pop failed after sync: {}", err)
+
+
+async def _do_sync(
+    *,
+    repo: Path,
+    branch: str,
+    upstream_remote: str,
+    upstream_url: str,
+    push_remote: str,
+    auto_push: bool,
+    git_env: dict,
+) -> str:
+    """Core sync logic, assumes clean worktree."""
+
+    # Ensure upstream remote
     code, existing_url, _ = await _run_git(repo, "remote", "get-url", upstream_remote)
     if code != 0:
         code, _, err = await _run_git(repo, "remote", "add", upstream_remote, upstream_url)
@@ -64,10 +119,12 @@ async def sync_fork_once(
         if code != 0:
             return f"Repo sync failed: cannot set upstream remote URL: {err or 'unknown error'}"
 
-    code, _, err = await _run_git(repo, "fetch", upstream_remote)
+    # Fetch upstream (may need SSH for private repos)
+    code, _, err = await _run_git(repo, "fetch", upstream_remote, env=git_env)
     if code != 0:
         return f"Repo sync failed: fetch upstream failed: {err or 'unknown error'}"
 
+    # Compare branches
     code, counts, err = await _run_git(
         repo, "rev-list", "--left-right", "--count", f"{branch}...{upstream_remote}/{branch}"
     )
@@ -75,32 +132,46 @@ async def sync_fork_once(
         return f"Repo sync failed: cannot compare branches: {err or 'unknown error'}"
 
     left_ahead, right_ahead = [int(x) for x in counts.split()]
-    if left_ahead > 0:
-        return (
-            "Repo sync skipped: local branch has commits not in upstream "
-            f"({left_ahead} ahead, {right_ahead} behind)."
-        )
+
+    # Already up to date
     if right_ahead == 0:
         return "Repo sync: already up to date."
 
-    code, _, err = await _run_git(repo, "merge", "--ff-only", f"{upstream_remote}/{branch}")
-    if code != 0:
-        return f"Repo sync failed: fast-forward merge failed: {err or 'unknown error'}"
+    # Local has no extra commits → simple fast-forward
+    if left_ahead == 0:
+        code, _, err = await _run_git(repo, "merge", "--ff-only", f"{upstream_remote}/{branch}")
+        if code != 0:
+            return f"Repo sync failed: fast-forward merge failed: {err or 'unknown error'}"
+        result_msg = f"fast-forwarded {right_ahead} commit(s)"
+    else:
+        # Local has own commits → rebase onto upstream
+        code, _, err = await _run_git(repo, "rebase", f"{upstream_remote}/{branch}")
+        if code != 0:
+            # Abort failed rebase to keep repo clean
+            await _run_git(repo, "rebase", "--abort")
+            return (
+                f"Repo sync failed: rebase failed ({left_ahead} local, {right_ahead} upstream). "
+                f"Manual resolution needed: {err or 'unknown error'}"
+            )
+        result_msg = f"rebased {left_ahead} local commit(s) onto {right_ahead} new upstream commit(s)"
 
     if not auto_push:
-        return f"Repo sync completed: fast-forwarded {right_ahead} commit(s) locally."
+        return f"Repo sync completed: {result_msg} locally."
 
-    code, _, err = await _run_git(repo, "push", push_remote, branch)
+    # Push with SSH command support
+    push_args = ["push", push_remote, branch]
+    if left_ahead > 0:
+        # After rebase, force-push is needed for the fork
+        push_args = ["push", "--force-with-lease", push_remote, branch]
+
+    code, _, err = await _run_git(repo, *push_args, env=git_env)
     if code != 0:
         return (
-            "Repo sync partially completed: local branch updated, but push failed: "
+            f"Repo sync partially completed: {result_msg} locally, but push failed: "
             f"{err or 'unknown error'}"
         )
 
-    return (
-        "Repo sync completed: "
-        f"fast-forwarded {right_ahead} commit(s) and pushed to {push_remote}/{branch}."
-    )
+    return f"Repo sync completed: {result_msg} and pushed to {push_remote}/{branch}."
 
 
 class RepoSyncWatcher:
@@ -118,6 +189,7 @@ class RepoSyncWatcher:
         allow_dirty_worktree: bool = False,
         interval_s: float = 60.0,
         run_on_start: bool = True,
+        ssh_command: str = "",
         sync_runner: Callable[..., Awaitable[str]] = sync_fork_once,
     ) -> None:
         self.repo_path = repo_path
@@ -129,6 +201,7 @@ class RepoSyncWatcher:
         self.allow_dirty_worktree = allow_dirty_worktree
         self.interval_s = float(interval_s) if interval_s > 0 else 1.0
         self.run_on_start = run_on_start
+        self.ssh_command = ssh_command
         self._sync_runner = sync_runner
 
         self._running = False
@@ -166,6 +239,7 @@ class RepoSyncWatcher:
                 push_remote=self.push_remote,
                 auto_push=self.auto_push,
                 allow_dirty_worktree=self.allow_dirty_worktree,
+                ssh_command=self.ssh_command,
             )
 
         lowered = result.lower()
