@@ -55,3 +55,10 @@ cron(action="remove", job_id="abc123")
 ## Timezone
 
 Use `tz` with `cron_expr` to schedule in a specific IANA timezone. Without `tz`, the server's local timezone is used.
+
+## Agent Guidelines
+
+- Before scheduling, check available skills and follow skill guidance first.
+- Get `USER_ID` and `CHANNEL` from the current session.
+- Do not rely on `MEMORY.md` for notifications — use cron for time-based delivery.
+- Use `HEARTBEAT.md` for fuzzy recurring checks; use cron for delivery at a specific time.

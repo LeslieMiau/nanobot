@@ -43,7 +43,9 @@ class ContextBuilder:
         if include_soul:
             bootstrap_files.append("SOUL.md")
         if include_user_profile:
-            bootstrap_files.append("USER.md")
+            user_content = self._load_optional_file("USER.md")
+            if user_content and self._has_filled_content(user_content):
+                bootstrap_files.append("USER.md")
         if include_tool_notes:
             bootstrap_files.append("TOOLS.md")
         bootstrap = self._load_bootstrap_files(bootstrap_files)
@@ -101,23 +103,16 @@ Skills with available="false" need dependencies installed first - you can try in
 
         return f"""# nanobot 🐈
 
-You are nanobot, a helpful AI assistant.
+You are nanobot, a personal AI assistant.
 
 ## Runtime
 {runtime}
 
 ## Workspace
 Your workspace is at: {workspace_path}
-- Long-term memory: {workspace_path}/memory/MEMORY.md (write important facts here)
-- History log: {workspace_path}/memory/HISTORY.md (grep-searchable). Each entry starts with [YYYY-MM-DD HH:MM].
+- Long-term memory: {workspace_path}/memory/MEMORY.md
+- History log: {workspace_path}/memory/HISTORY.md (grep-searchable, entries start with [YYYY-MM-DD HH:MM])
 - Custom skills: {workspace_path}/skills/{{skill-name}}/SKILL.md
-
-## nanobot Guidelines
-- Before modifying a file, read it first. Do not assume files or directories exist.
-- Keep tool narration and process chatter brief unless the user explicitly asks for it.
-- Ask for clarification when the request is ambiguous.
-- For non-coding conversations, answer with the final result first. Keep preambles, method explanations, and process narration to a minimum unless the user asks for them.
-- Do not reveal hidden reasoning or describe internal thought process.
 
 Reply directly with text for conversations. Only use the 'message' tool to send to a specific chat channel."""
 
@@ -146,6 +141,16 @@ Reply directly with text for conversations. Only use the 'message' tool to send 
         if not file_path.exists():
             return ""
         return file_path.read_text(encoding="utf-8")
+
+    @staticmethod
+    def _has_filled_content(content: str) -> bool:
+        """Check if a profile template has any filled-in values."""
+        for line in content.splitlines():
+            if line.startswith("- ") and ":" in line:
+                value = line.split(":", 1)[1].strip()
+                if value:
+                    return True
+        return False
 
     def build_messages(
         self,
