@@ -2,6 +2,13 @@
 .assets
 .docs
 .env
+.env.*
+config.json
+config.json.bak*
+*.secret
+*.credentials
+logs/
+*.log
 *.pyc
 dist/
 build/

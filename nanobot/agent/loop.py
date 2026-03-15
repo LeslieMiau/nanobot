@@ -176,6 +176,7 @@ class AgentLoop:
         self._provider_switcher = provider_switcher
         self._available_models_provider = available_models_provider
 
+        self._consolidating: set[str] = set()
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
