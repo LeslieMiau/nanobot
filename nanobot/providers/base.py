@@ -88,6 +88,10 @@ class LLMProvider(ABC):
         "connection",
         "server error",
         "temporarily unavailable",
+        "unterminated string",
+        "unexpected end of json",
+        "json decode",
+        "incomplete chunked read",
     )
     _IMAGE_UNSUPPORTED_MARKERS = (
         "image_url is only supported",
