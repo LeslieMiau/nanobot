@@ -1147,10 +1147,17 @@ class AgentLoop:
         archive_all: bool = False,
     ) -> bool:
         """Delegate to MemoryStore.consolidate(). Returns True on success."""
-        return await MemoryStore(self.workspace).consolidate(
-            session, provider, model,
-            archive_all=archive_all, memory_window=self.memory_window,
-        )
+        if archive_all:
+            messages = session.messages[session.last_consolidated:]
+        else:
+            end = max(session.last_consolidated, len(session.messages) - self.memory_window)
+            messages = session.messages[session.last_consolidated:end]
+        if not messages:
+            return True
+        ok = await MemoryStore(self.workspace).consolidate(messages, provider, model)
+        if ok:
+            session.last_consolidated += len(messages)
+        return ok
 
     async def _invoke_consolidate_memory(
         self,
