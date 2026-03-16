@@ -177,6 +177,8 @@ class AgentLoop:
         self._available_models_provider = available_models_provider
 
         self._consolidating: set[str] = set()
+        self._consolidation_locks: dict[str, asyncio.Lock] = {}
+        self._consolidation_tasks: set[asyncio.Task] = set()
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
