@@ -235,7 +235,17 @@ class AgentLoop:
                 # poison the context and cause permanent 400 loops (#1303).
                 if response.finish_reason == "error":
                     logger.error("LLM returned error: {}", (clean or "")[:200])
-                    final_content = clean or "Sorry, I encountered an error calling the AI model."
+                    err_lower = (clean or "").lower()
+                    if any(k in err_lower for k in (
+                        "unterminated string", "json", "column 1", "unexpected end",
+                        "incomplete chunked", "expecting value",
+                    )):
+                        final_content = (
+                            "AI 服务暂时不稳定（响应格式异常），已重试多次仍未成功。"
+                            "请稍后再试，或联系管理员检查 API 状态。"
+                        )
+                    else:
+                        final_content = clean or "Sorry, I encountered an error calling the AI model."
                     break
                 messages = self.context.add_assistant_message(
                     messages, clean, reasoning_content=response.reasoning_content,
