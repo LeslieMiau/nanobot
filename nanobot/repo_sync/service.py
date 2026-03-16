@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -267,6 +267,7 @@ class RepoSyncWatcher:
         auto_push: bool = True,
         allow_dirty_worktree: bool = False,
         interval_s: float = 60.0,
+        sync_hour: int = 3,
         run_on_start: bool = True,
         ssh_command: str = "",
         sync_runner: Callable[..., Awaitable[str]] = sync_fork_once,
@@ -279,6 +280,7 @@ class RepoSyncWatcher:
         self.auto_push = auto_push
         self.allow_dirty_worktree = allow_dirty_worktree
         self.interval_s = float(interval_s) if interval_s > 0 else 1.0
+        self.sync_hour = sync_hour
         self.run_on_start = run_on_start
         self.ssh_command = ssh_command
         self._sync_runner = sync_runner
@@ -295,10 +297,16 @@ class RepoSyncWatcher:
 
         self._running = True
         self._task = asyncio.create_task(self._run_loop())
-        logger.info("Repo sync watcher started (every {}s)", self.interval_s)
+        if 0 <= self.sync_hour <= 23:
+            logger.info("Repo sync watcher started (daily at {:02d}:00)", self.sync_hour)
+        else:
+            logger.info("Repo sync watcher started (every {}s)", self.interval_s)
 
         if self.run_on_start:
-            await self.trigger_now()
+            try:
+                await self.trigger_now()
+            except Exception:
+                logger.exception("Repo sync on-start failed; will retry on next interval")
 
     def stop(self) -> None:
         """Stop background watcher loop."""
@@ -330,11 +338,26 @@ class RepoSyncWatcher:
             logger.info(result)
         return result
 
+    @staticmethod
+    def _seconds_until_hour(hour: int) -> float:
+        """Return seconds from now until the next occurrence of the given local hour."""
+        now = datetime.now().astimezone()
+        target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        return (target - now).total_seconds()
+
     async def _run_loop(self) -> None:
         """Main watcher loop."""
+        daily = 0 <= self.sync_hour <= 23
         while self._running:
             try:
-                await asyncio.sleep(self.interval_s)
+                if daily:
+                    delay = self._seconds_until_hour(self.sync_hour)
+                    logger.debug("Repo sync: next run in {:.0f}s (at {:02d}:00)", delay, self.sync_hour)
+                    await asyncio.sleep(delay)
+                else:
+                    await asyncio.sleep(self.interval_s)
                 if self._running:
                     await self.trigger_now()
             except asyncio.CancelledError:

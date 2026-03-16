@@ -176,6 +176,7 @@ class RepoSyncConfig(Base):
     auto_push: bool = True
     allow_dirty_worktree: bool = False
     watch_interval_s: int = 60
+    sync_hour: int = 3  # Hour of day (0-23, local time) for daily sync; -1 to use watch_interval_s polling
     run_on_start: bool = True
     ssh_command: str = ""  # e.g. "ssh -o ProxyCommand=none -p 443 -i ~/.ssh/dev"
     # Legacy fields kept for backward compatibility (no longer used by gateway repo sync).

@@ -38,6 +38,7 @@ async def test_repo_sync_watcher_polls_while_running() -> None:
     watcher = RepoSyncWatcher(
         repo_path=".",
         interval_s=0.05,
+        sync_hour=-1,
         run_on_start=False,
         sync_runner=_fake_sync,
     )

@@ -8,6 +8,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
@@ -54,6 +55,36 @@ class _GatewayInstanceLock:
             pass
         self._fh.close()
         self._fh = None
+
+
+class _TaskSupervisor:
+    """Track failure counts for a supervised async task with exponential backoff."""
+
+    MAX_CONSECUTIVE_FAILURES = 5
+    INITIAL_BACKOFF_S = 1.0
+    MAX_BACKOFF_S = 60.0
+    MIN_HEALTHY_DURATION_S = 30.0
+
+    def __init__(self, name: str):
+        self.name = name
+        self.consecutive_failures = 0
+        self.backoff_s = self.INITIAL_BACKOFF_S
+        self._started_at: float = 0.0
+
+    def mark_started(self) -> None:
+        self._started_at = time.monotonic()
+
+    def record_failure(self) -> None:
+        elapsed = time.monotonic() - self._started_at if self._started_at else 0.0
+        if elapsed >= self.MIN_HEALTHY_DURATION_S:
+            self.consecutive_failures = 1
+            self.backoff_s = self.INITIAL_BACKOFF_S
+        else:
+            self.consecutive_failures += 1
+            self.backoff_s = min(self.backoff_s * 2, self.MAX_BACKOFF_S)
+
+    def should_escalate(self) -> bool:
+        return self.consecutive_failures >= self.MAX_CONSECUTIVE_FAILURES
 
 
 def _gateway_lock_path() -> Path:
@@ -192,6 +223,7 @@ def run_gateway(
         repo_sync_cfg = config.gateway.repo_sync
         legacy_repo_sync_marker = "__repo_sync__::"
         restart_requested = False
+        escalate_to_process_restart = False
 
         async def request_restart() -> None:
             nonlocal restart_requested
@@ -490,6 +522,7 @@ def run_gateway(
                 auto_push=repo_sync_cfg.auto_push,
                 allow_dirty_worktree=repo_sync_cfg.allow_dirty_worktree,
                 interval_s=repo_sync_cfg.watch_interval_s,
+                sync_hour=repo_sync_cfg.sync_hour,
                 run_on_start=repo_sync_cfg.run_on_start,
                 ssh_command=repo_sync_cfg.ssh_command,
             )
@@ -507,15 +540,20 @@ def run_gateway(
         console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
         async def run() -> None:
+            nonlocal escalate_to_process_restart
             agent_task: asyncio.Task | None = None
             channels_task: asyncio.Task | None = None
+            agent_sup = _TaskSupervisor("agent")
+            channels_sup = _TaskSupervisor("channels")
             try:
                 await cron.start()
                 await heartbeat.start()
                 if repo_sync_watcher:
                     await repo_sync_watcher.start()
                 agent_task = asyncio.create_task(agent.run())
+                agent_sup.mark_started()
                 channels_task = asyncio.create_task(channels.start_all())
+                channels_sup.mark_started()
                 while True:
                     if restart_requested:
                         await asyncio.sleep(0.2)
@@ -525,7 +563,65 @@ def run_gateway(
                         timeout=0.5,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
-                    if done:
+                    if not done:
+                        continue
+
+                    should_break = False
+
+                    if agent_task in done:
+                        exc = agent_task.exception() if not agent_task.cancelled() else None
+                        if exc is None and not agent_task.cancelled():
+                            logger.info("Agent task exited cleanly")
+                            should_break = True
+                        else:
+                            logger.error("Agent task crashed: {}", exc)
+                            agent_sup.record_failure()
+                            if agent_sup.should_escalate():
+                                logger.critical(
+                                    "Agent task failed {} times consecutively; "
+                                    "escalating to full process restart",
+                                    agent_sup.consecutive_failures,
+                                )
+                                escalate_to_process_restart = True
+                                break
+                            delay = agent_sup.backoff_s
+                            logger.warning(
+                                "Restarting agent task in {:.1f}s (failure #{})",
+                                delay,
+                                agent_sup.consecutive_failures,
+                            )
+                            await asyncio.sleep(delay)
+                            agent_task = asyncio.create_task(agent.run())
+                            agent_sup.mark_started()
+
+                    if channels_task in done:
+                        exc = channels_task.exception() if not channels_task.cancelled() else None
+                        if exc is None and not channels_task.cancelled():
+                            logger.info("Channels task exited cleanly")
+                            should_break = True
+                        else:
+                            logger.error("Channels task crashed: {}", exc)
+                            channels_sup.record_failure()
+                            if channels_sup.should_escalate():
+                                logger.critical(
+                                    "Channels task failed {} times consecutively; "
+                                    "escalating to full process restart",
+                                    channels_sup.consecutive_failures,
+                                )
+                                escalate_to_process_restart = True
+                                break
+                            delay = channels_sup.backoff_s
+                            logger.warning(
+                                "Restarting channels task in {:.1f}s (failure #{})",
+                                delay,
+                                channels_sup.consecutive_failures,
+                            )
+                            await channels.stop_all()
+                            await asyncio.sleep(delay)
+                            channels_task = asyncio.create_task(channels.start_all())
+                            channels_sup.mark_started()
+
+                    if should_break:
                         break
             except KeyboardInterrupt:
                 console.print("\nShutting down...")
@@ -548,7 +644,7 @@ def run_gateway(
                 await channels.stop_all()
 
         asyncio.run(run())
-        if restart_requested:
+        if escalate_to_process_restart or restart_requested:
             instance_lock.release()
             os.execv(sys.executable, [sys.executable, "-m", "nanobot", *restart_argv])
     finally:
