@@ -309,31 +309,44 @@ class AgentLoop:
         asyncio.create_task(_do_restart())
 
     def _handle_model_command(self, msg: InboundMessage) -> OutboundMessage:
-        """Handle /model [list | <model_id>] command."""
+        """Handle /model [list | <index> | <model_id>] command."""
         from nanobot.config.loader import load_config, save_config
         from nanobot.providers.registry import PROVIDERS
 
         parts = msg.content.strip().split(maxsplit=1)
         arg = parts[1].strip() if len(parts) > 1 else ""
 
+        # Build the flat list of available models (shared across list & switch)
+        config = load_config()
+        available: list[str] = []
+        for spec in PROVIDERS:
+            cfg_field = spec.config_key or spec.name
+            p = getattr(config.providers, cfg_field, None)
+            if not p or not (p.api_key or spec.is_oauth or spec.is_local):
+                continue
+            if spec.model_list:
+                available.extend(spec.model_list)
+
         if not arg or arg == "list":
-            config = load_config()
             lines = [f"Current model: {self.model}\n"]
             lines.append("Available models:")
-            for spec in PROVIDERS:
-                cfg_field = spec.config_key or spec.name
-                p = getattr(config.providers, cfg_field, None)
-                if not p or not (p.api_key or spec.is_oauth or spec.is_local):
-                    continue
-                if spec.model_list:
-                    for m in spec.model_list:
-                        marker = " ✓" if m == self.model else ""
-                        lines.append(f"  {m}{marker}")
+            for i, m in enumerate(available, 1):
+                marker = " ✓" if m == self.model else ""
+                lines.append(f"  {i}. {m}{marker}")
             return OutboundMessage(channel=msg.channel, chat_id=msg.chat_id, content="\n".join(lines))
 
-        # Switch model
+        # Switch model — by index or by name
         new_model = arg
-        config = load_config()
+        if arg.isdigit():
+            idx = int(arg)
+            if 1 <= idx <= len(available):
+                new_model = available[idx - 1]
+            else:
+                return OutboundMessage(
+                    channel=msg.channel, chat_id=msg.chat_id,
+                    content=f"Invalid index: {idx}. Use 1-{len(available)}.",
+                )
+
         config.agents.defaults.model = new_model
         save_config(config)
         self.model = new_model
@@ -440,7 +453,7 @@ class AgentLoop:
                 "/new — Start a new conversation",
                 "/stop — Stop the current task",
                 "/model — List available models",
-                "/model <id> — Switch model",
+                "/model <index|id> — Switch model by number or name",
                 "/restart — Restart the bot",
                 "/help — Show available commands",
             ]
