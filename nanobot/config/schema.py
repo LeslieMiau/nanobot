@@ -26,6 +26,18 @@ class ChannelsConfig(Base):
     send_tool_hints: bool = False  # stream tool-call hints (e.g. read_file("…"))
 
 
+class MemoryConfig(Base):
+    """Memory backend configuration."""
+
+    backend: Literal["file", "memos"] = "file"
+    # MemOS settings — only used when backend="memos"
+    memos_llm_backend: str = "ollama"           # ollama / openai / openai_compatible
+    memos_llm_model: str = "llama3.2"
+    memos_llm_api_base: str = "http://localhost:11434"
+    memos_llm_api_key: str = ""
+    memos_top_k: int = 5                         # number of relevant facts to inject per query
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -41,6 +53,7 @@ class AgentDefaults(Base):
     # Deprecated compatibility field: accepted from old configs but ignored at runtime.
     memory_window: int | None = Field(default=None, exclude=True)
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
 
     @property
     def should_warn_deprecated_memory_window(self) -> bool:
