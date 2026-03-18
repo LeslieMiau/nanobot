@@ -124,6 +124,22 @@ class WebToolsConfig(Base):
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
 
 
+class ImageGenerationConfig(Base):
+    """Image generation tool configuration."""
+
+    enabled: bool = False
+    provider: str = "openai-compatible"
+    model: str = "gpt-image-1"
+    api_key: str = ""
+    base_url: str | None = None
+    default_size: str = "1024x1536"
+    default_aspect_ratio: str = "3:4"
+    default_style_preset: str = "xiaohongshu-card"
+    watermark: bool = False  # Jimeng/Seedream: add watermark to generated images
+    skip_staging: bool = False  # If true, generate images directly without staging/confirmation
+
+
+
 class ExecToolConfig(Base):
     """Shell exec tool configuration."""
 
