@@ -35,3 +35,14 @@ Write important facts immediately using `edit_file` or `write_file`:
 ## Auto-consolidation
 
 Old conversations are automatically summarized and appended to HISTORY.md when the session grows large. Long-term facts are extracted to MEMORY.md. You don't need to manage this.
+
+## MemOS Semantic Index (when enabled)
+
+When `memory.backend = "memos"` is configured, a local MemOS fact index is maintained at `memory/memos/textual_memory.json`. It holds the same facts as MEMORY.md but supports keyword-based retrieval.
+
+**How it works:**
+- Each time MEMORY.md is updated during consolidation, the new facts are automatically synced into the MemOS index.
+- At context-build time, the top-k most relevant facts are injected under `## Relevant Memory` based on the current user message — in addition to the full `## Long-term Memory` block.
+- Do not edit `memory/memos/textual_memory.json` directly; it is managed automatically.
+
+**Re-index after manual MEMORY.md edits:** If you manually edited MEMORY.md, you can trigger a re-sync by asking: "Re-index my long-term memory into MemOS." Then read MEMORY.md and call `write_file` to overwrite it with the same content, which triggers the upsert hook.

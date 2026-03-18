@@ -30,7 +30,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
+    from nanobot.config.schema import ChannelsConfig, ExecToolConfig, MemoryConfig, WebSearchConfig
     from nanobot.cron.service import CronService
 
 
@@ -64,6 +64,7 @@ class AgentLoop:
         session_manager: SessionManager | None = None,
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
+        memory_config: MemoryConfig | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -111,6 +112,21 @@ class AgentLoop:
             build_messages=self.context.build_messages,
             get_tool_definitions=self.tools.get_definitions,
         )
+
+        if memory_config and memory_config.backend == "memos":
+            try:
+                from nanobot.agent.memory_memos import MemOSStore
+                memos_store = MemOSStore(workspace, memory_config)
+                # Share the same instance between consolidator and context builder
+                self.memory_consolidator.store._memos_store = memos_store
+                self.context.memory._memos_store = memos_store
+                logger.info("MemOS memory backend enabled (naive_text, local)")
+            except ImportError:
+                logger.warning(
+                    "memory.backend='memos' requested but MemOS is not installed. "
+                    "Falling back to file backend. Install with: pip install MemOS"
+                )
+
         self._register_default_tools()
 
     def _register_default_tools(self) -> None:

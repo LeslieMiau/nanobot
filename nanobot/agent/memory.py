@@ -14,6 +14,7 @@ from loguru import logger
 from nanobot.utils.helpers import ensure_dir, estimate_message_tokens, estimate_prompt_tokens_chain
 
 if TYPE_CHECKING:
+    from nanobot.agent.memory_memos import MemOSStore
     from nanobot.providers.base import LLMProvider
     from nanobot.session.manager import Session, SessionManager
 
@@ -77,11 +78,12 @@ class MemoryStore:
 
     _MAX_FAILURES_BEFORE_RAW_ARCHIVE = 3
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, memos_store: MemOSStore | None = None):
         self.memory_dir = ensure_dir(workspace / "memory")
         self.memory_file = self.memory_dir / "MEMORY.md"
         self.history_file = self.memory_dir / "HISTORY.md"
         self._consecutive_failures = 0
+        self._memos_store = memos_store
 
     def read_long_term(self) -> str:
         if self.memory_file.exists():
@@ -90,14 +92,22 @@ class MemoryStore:
 
     def write_long_term(self, content: str) -> None:
         self.memory_file.write_text(content, encoding="utf-8")
+        if self._memos_store is not None:
+            self._memos_store.upsert_facts(content)
 
     def append_history(self, entry: str) -> None:
         with open(self.history_file, "a", encoding="utf-8") as f:
             f.write(entry.rstrip() + "\n\n")
 
-    def get_memory_context(self) -> str:
+    def get_memory_context(self, query: str | None = None) -> str:
         long_term = self.read_long_term()
-        return f"## Long-term Memory\n{long_term}" if long_term else ""
+        parts = [f"## Long-term Memory\n{long_term}"] if long_term else []
+        if query and self._memos_store is not None:
+            hits = self._memos_store.search(query)
+            if hits:
+                relevant = "\n".join(f"- {h}" for h in hits)
+                parts.append(f"## Relevant Memory\n{relevant}")
+        return "\n\n".join(parts)
 
     @staticmethod
     def _format_messages(messages: list[dict]) -> str:
