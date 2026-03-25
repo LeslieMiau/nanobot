@@ -14,9 +14,11 @@ Update this file when adding or removing subscriptions. Keep entries first-hand,
 - GitHub: https://github.com/simonw
 
 ### 宝玉
-- X (signal): https://x.com/dotey
-- RSSHub mirror (unstable, signal-only): https://rsshub.app/twitter/user/dotey
 - Blog: https://baoyu.io/
+- X (signal): https://x.com/dotey
+- RSSHub X mirror (unstable, signal-only): https://rsshub.app/twitter/user/dotey
+- Weibo (backup): https://weibo.com/u/1727858283
+- RSSHub Weibo mirror: https://rsshub.app/weibo/user/1727858283
 
 ### Latent Space
 - Site: https://www.latent.space/
