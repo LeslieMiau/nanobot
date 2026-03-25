@@ -51,8 +51,9 @@ class AnthropicProvider(LLMProvider):
 
     @staticmethod
     def _strip_prefix(model: str) -> str:
-        if model.startswith("anthropic/"):
-            return model[len("anthropic/"):]
+        """Strip any provider prefix (e.g. 'anthropic/', 'aicodewith-claude/')."""
+        if "/" in model:
+            return model.split("/", 1)[1]
         return model
 
     # ------------------------------------------------------------------
