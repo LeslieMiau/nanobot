@@ -82,6 +82,41 @@ async def cmd_new(ctx: CommandContext) -> OutboundMessage:
     )
 
 
+async def cmd_model(ctx: CommandContext) -> OutboundMessage:
+    """List current model or switch to a new one."""
+    loop = ctx.loop
+    msg = ctx.msg
+    new_model = ctx.args.strip()
+
+    if not new_model:
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=f"Current model: `{loop.model}`\nUsage: /model <model-name> to switch",
+            metadata={"render_as": "text"},
+        )
+
+    # Switch model in-memory
+    loop.model = new_model
+
+    # Persist to config
+    try:
+        from nanobot.config.loader import get_config_path, load_config, save_config
+        config = load_config(get_config_path())
+        config.agents.defaults.model = new_model
+        save_config(config)
+        note = " (saved to config)"
+    except Exception as e:
+        note = f" (warning: could not save config: {e})"
+
+    return OutboundMessage(
+        channel=msg.channel,
+        chat_id=msg.chat_id,
+        content=f"Switched to model: `{new_model}`{note}",
+        metadata={"render_as": "text"},
+    )
+
+
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:
     """Return available slash commands."""
     lines = [
@@ -108,3 +143,5 @@ def register_builtin_commands(router: CommandRouter) -> None:
     router.exact("/new", cmd_new)
     router.exact("/status", cmd_status)
     router.exact("/help", cmd_help)
+    router.exact("/model", cmd_model)
+    router.prefix("/model ", cmd_model)
