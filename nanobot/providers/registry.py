@@ -62,6 +62,9 @@ class ProviderSpec:
     # Provider supports cache_control on content blocks (e.g. Anthropic prompt caching)
     supports_prompt_caching: bool = False
 
+    # Override config field name in ProvidersConfig (defaults to spec.name)
+    config_key: str = ""
+
     @property
     def label(self) -> str:
         return self.display_name or self.name.title()
