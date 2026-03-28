@@ -1,0 +1,574 @@
+[
+  {
+    "id": 1,
+    "category": "functional",
+    "description": "OpenAI OAuth provider defaults GPT-5.4 responses to low verbosity so routine replies stay concise.",
+    "steps": [
+      "Run the OpenAI OAuth provider test and verify the request body contains text.verbosity set to low.",
+      "Confirm a simple system prompt like 'Be concise.' still passes through unchanged.",
+      "Verify the provider still returns parsed assistant text and tool calls after the payload change."
+    ],
+    "passes": true
+  },
+  {
+    "id": 2,
+    "category": "testing",
+    "description": "OpenAI OAuth provider regression tests reflect the current SSE-backed implementation instead of the removed AsyncOpenAI client path.",
+    "steps": [
+      "Run the focused OpenAI OAuth test file.",
+      "Verify the test stubs the internal codex request helper rather than a removed SDK symbol.",
+      "Confirm the test fails if verbosity or request routing regresses."
+    ],
+    "passes": true
+  },
+  {
+    "id": 3,
+    "category": "testing",
+    "description": "Lazy provider exports include OpenAIOAuthProvider so package-level imports stay accurate.",
+    "steps": [
+      "Run the provider init test file.",
+      "Verify nanobot.providers.__all__ includes OpenAIOAuthProvider.",
+      "Confirm importing OpenAIOAuthProvider through nanobot.providers works without eagerly importing unrelated backends."
+    ],
+    "passes": true
+  },
+  {
+    "id": 4,
+    "category": "docs",
+    "description": "Repository progress log records the current baseline issues discovered before the feature change.",
+    "steps": [
+      "Open PROGRESS.md after the session update.",
+      "Verify it records the failing repo_sync baseline and stale provider test findings.",
+      "Confirm the next session can understand why only focused tests were used for this feature."
+    ],
+    "passes": true
+  },
+  {
+    "id": 5,
+    "category": "setup",
+    "description": "Harness init script can reproduce environment, smoke-test, and CLI-health checks without aborting on the first failure.",
+    "steps": [
+      "Run ./init.sh manually.",
+      "Verify it exits successfully even if pytest reports failures.",
+      "Confirm it prints where failing logs were written."
+    ],
+    "passes": false
+  },
+  {
+    "id": 6,
+    "category": "analysis",
+    "description": "Document the exact behavioral difference between nanobot and openclaw OpenAI reply verbosity defaults.",
+    "steps": [
+      "Compare the nanobot and openclaw provider payload builders.",
+      "Verify the recorded difference mentions medium versus low verbosity.",
+      "Confirm the comparison references both code paths accurately."
+    ],
+    "passes": false
+  },
+  {
+    "id": 7,
+    "category": "functional",
+    "description": "OpenAI Codex provider parity is evaluated so nanobot can later align concise behavior across OAuth-backed OpenAI transports.",
+    "steps": [
+      "Inspect the OpenAI Codex payload builder.",
+      "Verify whether it still defaults text.verbosity to medium.",
+      "Record parity follow-up notes without changing behavior unexpectedly."
+    ],
+    "passes": false
+  },
+  {
+    "id": 8,
+    "category": "functional",
+    "description": "OpenAI OAuth provider keeps tool calling enabled after the concise default change.",
+    "steps": [
+      "Run the focused OpenAI OAuth provider tests.",
+      "Verify the request still includes converted function tools and auto tool_choice.",
+      "Confirm tool call parsing still returns the expected call id and arguments."
+    ],
+    "passes": false
+  },
+  {
+    "id": 9,
+    "category": "functional",
+    "description": "OpenAI OAuth provider keeps reasoning payload support after the concise default change.",
+    "steps": [
+      "Run the OpenAI OAuth provider tests with reasoning_effort configured.",
+      "Verify the request body still includes reasoning.effort when provided.",
+      "Confirm there is no regression to finish_reason handling."
+    ],
+    "passes": false
+  },
+  {
+    "id": 10,
+    "category": "functional",
+    "description": "OpenAI OAuth provider still respects explicit model prefixes for hyphen and underscore variants.",
+    "steps": [
+      "Run the strip_model_prefix unit tests.",
+      "Verify both openai-oauth/gpt-5.4 and openai_oauth/gpt-5.4 resolve correctly.",
+      "Confirm gpt-5.4-mini remains supported."
+    ],
+    "passes": false
+  },
+  {
+    "id": 11,
+    "category": "testing",
+    "description": "Provider retry behavior remains unaffected by the concise OpenAI OAuth payload change.",
+    "steps": [
+      "Run provider retry tests relevant to generation defaults if touched later.",
+      "Verify generation defaults still flow through chat_with_retry.",
+      "Confirm no retry-only regressions are introduced by the feature."
+    ],
+    "passes": false
+  },
+  {
+    "id": 12,
+    "category": "functional",
+    "description": "Agent defaults continue to pass max_tokens, temperature, and reasoning_effort into provider generation settings.",
+    "steps": [
+      "Inspect CLI provider construction after the change.",
+      "Verify no existing generation wiring is removed.",
+      "Confirm the concise behavior comes from payload verbosity rather than breaking generation defaults."
+    ],
+    "passes": false
+  },
+  {
+    "id": 13,
+    "category": "docs",
+    "description": "Session notes clearly distinguish baseline red tests from regressions introduced by the concise-response feature.",
+    "steps": [
+      "Review the latest PROGRESS.md entry.",
+      "Verify it names the unrelated repo_sync failure separately from feature verification.",
+      "Confirm the note explains why targeted tests are the reliable gate for this change."
+    ],
+    "passes": false
+  },
+  {
+    "id": 14,
+    "category": "testing",
+    "description": "Focused provider verification command is documented in progress notes for repeatable future sessions.",
+    "steps": [
+      "Review PROGRESS.md after the session.",
+      "Verify the exact pytest command is recorded.",
+      "Confirm another session can rerun the same verification without rediscovery."
+    ],
+    "passes": false
+  },
+  {
+    "id": 15,
+    "category": "functional",
+    "description": "OpenAI OAuth errors remain user-readable after payload changes.",
+    "steps": [
+      "Inspect the exception-to-LLMResponse path in the provider.",
+      "Verify the change does not alter the error wrapping branch.",
+      "Confirm the provider still returns finish_reason='error' on request failures."
+    ],
+    "passes": false
+  },
+  {
+    "id": 16,
+    "category": "refactor",
+    "description": "Shared concise-verbosity helper feasibility is evaluated without coupling unrelated providers in this session.",
+    "steps": [
+      "Review OpenAI OAuth and Codex payload builders side by side.",
+      "Verify whether a shared helper would be mechanical and low-risk.",
+      "Record the result in PROGRESS.md without forcing a broad refactor."
+    ],
+    "passes": false
+  },
+  {
+    "id": 17,
+    "category": "functional",
+    "description": "OpenAI OAuth default behavior stays compatible with gpt-5.4-mini as a lighter variant.",
+    "steps": [
+      "Inspect the README and model prefix helper for the mini model path.",
+      "Verify no model-specific condition blocks low verbosity for gpt-5.4-mini.",
+      "Confirm tests still allow mini model prefix parsing."
+    ],
+    "passes": false
+  },
+  {
+    "id": 18,
+    "category": "docs",
+    "description": "OpenAI OAuth README guidance can later mention concise-mode expectations if user-facing docs need parity with behavior.",
+    "steps": [
+      "Review the current OpenAI OAuth README section.",
+      "Verify whether it documents response-style behavior today.",
+      "Record whether a docs update is necessary after the code change."
+    ],
+    "passes": false
+  },
+  {
+    "id": 19,
+    "category": "functional",
+    "description": "OpenAI OAuth provider continues to use the ChatGPT backend codex responses endpoint with OAuth headers intact.",
+    "steps": [
+      "Inspect the provider request path after the change.",
+      "Verify the endpoint and headers are unchanged.",
+      "Confirm only the verbosity default differs."
+    ],
+    "passes": false
+  },
+  {
+    "id": 20,
+    "category": "testing",
+    "description": "OpenAI OAuth provider test asserts the payload sent to _request_codex so future regressions are caught at the contract boundary.",
+    "steps": [
+      "Run the focused provider tests.",
+      "Verify assertions cover model, instructions, text.verbosity, reasoning, tool_choice, and tools.",
+      "Confirm the test no longer depends on removed SDK internals."
+    ],
+    "passes": false
+  },
+  {
+    "id": 21,
+    "category": "functional",
+    "description": "OpenAI OAuth provider still sets prompt cache keys after the concise change.",
+    "steps": [
+      "Inspect the request body in the focused provider test.",
+      "Verify prompt_cache_key is still present.",
+      "Confirm it is derived from messages and not dropped during refactor."
+    ],
+    "passes": false
+  },
+  {
+    "id": 22,
+    "category": "functional",
+    "description": "OpenAI OAuth provider still enables parallel tool calls after the concise change.",
+    "steps": [
+      "Review the payload assertions in tests.",
+      "Verify parallel_tool_calls remains true.",
+      "Confirm no tool execution policy was changed incidentally."
+    ],
+    "passes": false
+  },
+  {
+    "id": 23,
+    "category": "testing",
+    "description": "Provider package lazy-import tests remain the single-source regression net for top-level export ordering.",
+    "steps": [
+      "Run the provider init test file.",
+      "Verify export ordering matches current package expectations.",
+      "Confirm OpenAIOAuthProvider is represented in both __all__ and lazy imports."
+    ],
+    "passes": false
+  },
+  {
+    "id": 24,
+    "category": "functional",
+    "description": "OpenAI OAuth provider still retries with verify=False only on certificate failures.",
+    "steps": [
+      "Inspect the SSL fallback branch after the concise change.",
+      "Verify the exception filter remains limited to certificate failures.",
+      "Confirm the new behavior does not broaden retry scope."
+    ],
+    "passes": false
+  },
+  {
+    "id": 25,
+    "category": "testing",
+    "description": "Targeted verification stays fast enough for per-feature checkpoints in this repo.",
+    "steps": [
+      "Run the focused pytest subset for this feature.",
+      "Verify it completes successfully without invoking the unrelated failing baseline test module.",
+      "Confirm the command is practical for future feature-level checkpoints."
+    ],
+    "passes": false
+  },
+  {
+    "id": 26,
+    "category": "docs",
+    "description": "Progress log records that openclaw achieves shorter replies via low verbosity rather than a different GPT-5.4 version.",
+    "steps": [
+      "Read the comparison notes in PROGRESS.md.",
+      "Verify they mention strategy difference rather than model-version difference.",
+      "Confirm a later session can reuse the comparison without re-reading openclaw."
+    ],
+    "passes": false
+  },
+  {
+    "id": 27,
+    "category": "functional",
+    "description": "OpenAI OAuth provider preserves user system prompts instead of replacing them with a fixed concise prompt.",
+    "steps": [
+      "Run the focused provider tests.",
+      "Verify the request instructions equal the caller-supplied system prompt.",
+      "Confirm concise behavior comes from text verbosity, not prompt rewriting."
+    ],
+    "passes": false
+  },
+  {
+    "id": 28,
+    "category": "functional",
+    "description": "OpenAI OAuth provider remains compatible with explicit provider forcing plus bare model names in config.",
+    "steps": [
+      "Inspect README examples and prefix stripping behavior.",
+      "Verify provider forcing still resolves to gpt-5.4 correctly.",
+      "Confirm the concise default does not rely on the prefixed model string."
+    ],
+    "passes": false
+  },
+  {
+    "id": 29,
+    "category": "testing",
+    "description": "Regression tests continue to validate parsed tool call arguments as dictionaries after the request helper stub change.",
+    "steps": [
+      "Run the focused OpenAI OAuth test.",
+      "Verify the response fixture exercises a function_call event.",
+      "Confirm the returned tool call arguments are parsed JSON objects."
+    ],
+    "passes": false
+  },
+  {
+    "id": 30,
+    "category": "functional",
+    "description": "OpenAI OAuth provider still strips the provider prefix before sending the model to the backend.",
+    "steps": [
+      "Run the strip_model_prefix test and focused provider test.",
+      "Verify the payload model equals gpt-5.4 rather than openai-oauth/gpt-5.4.",
+      "Confirm no backend request includes the prefixed model name."
+    ],
+    "passes": false
+  },
+  {
+    "id": 31,
+    "category": "analysis",
+    "description": "Baseline unrelated failures are preserved as known blockers rather than silently masked by narrower tests.",
+    "steps": [
+      "Review the current session notes.",
+      "Verify the missing nanobot.repo_sync.service failure is explicitly mentioned.",
+      "Confirm the session does not claim the whole repo is green."
+    ],
+    "passes": false
+  },
+  {
+    "id": 32,
+    "category": "functional",
+    "description": "OpenAI OAuth provider remains store-disabled after the concise-response change.",
+    "steps": [
+      "Inspect the request body assertion in tests.",
+      "Verify store remains false.",
+      "Confirm the feature does not alter retention semantics."
+    ],
+    "passes": false
+  },
+  {
+    "id": 33,
+    "category": "functional",
+    "description": "OpenAI OAuth provider continues to stream responses while using low verbosity.",
+    "steps": [
+      "Inspect the request body assertion in tests.",
+      "Verify stream remains true.",
+      "Confirm the concise change does not switch the provider to non-streaming mode."
+    ],
+    "passes": false
+  },
+  {
+    "id": 34,
+    "category": "testing",
+    "description": "OpenAI OAuth provider tests cover both content and finish_reason after the concise-response change.",
+    "steps": [
+      "Run the focused provider tests.",
+      "Verify the response content assertion still passes.",
+      "Confirm the expected finish_reason remains tool_calls when tool calls are present."
+    ],
+    "passes": false
+  },
+  {
+    "id": 35,
+    "category": "functional",
+    "description": "OpenAI OAuth provider remains free of direct SDK coupling in the request path.",
+    "steps": [
+      "Inspect the provider implementation.",
+      "Verify requests go through _request_codex rather than AsyncOpenAI.",
+      "Confirm tests align with the actual implementation."
+    ],
+    "passes": false
+  },
+  {
+    "id": 36,
+    "category": "testing",
+    "description": "The concise-response feature is verified with the repository-preferred .venv pytest interpreter.",
+    "steps": [
+      "Run the focused pytest subset with .venv/bin/pytest.",
+      "Verify no system-python fallback is used.",
+      "Confirm the command succeeds after the code change."
+    ],
+    "passes": false
+  },
+  {
+    "id": 37,
+    "category": "docs",
+    "description": "Progress notes identify whether README behavior documentation should be updated in a future session.",
+    "steps": [
+      "Inspect the final PROGRESS.md entry.",
+      "Verify it states whether the docs still omit verbosity behavior.",
+      "Confirm a future docs-only follow-up would be well-scoped."
+    ],
+    "passes": false
+  },
+  {
+    "id": 38,
+    "category": "functional",
+    "description": "OpenAI OAuth provider request payload continues to include reasoning.encrypted_content in the include list.",
+    "steps": [
+      "Inspect the payload assertion in tests or code review notes.",
+      "Verify the include list remains unchanged.",
+      "Confirm only verbosity changed."
+    ],
+    "passes": false
+  },
+  {
+    "id": 39,
+    "category": "functional",
+    "description": "Focused concise-response change stays limited to OpenAI OAuth unless parity work is intentionally scheduled.",
+    "steps": [
+      "Review the git diff after the feature is complete.",
+      "Verify no unrelated providers changed unless explicitly documented.",
+      "Confirm scope stayed within the agreed single feature."
+    ],
+    "passes": false
+  },
+  {
+    "id": 40,
+    "category": "testing",
+    "description": "Provider export tests remain isolated from unrelated repo baseline failures.",
+    "steps": [
+      "Run tests/providers/test_providers_init.py directly.",
+      "Verify it passes independently.",
+      "Confirm success does not require the missing repo_sync module."
+    ],
+    "passes": false
+  },
+  {
+    "id": 41,
+    "category": "functional",
+    "description": "OpenAI OAuth provider still builds OAuth headers from the stored token before sending requests.",
+    "steps": [
+      "Review the focused provider test setup.",
+      "Verify the helper receives account_id and access token-derived headers.",
+      "Confirm the concise change does not disturb auth header wiring."
+    ],
+    "passes": false
+  },
+  {
+    "id": 42,
+    "category": "analysis",
+    "description": "OpenAI OAuth config path differences between nanobot and openclaw are documented for future parity decisions.",
+    "steps": [
+      "Review the comparison notes after the session.",
+      "Verify they distinguish nanobot's flat defaults from openclaw's model.primary plus model params.",
+      "Confirm the notes explain why openclaw can attach fastMode per model."
+    ],
+    "passes": false
+  },
+  {
+    "id": 43,
+    "category": "functional",
+    "description": "Low verbosity remains the default only when the provider builds the payload, not by mutating agent-wide prompt text.",
+    "steps": [
+      "Inspect the final code diff.",
+      "Verify there is no global system prompt rewrite for concision.",
+      "Confirm the change is localized to request payload construction and tests."
+    ],
+    "passes": false
+  },
+  {
+    "id": 44,
+    "category": "testing",
+    "description": "OpenAI OAuth provider tests remain readable and maintainable after converting to request-helper stubs.",
+    "steps": [
+      "Review the updated test file.",
+      "Verify the fixture setup is concise and follows current implementation boundaries.",
+      "Confirm future maintainers can see which payload fields define concise behavior."
+    ],
+    "passes": false
+  },
+  {
+    "id": 45,
+    "category": "docs",
+    "description": "Feature checkpoint commit message clearly describes the concise OpenAI OAuth behavior change.",
+    "steps": [
+      "Inspect the feature commit message.",
+      "Verify it describes the behavior in a concise, specific way.",
+      "Confirm the required Codex co-author trailer is present exactly once."
+    ],
+    "passes": false
+  },
+  {
+    "id": 46,
+    "category": "functional",
+    "description": "OpenAI OAuth provider still leaves tool_choice configurable by callers after the concise change.",
+    "steps": [
+      "Inspect the focused provider test or final diff.",
+      "Verify tool_choice defaults to auto only when callers do not override it.",
+      "Confirm the concise feature does not hardcode a stricter tool policy."
+    ],
+    "passes": false
+  },
+  {
+    "id": 47,
+    "category": "functional",
+    "description": "OpenAI OAuth provider still uses the caller-supplied tools only when present.",
+    "steps": [
+      "Inspect the provider implementation after the feature.",
+      "Verify the tools field is conditional and unchanged.",
+      "Confirm concise behavior does not alter tool schema conversion."
+    ],
+    "passes": false
+  },
+  {
+    "id": 48,
+    "category": "testing",
+    "description": "The harness plan can be resumed cleanly in a later session without redoing current diagnosis work.",
+    "steps": [
+      "Review PLAN.json and PROGRESS.md together.",
+      "Verify the next session can see the completed concise-response feature and remaining follow-ups.",
+      "Confirm the state files match the current repository reality."
+    ],
+    "passes": false
+  },
+  {
+    "id": 49,
+    "category": "analysis",
+    "description": "Future optional parity work for openai_codex concise defaults is explicitly separated from the current approved feature.",
+    "steps": [
+      "Review the current session notes.",
+      "Verify codex parity is recorded as follow-up rather than silently bundled in.",
+      "Confirm the approved feature scope remains intact."
+    ],
+    "passes": false
+  },
+  {
+    "id": 50,
+    "category": "docs",
+    "description": "Session completion notes state exactly what was verified and what remains unverified due baseline failures.",
+    "steps": [
+      "Read the final PROGRESS.md entry.",
+      "Verify it lists the passing focused tests and the unresolved repo baseline issue.",
+      "Confirm it does not overclaim full-repo validation."
+    ],
+    "passes": false
+  },
+  {
+    "id": 51,
+    "category": "setup",
+    "description": "Harness initialization checkpoint is committed so later sessions can restore task state before editing.",
+    "steps": [
+      "Review git log after the init checkpoint.",
+      "Verify init.sh, PLAN.json, and PROGRESS.md are included in the commit.",
+      "Confirm the repository can resume from that checkpoint without reconstructing task context."
+    ],
+    "passes": false
+  },
+  {
+    "id": 52,
+    "category": "functional",
+    "description": "The current session ends with a clean checkpoint even if broader repo validation is still blocked by unrelated failures.",
+    "steps": [
+      "Inspect git log and PROGRESS.md at session end.",
+      "Verify the feature work is committed.",
+      "Confirm the remaining blocker is documented for the next session."
+    ],
+    "passes": false
+  }
+]

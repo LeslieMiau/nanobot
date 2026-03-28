@@ -24,3 +24,7 @@ nano.*.save
 .DS_Store
 uv.lock
 .claude/
+
+# Harness 临时文件
+PLAN.json
+PROGRESS.md

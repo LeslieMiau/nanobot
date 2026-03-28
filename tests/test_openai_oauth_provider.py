@@ -1,5 +1,4 @@
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from oauth_cli_kit import OAuthToken
@@ -15,34 +14,6 @@ def test_strip_model_prefix_supports_hyphen_and_underscore():
 
 @pytest.mark.asyncio
 async def test_openai_oauth_provider_uses_oauth_token_for_responses_api(monkeypatch):
-    fake_response = SimpleNamespace(
-        model_dump=lambda mode="json": {
-            "output": [
-                {
-                    "type": "message",
-                    "content": [{"type": "output_text", "text": "hello from oauth"}],
-                },
-                {
-                    "type": "function_call",
-                    "call_id": "call_1",
-                    "id": "fc_1",
-                    "name": "weather",
-                    "arguments": "{\"city\": \"Shanghai\"}",
-                },
-            ],
-            "usage": {
-                "input_tokens": 12,
-                "output_tokens": 7,
-                "total_tokens": 19,
-            },
-        }
-    )
-
-    configured_client = MagicMock()
-    configured_client.responses.create = AsyncMock(return_value=fake_response)
-    base_client = MagicMock()
-    base_client.with_options.return_value = configured_client
-
     monkeypatch.setattr(
         "nanobot.providers.openai_oauth_provider.get_token",
         lambda provider=None: OAuthToken(
@@ -53,43 +24,63 @@ async def test_openai_oauth_provider_uses_oauth_token_for_responses_api(monkeypa
         ),
     )
 
-    with patch("nanobot.providers.openai_oauth_provider.AsyncOpenAI", return_value=base_client):
+    captured: dict[str, object] = {}
+
+    async def fake_request_codex(url, headers, body, verify, on_content_delta=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["body"] = body
+        captured["verify"] = verify
+        return "hello from oauth", [], "stop"
+
+    with patch("nanobot.providers.openai_oauth_provider._request_codex", side_effect=fake_request_codex):
         provider = OpenAIOAuthProvider(default_model="openai-oauth/gpt-5.4")
 
-    response = await provider.chat(
-        messages=[
-            {"role": "system", "content": "Be concise."},
-            {"role": "user", "content": "What's the weather?"},
-        ],
-        tools=[
-            {
-                "type": "function",
-                "function": {
-                    "name": "weather",
-                    "description": "Get weather",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"city": {"type": "string"}},
+        response = await provider.chat(
+            messages=[
+                {"role": "system", "content": "Be concise."},
+                {"role": "user", "content": "What's the weather?"},
+            ],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "weather",
+                        "description": "Get weather",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {"city": {"type": "string"}},
+                        },
                     },
-                },
-            }
-        ],
-        reasoning_effort="medium",
-        max_tokens=256,
-    )
+                }
+            ],
+            reasoning_effort="medium",
+            max_tokens=256,
+        )
 
-    base_client.with_options.assert_called_once_with(api_key="access-token")
-    configured_client.responses.create.assert_awaited_once()
-    _, kwargs = configured_client.responses.create.await_args
-    assert kwargs["model"] == "gpt-5.4"
-    assert kwargs["instructions"] == "Be concise."
-    assert kwargs["reasoning"] == {"effort": "medium"}
-    assert kwargs["tool_choice"] == "auto"
-    assert kwargs["parallel_tool_calls"] is True
-    assert kwargs["extra_headers"] == {"chatgpt-account-id": "acct_123"}
+    body = captured["body"]
+    assert isinstance(body, dict)
+    assert body["model"] == "gpt-5.4"
+    assert body["instructions"] == "Be concise."
+    assert body["reasoning"] == {"effort": "medium"}
+    assert body["text"] == {"verbosity": "low"}
+    assert body["tool_choice"] == "auto"
+    assert body["parallel_tool_calls"] is True
+    assert body["tools"] == [
+        {
+            "type": "function",
+            "name": "weather",
+            "description": "Get weather",
+            "parameters": {
+                "type": "object",
+                "properties": {"city": {"type": "string"}},
+            },
+        }
+    ]
+    headers = captured["headers"]
+    assert isinstance(headers, dict)
+    assert headers["chatgpt-account-id"] == "acct_123"
+    assert headers["Authorization"] == "Bearer access-token"
     assert response.content == "hello from oauth"
-    assert response.finish_reason == "tool_calls"
-    assert response.tool_calls[0].id == "call_1"
-    assert response.tool_calls[0].name == "weather"
-    assert response.tool_calls[0].arguments == {"city": "Shanghai"}
-
+    assert response.finish_reason == "stop"
+    assert response.tool_calls == []
