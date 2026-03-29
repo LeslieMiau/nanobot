@@ -2,78 +2,100 @@
   {
     "id": 1,
     "category": "setup",
-    "description": "The Telegram auto-launch task is reinitialized as a standalone harness separate from the completed repo_sync recovery work.",
+    "description": "The Telegram coding-intent refactor is initialized as a standalone harness separate from the completed auto-launch task.",
     "steps": [
-      "Open PLAN.json and verify it only describes Telegram auto-launch work for coding tasks.",
-      "Open PROGRESS.md and verify the reboot entry records the current baseline and the decision to keep CLI run semantics unchanged.",
-      "Confirm the new task scope is limited to Telegram start-command launch behavior and its focused regressions."
+      "Open PLAN.json and verify it only tracks the Telegram coding-intent refactor.",
+      "Open PROGRESS.md and verify the reboot entry records the current parser limitations and the new intent-driven scope.",
+      "Confirm the task scope is limited to Telegram private-chat coding-task detection and repo resolution."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 2,
     "category": "functional",
-    "description": "Telegram private-chat `开始编程` automatically launches the newly created coding task when a launcher is available.",
+    "description": "Configuration can provide a repo alias table for coding tasks, and the runtime wires that alias map into the Telegram coding-task entrypoint.",
     "steps": [
-      "Send a Telegram private-chat start command in a focused routing test with a fake launcher attached.",
-      "Verify nanobot creates the task and immediately calls the launcher for that new task id.",
-      "Confirm the Telegram acknowledgement reports the launched status instead of leaving the task queued."
+      "Load config with a coding-task repo alias map.",
+      "Verify the active coding-task runtime receives the alias map without changing CLI coding-task behavior.",
+      "Confirm the gateway path still boots with no alias map configured."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 3,
     "category": "functional",
-    "description": "Automatic Telegram launch reuses the existing coding-task launcher path rather than duplicating worker startup logic in the router.",
+    "description": "A dedicated repo resolver resolves repo refs by checking configured aliases first and then falling back to ~/Documents/<repo>.",
     "steps": [
-      "Inspect the Telegram start-command handler after the change.",
-      "Verify it delegates launch to the shared launcher abstraction already used by `nanobot coding-task run`.",
-      "Confirm no second worker-start implementation or ad hoc tmux logic is added to the router."
+      "Resolve a configured alias and verify it returns the configured absolute path.",
+      "Resolve an unconfigured repo name that exists under ~/Documents and verify it falls back correctly.",
+      "Resolve a missing repo ref and confirm it returns a clear validation failure."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 4,
     "category": "functional",
-    "description": "If no launcher is wired into the runtime, Telegram start commands still fall back to create-only behavior instead of failing.",
+    "description": "Telegram coding-task entry uses explicit entry detection plus a unified slot extractor instead of hardcoded multi-branch sentence parsing.",
     "steps": [
-      "Send a Telegram private-chat start command through a runtime that only has a manager.",
-      "Verify the task is still persisted successfully.",
-      "Confirm the acknowledgement remains usable and does not claim a worker was launched."
+      "Feed the extractor explicit Telegram commands using both 开始编程 and /coding.",
+      "Verify it extracts the same repo ref and goal from natural expressions like repo 的 goal and repo goal.",
+      "Confirm ordinary non-coding chat without an explicit entry does not produce a coding-task request."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 5,
-    "category": "functional",
-    "description": "If automatic launch raises an exception, nanobot preserves the created task and returns a clear Telegram failure message instead of silently dropping work.",
+    "category": "integration",
+    "description": "Telegram private-chat coding-task routing uses the new intent and repo-resolution layers while preserving the existing shared launcher and fallback behavior.",
     "steps": [
-      "Send a Telegram private-chat start command with a launcher stub that raises.",
-      "Verify the task record still exists in the coding-task store.",
-      "Confirm the Telegram reply explains that creation succeeded but launch failed."
+      "Send a Telegram private-chat explicit coding command with a repo alias in a focused routing test.",
+      "Verify nanobot resolves the repo, creates the task, and auto-launches via the shared launcher.",
+      "Confirm no new worker-launch path is added outside the existing launcher abstraction."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 6,
-    "category": "testing",
-    "description": "Focused regression tests cover Telegram auto-launch success, create-only fallback, and launch failure behavior.",
+    "category": "functional",
+    "description": "Telegram private-chat coding commands still fall back cleanly when no launcher is available or when launch fails.",
     "steps": [
-      "Run the focused coding-task routing test files.",
-      "Verify the new assertions cover both the happy path and the failure boundary.",
-      "Confirm the regression suite remains scoped away from unrelated global pytest failures."
+      "Run the Telegram start flow with no launcher wired and verify it still creates a queued task.",
+      "Run the Telegram start flow with a failing launcher and verify the task is preserved with a clear failure response.",
+      "Confirm these behaviors continue to work with repo alias resolution enabled."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 7,
+    "category": "testing",
+    "description": "Focused tests cover the explicit-entry detector, slot extractor, repo resolver, and Telegram routing behavior.",
+    "steps": [
+      "Run the coding-task router and agent routing test files.",
+      "Verify the suite covers alias-map resolution, ~/Documents fallback, explicit-entry parsing, and launch fallback paths.",
+      "Confirm the tests remain scoped away from unrelated repo-wide baseline failures."
+    ],
+    "passes": false
+  },
+  {
+    "id": 8,
     "category": "docs",
-    "description": "User-facing documentation explains that Telegram `开始编程` now launches Codex immediately while CLI create/run remains available as an explicit path.",
+    "description": "README explains the new explicit-entry plus intent-extraction behavior and the alias-table plus Documents fallback repo resolution model.",
     "steps": [
       "Open the updated README coding-task section.",
-      "Verify it states that Telegram start commands now create and launch automatically.",
-      "Confirm the docs still mention the CLI create/run workflow as an explicit alternative."
+      "Verify it documents 开始编程 and /coding as explicit triggers with natural goal wording.",
+      "Confirm it explains alias-table priority and the ~/Documents fallback."
     ],
-    "passes": true
+    "passes": false
+  },
+  {
+    "id": 9,
+    "category": "integration",
+    "description": "The live nanobot gateway can be restarted in-place and manually exercise a Telegram coding command that uses natural repo-plus-goal phrasing.",
+    "steps": [
+      "Restart the existing nanobot tmux gateway in-place after the refactor.",
+      "Send a Telegram private-chat command like 开始编程 codex-remote 底部tab设置icon换一个.",
+      "Verify the task enters the coding-task flow instead of falling through to normal chat."
+    ],
+    "passes": false
   }
 ]

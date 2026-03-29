@@ -434,3 +434,18 @@
 - Remaining blockers / follow-up:
   - Repo-wide pytest still has the unrelated baseline failures recorded in the previous session (`tests/cli/test_commands.py`, `tests/config/test_config_migration.py`, `tests/test_openai_oauth_provider.py`, and `tests/tools/test_tool_validation.py`)
   - The Telegram path still depends on the gateway being active; this session did not change gateway startup or outbound notification plumbing
+
+## Harness reboot - 2026-03-29 (telegram coding intent refactor)
+- Task pivot:
+  - Start a new standalone harness to replace the Telegram coding-task start parser with explicit-entry intent detection, slot extraction, and repo resolution
+- Existing work detected before re-planning:
+  - The active Telegram coding-task path already supports auto-launch and a few alias-like parser shortcuts, but the current behavior is still driven by hardcoded sentence branches inside [nanobot/coding_tasks/router.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/router.py)
+  - Current uncommitted edits already widen the parser slightly for `repo goal` cases, so they should be absorbed into this refactor rather than treated as a separate feature
+  - There is still no config-level repo alias table; repo alias handling currently depends on router-local fallback logic
+- Baseline validation before feature work:
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0 with one known pytest failure bundle from unrelated baseline issues
+  - `git status --short` -> only router/test files for the Telegram coding-task parser were dirty before this harness reboot, plus untracked `.codex/`
+- Key decisions:
+  - Keep explicit Telegram entry signals (`开始编程`, `/coding`) as the first-version boundary, but remove hardcoded sentence-specific routing beneath them
+  - Move repo resolution into a dedicated resolver with alias-table priority and `~/Documents/<repo>` fallback
+  - Preserve the existing shared launcher path and current Telegram control commands; this task only replaces the start-intent understanding layer
