@@ -1002,6 +1002,37 @@ def test_gateway_reports_coding_task_counts(monkeypatch, tmp_path: Path) -> None
     assert "Coding tasks: 2 tracked, 1 recoverable" in _strip_ansi(result.stdout)
 
 
+def test_gateway_rejects_duplicate_instance_before_runtime_starts(monkeypatch, tmp_path: Path) -> None:
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+
+    provider_called = False
+
+    def _fake_provider(_config):
+        nonlocal provider_called
+        provider_called = True
+        return object()
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", _fake_provider)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._GatewayInstanceLock.acquire",
+        lambda self: (_ for _ in ()).throw(RuntimeError("gateway lock is already held")),
+    )
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert result.exit_code == 1
+    assert provider_called is False
+    assert "already running" in _strip_ansi(result.stdout)
+
+
 def test_coding_task_create_persists_task(monkeypatch, tmp_path: Path) -> None:
     from nanobot.coding_tasks.store import CodingTaskStore
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -24,6 +25,15 @@ def _prepare_repo(repo: Path) -> None:
         '[{"id": 1, "passes": true}, {"id": 2, "passes": false}, {"id": 3, "passes": true}]',
         encoding="utf-8",
     )
+
+
+def _init_git_repo(repo: Path) -> None:
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True, capture_output=True)
+    (repo / "tracked.txt").write_text("tracked\n", encoding="utf-8")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", "seed repo"], cwd=repo, check=True, capture_output=True)
 
 
 def test_extract_latest_progress_note_returns_newest_session_note(tmp_path: Path) -> None:
@@ -81,3 +91,54 @@ async def test_poll_task_updates_progress_summary_and_timestamp(tmp_path: Path) 
     assert refreshed.last_progress_summary == report.summary
     assert refreshed.last_progress_at_ms is not None
     assert "Waiting for user confirmation" in refreshed.last_progress_summary
+
+
+@pytest.mark.asyncio
+async def test_poll_task_marks_waiting_user_when_live_output_requests_confirmation(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    repo = tmp_path / "repo"
+    _prepare_repo(repo)
+    task = manager.create_task(repo_path=str(repo), goal="Need confirmation")
+    task = manager.mark_starting(task.id, summary="Launching")
+    task = manager.mark_running(task.id, summary="Working")
+
+    class _FakeLauncher:
+        def capture_pane(self, session: str) -> str:
+            assert session == task.tmux_session
+            return "Need plan confirmation before edits\n"
+
+    monitor = CodexProgressMonitor(manager, _FakeLauncher())  # type: ignore[arg-type]
+    await monitor.poll_task(task.id)
+
+    refreshed = store.get_task(task.id)
+    assert refreshed is not None
+    assert refreshed.status == "waiting_user"
+    assert "Need plan confirmation" in refreshed.last_progress_summary
+
+
+@pytest.mark.asyncio
+async def test_poll_task_persists_branch_and_recent_commit_metadata(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    repo = tmp_path / "repo"
+    _prepare_repo(repo)
+    _init_git_repo(repo)
+    task = manager.create_task(repo_path=str(repo), goal="Track metadata")
+    task = manager.mark_starting(task.id, summary="Launching")
+    task = manager.mark_running(task.id, summary="Working")
+
+    class _FakeLauncher:
+        def capture_pane(self, session: str) -> str:
+            assert session == task.tmux_session
+            return "Running pytest\n"
+
+    monitor = CodexProgressMonitor(manager, _FakeLauncher())  # type: ignore[arg-type]
+    await monitor.poll_task(task.id)
+
+    refreshed = store.get_task(task.id)
+    assert refreshed is not None
+    assert refreshed.branch_name == "main"
+    assert "seed repo" in refreshed.metadata.get("recent_commit_summary", "")

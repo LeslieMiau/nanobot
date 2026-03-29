@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import contextmanager, nullcontext
+import fcntl
 
 import os
 import select
@@ -47,6 +48,36 @@ app = typer.Typer(
 
 console = Console()
 EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
+
+
+class _GatewayInstanceLock:
+    """Best-effort single-instance lock for the active CLI gateway runtime."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self._fh = None
+
+    def acquire(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._fh = self.path.open("a+", encoding="utf-8")
+        try:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError("gateway lock is already held") from exc
+        self._fh.seek(0)
+        self._fh.truncate()
+        self._fh.write(str(os.getpid()))
+        self._fh.flush()
+
+    def release(self) -> None:
+        if not self._fh:
+            return
+        try:
+            fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        self._fh.close()
+        self._fh = None
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -530,198 +561,226 @@ def gateway(
 
     config = _load_runtime_config(config, workspace)
     port = port if port is not None else config.gateway.port
+    lock = _GatewayInstanceLock(config.workspace_path / "gateway.lock")
+    try:
+        lock.acquire()
+    except RuntimeError:
+        console.print("[red]Another nanobot gateway is already running for this workspace.[/red]")
+        raise typer.Exit(1)
 
-    console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
-    sync_workspace_templates(config.workspace_path)
-    bus = MessageBus()
-    provider = _make_provider(config)
-    session_manager = SessionManager(config.workspace_path)
-    coding_task_store, codex_workers = _load_coding_task_runtime(config)
-    from nanobot.coding_tasks import CodexProgressMonitor, CodexTaskRecovery, CodexWorkerLauncher
-    coding_task_launcher = CodexWorkerLauncher(config.workspace_path, codex_workers)
-    coding_task_monitor = CodexProgressMonitor(codex_workers, coding_task_launcher)
-    coding_task_recovery = CodexTaskRecovery(codex_workers, coding_task_launcher, coding_task_monitor)
-    coding_task_recovery.recover_tasks()
+    try:
+        console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
+        sync_workspace_templates(config.workspace_path)
+        bus = MessageBus()
+        provider = _make_provider(config)
+        session_manager = SessionManager(config.workspace_path)
+        coding_task_store, codex_workers = _load_coding_task_runtime(config)
+        from nanobot.coding_tasks import (
+            CodingTaskNotifier,
+            CodexProgressMonitor,
+            CodexTaskRecovery,
+            CodexWorkerLauncher,
+        )
+        coding_task_launcher = CodexWorkerLauncher(config.workspace_path, codex_workers)
+        coding_task_monitor = CodexProgressMonitor(codex_workers, coding_task_launcher)
+        coding_task_recovery = CodexTaskRecovery(codex_workers, coding_task_launcher, coding_task_monitor)
+        coding_task_recovery.recover_tasks()
+        coding_task_notifier = CodingTaskNotifier(codex_workers, bus.publish_outbound)
 
-    # Preserve existing single-workspace installs, but keep custom workspaces clean.
-    if is_default_workspace(config.workspace_path):
-        _migrate_cron_store(config)
+        # Preserve existing single-workspace installs, but keep custom workspaces clean.
+        if is_default_workspace(config.workspace_path):
+            _migrate_cron_store(config)
 
-    # Create cron service with workspace-scoped store
-    cron_store_path = config.workspace_path / "cron" / "jobs.json"
-    cron = CronService(cron_store_path)
+        # Create cron service with workspace-scoped store
+        cron_store_path = config.workspace_path / "cron" / "jobs.json"
+        cron = CronService(cron_store_path)
 
-    # Create agent with cron service
-    agent = AgentLoop(
-        bus=bus,
-        provider=provider,
-        workspace=config.workspace_path,
-        model=config.agents.defaults.model,
-        max_iterations=config.agents.defaults.max_tool_iterations,
-        context_window_tokens=config.agents.defaults.context_window_tokens,
-        web_search_config=config.tools.web.search,
-        web_proxy=config.tools.web.proxy or None,
-        exec_config=config.tools.exec,
-        cron_service=cron,
-        restrict_to_workspace=config.tools.restrict_to_workspace,
-        session_manager=session_manager,
-        mcp_servers=config.tools.mcp_servers,
-        channels_config=config.channels,
-        timezone=config.agents.defaults.timezone,
-        coding_task_manager=codex_workers,
-    )
-
-    # Set cron callback (needs agent)
-    async def on_cron_job(job: CronJob) -> str | None:
-        """Execute a cron job through the agent."""
-        from nanobot.agent.tools.cron import CronTool
-        from nanobot.agent.tools.message import MessageTool
-        from nanobot.utils.evaluator import evaluate_response
-
-        reminder_note = (
-            "[Scheduled Task] Timer finished.\n\n"
-            f"Task '{job.name}' has been triggered.\n"
-            f"Scheduled instruction: {job.payload.message}"
+        # Create agent with cron service
+        agent = AgentLoop(
+            bus=bus,
+            provider=provider,
+            workspace=config.workspace_path,
+            model=config.agents.defaults.model,
+            max_iterations=config.agents.defaults.max_tool_iterations,
+            context_window_tokens=config.agents.defaults.context_window_tokens,
+            web_search_config=config.tools.web.search,
+            web_proxy=config.tools.web.proxy or None,
+            exec_config=config.tools.exec,
+            cron_service=cron,
+            restrict_to_workspace=config.tools.restrict_to_workspace,
+            session_manager=session_manager,
+            mcp_servers=config.tools.mcp_servers,
+            channels_config=config.channels,
+            timezone=config.agents.defaults.timezone,
+            coding_task_manager=codex_workers,
         )
 
-        cron_tool = agent.tools.get("cron")
-        cron_token = None
-        if isinstance(cron_tool, CronTool):
-            cron_token = cron_tool.set_cron_context(True)
-        try:
-            resp = await agent.process_direct(
-                reminder_note,
-                session_key=f"cron:{job.id}",
-                channel=job.payload.channel or "cli",
-                chat_id=job.payload.to or "direct",
+        # Set cron callback (needs agent)
+        async def on_cron_job(job: CronJob) -> str | None:
+            """Execute a cron job through the agent."""
+            from nanobot.agent.tools.cron import CronTool
+            from nanobot.agent.tools.message import MessageTool
+            from nanobot.utils.evaluator import evaluate_response
+
+            reminder_note = (
+                "[Scheduled Task] Timer finished.\n\n"
+                f"Task '{job.name}' has been triggered.\n"
+                f"Scheduled instruction: {job.payload.message}"
             )
-        finally:
-            if isinstance(cron_tool, CronTool) and cron_token is not None:
-                cron_tool.reset_cron_context(cron_token)
 
-        response = resp.content if resp else ""
-
-        message_tool = agent.tools.get("message")
-        if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
-            return response
-
-        if job.payload.deliver and job.payload.to and response:
-            should_notify = await evaluate_response(
-                response, job.payload.message, provider, agent.model,
-            )
-            if should_notify:
-                from nanobot.bus.events import OutboundMessage
-                await bus.publish_outbound(OutboundMessage(
+            cron_tool = agent.tools.get("cron")
+            cron_token = None
+            if isinstance(cron_tool, CronTool):
+                cron_token = cron_tool.set_cron_context(True)
+            try:
+                resp = await agent.process_direct(
+                    reminder_note,
+                    session_key=f"cron:{job.id}",
                     channel=job.payload.channel or "cli",
-                    chat_id=job.payload.to,
-                    content=response,
-                ))
-        return response
-    cron.on_job = on_cron_job
+                    chat_id=job.payload.to or "direct",
+                )
+            finally:
+                if isinstance(cron_tool, CronTool) and cron_token is not None:
+                    cron_tool.reset_cron_context(cron_token)
 
-    # Create channel manager
-    channels = ChannelManager(config, bus)
+            response = resp.content if resp else ""
 
-    def _pick_heartbeat_target() -> tuple[str, str]:
-        """Pick a routable channel/chat target for heartbeat-triggered messages."""
-        enabled = set(channels.enabled_channels)
-        # Prefer the most recently updated non-internal session on an enabled channel.
-        for item in session_manager.list_sessions():
-            key = item.get("key") or ""
-            if ":" not in key:
-                continue
-            channel, chat_id = key.split(":", 1)
-            if channel in {"cli", "system"}:
-                continue
-            if channel in enabled and chat_id:
-                return channel, chat_id
-        # Fallback keeps prior behavior but remains explicit.
-        return "cli", "direct"
+            message_tool = agent.tools.get("message")
+            if isinstance(message_tool, MessageTool) and message_tool._sent_in_turn:
+                return response
 
-    # Create heartbeat service
-    async def on_heartbeat_execute(tasks: str) -> str:
-        """Phase 2: execute heartbeat tasks through the full agent loop."""
-        channel, chat_id = _pick_heartbeat_target()
+            if job.payload.deliver and job.payload.to and response:
+                should_notify = await evaluate_response(
+                    response, job.payload.message, provider, agent.model,
+                )
+                if should_notify:
+                    from nanobot.bus.events import OutboundMessage
+                    await bus.publish_outbound(OutboundMessage(
+                        channel=job.payload.channel or "cli",
+                        chat_id=job.payload.to,
+                        content=response,
+                    ))
+            return response
+        cron.on_job = on_cron_job
 
-        async def _silent(*_args, **_kwargs):
-            pass
+        # Create channel manager
+        channels = ChannelManager(config, bus)
 
-        resp = await agent.process_direct(
-            tasks,
-            session_key="heartbeat",
-            channel=channel,
-            chat_id=chat_id,
-            on_progress=_silent,
+        def _pick_heartbeat_target() -> tuple[str, str]:
+            """Pick a routable channel/chat target for heartbeat-triggered messages."""
+            enabled = set(channels.enabled_channels)
+            # Prefer the most recently updated non-internal session on an enabled channel.
+            for item in session_manager.list_sessions():
+                key = item.get("key") or ""
+                if ":" not in key:
+                    continue
+                channel, chat_id = key.split(":", 1)
+                if channel in {"cli", "system"}:
+                    continue
+                if channel in enabled and chat_id:
+                    return channel, chat_id
+            # Fallback keeps prior behavior but remains explicit.
+            return "cli", "direct"
+
+        # Create heartbeat service
+        async def on_heartbeat_execute(tasks: str) -> str:
+            """Phase 2: execute heartbeat tasks through the full agent loop."""
+            channel, chat_id = _pick_heartbeat_target()
+
+            async def _silent(*_args, **_kwargs):
+                pass
+
+            resp = await agent.process_direct(
+                tasks,
+                session_key="heartbeat",
+                channel=channel,
+                chat_id=chat_id,
+                on_progress=_silent,
+            )
+
+            # Keep a small tail of heartbeat history so the loop stays bounded
+            # without losing all short-term context between runs.
+            session = agent.sessions.get_or_create("heartbeat")
+            session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
+            agent.sessions.save(session)
+
+            return resp.content if resp else ""
+
+        async def on_heartbeat_notify(response: str) -> None:
+            """Deliver a heartbeat response to the user's channel."""
+            from nanobot.bus.events import OutboundMessage
+            channel, chat_id = _pick_heartbeat_target()
+            if channel == "cli":
+                return  # No external channel available to deliver to
+            await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+
+        hb_cfg = config.gateway.heartbeat
+        heartbeat = HeartbeatService(
+            workspace=config.workspace_path,
+            provider=provider,
+            model=agent.model,
+            on_execute=on_heartbeat_execute,
+            on_notify=on_heartbeat_notify,
+            interval_s=hb_cfg.interval_s,
+            enabled=hb_cfg.enabled,
+            timezone=config.agents.defaults.timezone,
         )
 
-        # Keep a small tail of heartbeat history so the loop stays bounded
-        # without losing all short-term context between runs.
-        session = agent.sessions.get_or_create("heartbeat")
-        session.retain_recent_legal_suffix(hb_cfg.keep_recent_messages)
-        agent.sessions.save(session)
+        if channels.enabled_channels:
+            console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
+        else:
+            console.print("[yellow]Warning: No channels enabled[/yellow]")
 
-        return resp.content if resp else ""
+        cron_status = cron.status()
+        if cron_status["jobs"] > 0:
+            console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
+        tracked_coding_tasks = coding_task_store.list_tasks()
+        recoverable_coding_tasks = codex_workers.recoverable_tasks()
+        console.print(
+            "[green]✓[/green] Coding tasks: "
+            f"{len(tracked_coding_tasks)} tracked, "
+            f"{len(recoverable_coding_tasks)} recoverable"
+        )
 
-    async def on_heartbeat_notify(response: str) -> None:
-        """Deliver a heartbeat response to the user's channel."""
-        from nanobot.bus.events import OutboundMessage
-        channel, chat_id = _pick_heartbeat_target()
-        if channel == "cli":
-            return  # No external channel available to deliver to
-        await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
+        console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
-    hb_cfg = config.gateway.heartbeat
-    heartbeat = HeartbeatService(
-        workspace=config.workspace_path,
-        provider=provider,
-        model=agent.model,
-        on_execute=on_heartbeat_execute,
-        on_notify=on_heartbeat_notify,
-        interval_s=hb_cfg.interval_s,
-        enabled=hb_cfg.enabled,
-        timezone=config.agents.defaults.timezone,
-    )
+        async def watch_coding_tasks() -> None:
+            while True:
+                for task in coding_task_store.list_tasks():
+                    if task.status == "queued":
+                        continue
+                    if task.status in {"starting", "running", "waiting_user"}:
+                        report = await coding_task_monitor.poll_task(task.id)
+                    else:
+                        report = coding_task_monitor.build_task_report(task.id)
+                    await coding_task_notifier.maybe_notify(task.id, report)
+                await asyncio.sleep(5)
 
-    if channels.enabled_channels:
-        console.print(f"[green]✓[/green] Channels enabled: {', '.join(channels.enabled_channels)}")
-    else:
-        console.print("[yellow]Warning: No channels enabled[/yellow]")
+        async def run():
+            try:
+                await cron.start()
+                await heartbeat.start()
+                await asyncio.gather(
+                    agent.run(),
+                    channels.start_all(),
+                    watch_coding_tasks(),
+                )
+            except KeyboardInterrupt:
+                console.print("\nShutting down...")
+            except Exception:
+                import traceback
+                console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
+                console.print(traceback.format_exc())
+            finally:
+                await agent.close_mcp()
+                heartbeat.stop()
+                cron.stop()
+                agent.stop()
+                await channels.stop_all()
 
-    cron_status = cron.status()
-    if cron_status["jobs"] > 0:
-        console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
-    tracked_coding_tasks = coding_task_store.list_tasks()
-    recoverable_coding_tasks = codex_workers.recoverable_tasks()
-    console.print(
-        "[green]✓[/green] Coding tasks: "
-        f"{len(tracked_coding_tasks)} tracked, "
-        f"{len(recoverable_coding_tasks)} recoverable"
-    )
-
-    console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
-
-    async def run():
-        try:
-            await cron.start()
-            await heartbeat.start()
-            await asyncio.gather(
-                agent.run(),
-                channels.start_all(),
-            )
-        except KeyboardInterrupt:
-            console.print("\nShutting down...")
-        except Exception:
-            import traceback
-            console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
-            console.print(traceback.format_exc())
-        finally:
-            await agent.close_mcp()
-            heartbeat.stop()
-            cron.stop()
-            agent.stop()
-            await channels.stop_all()
-
-    asyncio.run(run())
+        asyncio.run(run())
+    finally:
+        lock.release()
 
 
 # ============================================================================
@@ -797,7 +856,13 @@ def coding_task_status(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Show detailed status for one coding task."""
-    from nanobot.coding_tasks import CodexProgressMonitor, CodexWorkerLauncher
+    from nanobot.coding_tasks import (
+        CodexProgressMonitor,
+        CodexWorkerLauncher,
+        build_completion_report,
+        build_failure_report,
+        build_waiting_user_report,
+    )
 
     config_obj = _load_runtime_config(config, workspace)
     store, manager = _load_coding_task_runtime(config_obj)
@@ -820,8 +885,17 @@ def coding_task_status(
     console.print(f"Last progress: {task.last_progress_summary or '-'}")
     monitor = CodexProgressMonitor(manager, CodexWorkerLauncher(config_obj.workspace_path, manager))
     report = monitor.build_task_report(task.id)
+    refreshed = store.get_task(task.id) or task
+    console.print(f"Branch: {refreshed.branch_name or '-'}")
+    console.print(f"Recent commit: {refreshed.metadata.get('recent_commit_summary', '-')}")
     if report.summary:
         console.print(f"Live report: {report.summary}")
+    if refreshed.status == "completed":
+        console.print(build_completion_report(refreshed))
+    elif refreshed.status == "failed":
+        console.print(build_failure_report(refreshed))
+    elif refreshed.status == "waiting_user":
+        console.print(build_waiting_user_report(refreshed))
 
     events = store.read_run_events(task.id, limit=5)
     if not events:

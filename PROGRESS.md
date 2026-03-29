@@ -267,3 +267,22 @@
   - Document the nanobot/Codex/repo-harness split in README directly under the architecture section so future operators can orient quickly
 - Remaining blockers / follow-up:
   - The remaining major gaps are gateway single-instance protection in the active runtime path and a true end-to-end manual run against a local repo
+
+## Session update - 2026-03-29 (features #37, #38, #39, #40, #41, #42, #51)
+- Completed features:
+  - Added a throttled coding-task notifier and wired a background coding-task watch loop into the active CLI gateway runtime so repeated identical progress summaries are not spammed to Telegram
+  - Added completion, failure, and waiting-user report builders for user-facing status delivery
+  - Added waiting-user detection from live pane output and automatic transition into `waiting_user` with an explanatory summary when Codex asks for confirmation
+  - Added repo metadata inspection so branch name and recent commit summary are persisted onto the task record during polling/reporting
+  - Added a single-instance gateway lock to the active CLI gateway runtime so duplicate gateways are rejected before orchestration starts
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_reporting.py tests/coding_tasks/test_notifier.py tests/coding_tasks/test_progress.py tests/coding_tasks/test_recovery.py tests/coding_tasks/test_worker.py` -> passed (17 tests)
+  - `.venv/bin/pytest tests/coding_tasks/test_progress.py tests/coding_tasks/test_reporting.py tests/coding_tasks/test_notifier.py` -> passed (9 tests)
+  - `.venv/bin/pytest tests/cli/test_commands.py -k "gateway_reports_coding_task_counts or gateway_rejects_duplicate_instance_before_runtime_starts or gateway_uses_configured_port_when_cli_flag_is_missing or gateway_cli_port_overrides_configured_port"` -> passed (4 selected tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks nanobot/cli/commands.py tests/coding_tasks/test_reporting.py tests/coding_tasks/test_notifier.py tests/coding_tasks/test_progress.py` -> passed
+- Key decisions:
+  - Keep notification throttling in a dedicated notifier class so push delivery policy stays separate from progress detection and reporting
+  - Update repo branch/commit metadata opportunistically during polling and status reads, which avoids rescanning git in every final report path
+  - Reuse the active CLI gateway path for the single-instance lock instead of relying on the dormant `app/gateway.py` branch
+- Remaining blockers / follow-up:
+  - Only feature `#52` remains: a true manual end-to-end run against a local repo through the nanobot entrypoint

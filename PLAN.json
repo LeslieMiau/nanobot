@@ -404,7 +404,7 @@
       "Observe the outgoing Telegram progress notifications.",
       "Verify notifications are grouped or throttled instead of sending one message per terminal line."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 38,
@@ -415,7 +415,7 @@
       "Observe the final completion message sent to Telegram or CLI.",
       "Verify it includes the outcome, test status, branch, and recent commit summary."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 39,
@@ -426,7 +426,7 @@
       "Request or observe the failure report.",
       "Verify the report includes what completed successfully, what failed, and how to resume."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 40,
@@ -437,7 +437,7 @@
       "Verify nanobot moves the task into `waiting_user` when that pause point is reached.",
       "Confirm the stored summary explains exactly what confirmation or decision is needed."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 41,
@@ -448,7 +448,7 @@
       "Inspect the stored coding task metadata after the branch change.",
       "Verify the branch name is persisted for status and completion reporting."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 42,
@@ -459,7 +459,7 @@
       "Update task metadata from the repo state.",
       "Verify the coding task record stores a recent commit summary that matches `git log --oneline`."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 43,
@@ -558,7 +558,7 @@
       "Verify the duplicate process is rejected before coding-task orchestration starts.",
       "Confirm the original gateway retains ownership of tracked coding tasks."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 52,

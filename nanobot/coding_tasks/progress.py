@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from nanobot.coding_tasks.manager import CodexWorkerManager
+from nanobot.coding_tasks.reporting import detect_waiting_reason, inspect_repo_snapshot
 from nanobot.coding_tasks.worker import CodexWorkerLauncher
 
 
@@ -27,6 +28,8 @@ class TaskProgressReport:
     latest_note: str
     plan_progress: PlanProgress
     live_output: str
+    branch_name: str
+    recent_commit_summary: str
     summary: str
 
 
@@ -65,6 +68,7 @@ def build_task_progress_report(repo_path: str | Path, pane_output: str) -> TaskP
     latest_note = extract_latest_progress_note(repo_path)
     plan_progress = summarize_plan_progress(repo_path)
     live_output = _extract_live_output(pane_output)
+    repo_snapshot = inspect_repo_snapshot(repo_path)
 
     segments: list[str] = []
     if plan_progress.total:
@@ -81,6 +85,8 @@ def build_task_progress_report(repo_path: str | Path, pane_output: str) -> TaskP
         latest_note=latest_note,
         plan_progress=plan_progress,
         live_output=live_output,
+        branch_name=repo_snapshot.branch_name,
+        recent_commit_summary=repo_snapshot.recent_commit_summary,
         summary=summary,
     )
 
@@ -99,6 +105,14 @@ class CodexProgressMonitor:
         if task.tmux_session:
             pane_output = await asyncio.to_thread(self.launcher.capture_pane, task.tmux_session)
         report = build_task_progress_report(task.repo_path, pane_output)
+        self.manager.update_repo_metadata(
+            task_id,
+            branch_name=report.branch_name or None,
+            recent_commit_summary=report.recent_commit_summary or None,
+            latest_note=report.latest_note or None,
+        )
+        if waiting_reason := detect_waiting_reason(report.live_output):
+            self.manager.mark_waiting_user(task_id, summary=waiting_reason)
         if report.summary:
             self.manager.update_progress(task_id, report.summary)
         return report
@@ -112,7 +126,14 @@ class CodexProgressMonitor:
                 pane_output = self.launcher.capture_pane(task.tmux_session)
             except Exception:
                 pane_output = ""
-        return build_task_progress_report(task.repo_path, pane_output)
+        report = build_task_progress_report(task.repo_path, pane_output)
+        self.manager.update_repo_metadata(
+            task_id,
+            branch_name=report.branch_name or None,
+            recent_commit_summary=report.recent_commit_summary or None,
+            latest_note=report.latest_note or None,
+        )
+        return report
 
 
 def _extract_live_output(pane_output: str) -> str:

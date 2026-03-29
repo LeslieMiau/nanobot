@@ -1,0 +1,65 @@
+"""Throttled outbound notifications for coding task progress."""
+
+from __future__ import annotations
+
+import time
+from collections.abc import Awaitable, Callable
+
+from nanobot.bus.events import OutboundMessage
+from nanobot.coding_tasks.manager import CodexWorkerManager
+from nanobot.coding_tasks.progress import TaskProgressReport
+from nanobot.coding_tasks.reporting import (
+    build_completion_report,
+    build_failure_report,
+    build_waiting_user_report,
+)
+
+
+class CodingTaskNotifier:
+    """Throttle and deliver coding-task notifications to the originating chat."""
+
+    def __init__(
+        self,
+        manager: CodexWorkerManager,
+        send_callback: Callable[[OutboundMessage], Awaitable[None]],
+        *,
+        throttle_s: int = 30,
+    ) -> None:
+        self.manager = manager
+        self.send_callback = send_callback
+        self.throttle_s = throttle_s
+        self._last_sent_at: dict[str, float] = {}
+        self._last_sent_content: dict[str, str] = {}
+
+    async def maybe_notify(self, task_id: str, report: TaskProgressReport) -> bool:
+        task = self.manager.require_task(task_id)
+        channel = task.metadata.get("origin_channel")
+        chat_id = task.metadata.get("origin_chat_id")
+        if not channel or not chat_id:
+            return False
+
+        content = self._build_content(task, report)
+        if not content:
+            return False
+
+        now = time.monotonic()
+        last_content = self._last_sent_content.get(task_id)
+        last_at = self._last_sent_at.get(task_id, 0.0)
+        if last_content == content and now - last_at < self.throttle_s:
+            return False
+
+        await self.send_callback(
+            OutboundMessage(channel=channel, chat_id=chat_id, content=content, metadata={"render_as": "text"})
+        )
+        self._last_sent_at[task_id] = now
+        self._last_sent_content[task_id] = content
+        return True
+
+    def _build_content(self, task, report: TaskProgressReport) -> str:
+        if task.status == "completed":
+            return build_completion_report(task)
+        if task.status == "failed":
+            return build_failure_report(task)
+        if task.status == "waiting_user":
+            return build_waiting_user_report(task)
+        return report.summary

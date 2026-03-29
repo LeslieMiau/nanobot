@@ -150,6 +150,30 @@ class CodexWorkerManager:
         )
         return updated
 
+    def update_repo_metadata(
+        self,
+        task_id: str,
+        *,
+        branch_name: str | None = None,
+        recent_commit_summary: str | None = None,
+        latest_note: str | None = None,
+    ) -> CodingTask:
+        """Persist repo-derived metadata without changing lifecycle state."""
+        task = self.require_task(task_id)
+        metadata = dict(task.metadata)
+        if recent_commit_summary:
+            metadata["recent_commit_summary"] = recent_commit_summary
+        if latest_note:
+            metadata["latest_note"] = latest_note
+        updated = replace(
+            task,
+            branch_name=branch_name or task.branch_name,
+            metadata=metadata,
+            updated_at_ms=now_ms(),
+        )
+        self.store.upsert_task(updated)
+        return updated
+
     def mark_starting(
         self,
         task_id: str,
