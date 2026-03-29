@@ -121,3 +121,18 @@
 - Remaining blockers / follow-up:
   - There is still no real Codex worker launch/reuse path, so cancel/resume currently operate on persisted task state rather than a live tmux-backed worker
   - Telegram command routing and active-task selection are still missing, so coding-task control remains CLI-only
+
+## Session update - 2026-03-29 (feature #9)
+- Completed feature:
+  - Added a coding-task chat interceptor so Telegram private-chat messages starting with `开始编程` can create a persisted coding task immediately instead of falling through to the LLM
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_router.py tests/agent/test_coding_task_routing.py` -> passed (5 tests)
+  - `.venv/bin/pytest tests/cli/test_commands.py -k "coding_task_create_persists_task or coding_task_list_shows_status_and_recoverability or coding_task_status_shows_details_and_recent_events or test_coding_task_cancel_updates_status_and_reason or test_coding_task_resume_moves_failed_task_back_to_starting or gateway_reports_coding_task_counts or gateway_uses_configured_port_when_cli_flag_is_missing or gateway_cli_port_overrides_configured_port"` -> passed (8 selected tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks nanobot/agent/loop.py nanobot/cli/commands.py` -> passed
+- Key decisions:
+  - Hook the Telegram private-chat route at `AgentLoop` command-interceptor level instead of modifying the Telegram channel adapter, so the behavior stays close to the active runtime path and is easy to test
+  - Support both inline `开始编程 /path/to/repo 任务目标` and structured `仓库:` / `目标:` message shapes while returning a usage hint for incomplete requests
+  - Persist the origin channel/chat metadata on created coding tasks now so later Telegram control routing can identify the originating conversation without another state migration
+- Remaining blockers / follow-up:
+  - Telegram control messages such as `状态` / `继续` / `取消` are still not routed onto active coding tasks yet, so feature `#10` remains the next chat-control gap
+  - The new chat route only creates persisted tasks; it does not launch or resume a real Codex worker session yet

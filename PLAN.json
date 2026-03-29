@@ -96,7 +96,7 @@
       "Verify nanobot creates exactly one coding task record with the parsed repo and goal.",
       "Confirm the chat receives an acknowledgement containing the task id and initial state."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 10,

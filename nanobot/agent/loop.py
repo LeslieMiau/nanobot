@@ -34,6 +34,7 @@ from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
+    from nanobot.coding_tasks.manager import CodexWorkerManager
     from nanobot.cron.service import CronService
 
 
@@ -68,6 +69,7 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        coding_task_manager: CodexWorkerManager | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -75,6 +77,7 @@ class AgentLoop:
         self.channels_config = channels_config
         self.provider = provider
         self.workspace = workspace
+        self.coding_task_manager = coding_task_manager
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
         self.context_window_tokens = context_window_tokens
@@ -127,6 +130,10 @@ class AgentLoop:
         self._register_default_tools()
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+        if self.coding_task_manager is not None:
+            from nanobot.coding_tasks.router import register_coding_task_commands
+
+            register_coding_task_commands(self.commands, self.coding_task_manager)
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
