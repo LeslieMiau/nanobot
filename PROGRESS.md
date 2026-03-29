@@ -72,3 +72,15 @@
   - Use store reload as the proof point because restart/recovery will consume persisted task state rather than in-memory objects
 - Remaining blockers / follow-up:
   - The next highest-value feature is now `#4` or `#5`: a real user-facing way to create and inspect coding tasks through the active CLI/runtime path
+
+## Session update - 2026-03-29 (feature #4)
+- Completed feature:
+  - Added `nanobot coding-task create` so a user can create a persisted coding task record from the active CLI path, reusing the same workspace-scoped coding-task runtime helper as gateway startup
+- Verification:
+  - `.venv/bin/pytest tests/cli/test_commands.py -k "coding_task_create_persists_task or gateway_reports_coding_task_counts or gateway_uses_configured_port_when_cli_flag_is_missing or gateway_cli_port_overrides_configured_port"` -> passed (4 selected tests)
+- Key decisions:
+  - Reuse a shared `_load_coding_task_runtime()` helper so the CLI create flow and gateway startup always point at the same task store location
+  - Keep repo-path validation out of this feature; the command currently focuses on record creation and persistence, with stricter validation reserved for later feature work
+- Remaining blockers / follow-up:
+  - There is still no user-facing list/status command, so feature `#5` is the natural next step to make created tasks inspectable
+  - Telegram command routing still does not exist; coding-task control remains CLI-only at this point

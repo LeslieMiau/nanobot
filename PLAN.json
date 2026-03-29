@@ -41,7 +41,7 @@
       "Verify the command returns the task id and initial status.",
       "Confirm the created task is visible in the persisted coding task store."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,

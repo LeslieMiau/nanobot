@@ -494,6 +494,15 @@ def _migrate_cron_store(config: "Config") -> None:
         shutil.move(str(legacy_path), str(new_path))
 
 
+def _load_coding_task_runtime(config: "Config"):
+    """Build the workspace-scoped coding task store and manager."""
+    from nanobot.coding_tasks import CodexWorkerManager, CodingTaskStore
+
+    store = CodingTaskStore(config.workspace_path / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(config.workspace_path, store)
+    return store, manager
+
+
 # ============================================================================
 # Gateway / Server
 # ============================================================================
@@ -510,7 +519,6 @@ def gateway(
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
-    from nanobot.coding_tasks import CodexWorkerManager, CodingTaskStore
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
@@ -528,10 +536,7 @@ def gateway(
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
-    coding_task_store = CodingTaskStore(
-        config.workspace_path / "automation" / "coding" / "tasks.json"
-    )
-    codex_workers = CodexWorkerManager(config.workspace_path, coding_task_store)
+    coding_task_store, codex_workers = _load_coding_task_runtime(config)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
@@ -711,6 +716,40 @@ def gateway(
             await channels.stop_all()
 
     asyncio.run(run())
+
+
+# ============================================================================
+# Coding Task Commands
+# ============================================================================
+
+coding_task_app = typer.Typer(help="Manage Codex-backed coding tasks")
+app.add_typer(coding_task_app, name="coding-task")
+
+
+@coding_task_app.command("create")
+def coding_task_create(
+    repo_path: str = typer.Argument(..., help="Target repository path"),
+    goal: str = typer.Option(..., "--goal", "-g", help="Goal for Codex to implement"),
+    title: str | None = typer.Option(None, "--title", "-t", help="Optional short task title"),
+    branch: str | None = typer.Option(None, "--branch", "-b", help="Optional preferred branch name"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Create a persisted coding task record."""
+    config_obj = _load_runtime_config(config, workspace)
+    _, manager = _load_coding_task_runtime(config_obj)
+    task = manager.create_task(
+        repo_path=repo_path,
+        goal=goal,
+        title=title,
+        branch_name=branch,
+    )
+
+    console.print(f"[green]✓[/green] Created coding task {task.id}")
+    console.print(f"Status: {task.status}")
+    console.print(f"Repo: {task.repo_path}")
+    console.print(f"Goal: {task.goal}")
+    console.print(f"tmux: {task.tmux_session}")
 
 
 

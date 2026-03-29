@@ -998,6 +998,51 @@ def test_gateway_reports_coding_task_counts(monkeypatch, tmp_path: Path) -> None
     assert "Coding tasks: 2 tracked, 1 recoverable" in _strip_ansi(result.stdout)
 
 
+def test_coding_task_create_persists_task(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.coding_tasks.store import CodingTaskStore
+
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+
+    result = runner.invoke(
+        app,
+        [
+            "coding-task",
+            "create",
+            str(repo),
+            "--goal",
+            "Implement feature #4",
+            "--config",
+            str(config_file),
+        ],
+    )
+
+    assert result.exit_code == 0
+    output = _strip_ansi(result.stdout)
+    assert "Created coding task" in output
+    assert "Status: queued" in output
+    assert "Repo:" in output
+    assert str(repo) in output.replace("\n", "")
+    assert "Goal: Implement feature #4" in output
+
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    tasks = store.list_tasks()
+    assert len(tasks) == 1
+    assert tasks[0].repo_path == str(repo)
+    assert tasks[0].goal == "Implement feature #4"
+
+
 def test_channels_login_requires_channel_name() -> None:
     result = runner.invoke(app, ["channels", "login"])
 
