@@ -2,77 +2,77 @@
   {
     "id": 1,
     "category": "setup",
-    "description": "The worker-launch isolation fix is tracked as its own harness task so future sessions can resume from the tmux/bootstrap failure evidence directly.",
+    "description": "The Telegram coding-task long-message fix is tracked as its own harness task so future sessions can resume from the notifier/report split instead of re-debugging live chat output.",
     "steps": [
-      "Open PLAN.json and verify it only tracks the worker-launch isolation harness.",
-      "Open PROGRESS.md and verify the reboot entry records the tmux zsh bootstrap error, the host-shell Codex run, and the global Codex config mismatch.",
-      "Confirm the scope is limited to worker startup isolation, launch observability, and real Codex validation."
+      "Open PLAN.json and verify it only tracks the Telegram coding-task notification-shortening harness.",
+      "Open PROGRESS.md and verify the reboot entry records that notifier currently sends detailed report.summary strings to Telegram.",
+      "Confirm the scope is limited to proactive Telegram push shortening, while detailed status diagnostics remain unchanged."
     ],
     "passes": true
   },
   {
     "id": 2,
     "category": "functional",
-    "description": "CodexWorkerLauncher uses an isolated shell session instead of tmux's default interactive zsh environment.",
+    "description": "Starting and running coding tasks use a dedicated short notification format instead of sending the full progress report to Telegram.",
     "steps": [
-      "Inspect the tmux launcher code and verify new sessions no longer boot into the default zsh login shell.",
-      "Verify reused sessions still relaunch work through the same isolated shell path.",
-      "Confirm the launcher keeps the existing tmux reuse and interrupt semantics."
+      "Inspect the notifier path and verify starting or running tasks no longer return report.summary directly.",
+      "Verify the proactive Telegram message includes only compact status, repo, goal or task identity, and one short progress line.",
+      "Confirm waiting_user, failed, and completed tasks still use their existing specialized reports."
     ],
     "passes": true
   },
   {
     "id": 3,
     "category": "functional",
-    "description": "The worker launch command explicitly overrides unstable global Codex config so background runs do not inherit incompatible reasoning-summary settings.",
+    "description": "Notification progress extraction prefers meaningful live output or clear blockers and ignores shell prompt noise or plan-only summaries.",
     "steps": [
-      "Inspect the generated Codex command line for a coding task launch.",
-      "Verify it includes a compatible reasoning-summary override and still runs from the target repo root.",
-      "Confirm the user-level ~/.codex/config.toml file is not modified."
+      "Feed pane output containing only prompt noise and verify no new proactive progress text is selected from it.",
+      "Feed progress data with useful live output or an explicit error and verify that shorter signal is chosen for Telegram pushes.",
+      "Confirm long repo-history notes are shortened before they can reach proactive Telegram notifications."
     ],
     "passes": true
   },
   {
     "id": 4,
     "category": "functional",
-    "description": "Worker logs and status views surface meaningful startup failures instead of collapsing to shell prompt noise.",
+    "description": "Detailed status views remain unchanged so CLI status and Telegram 状态 still expose full diagnostics even after proactive push messages are shortened.",
     "steps": [
-      "Inspect a pane/log stream with startup errors and verify the most useful error line is preserved instead of a bare shell prompt.",
-      "Verify stderr is captured into the worker artifact log alongside Codex JSON output.",
-      "Confirm coding-task status remains readable for successful launches."
+      "Run coding-task status for an active task and verify plan progress, latest note, and live report still appear in detail.",
+      "Verify Telegram 状态 routing still returns the detailed task status payload rather than the short proactive notification format.",
+      "Confirm the long-message fix only changes background push behavior, not explicit status inspection."
     ],
     "passes": true
   },
   {
     "id": 5,
     "category": "testing",
-    "description": "Focused tests cover isolated shell startup, Codex config overrides, prompt/log behavior, and progress extraction regressions.",
+    "description": "Focused tests cover short notification building, duplicate suppression, prompt-noise rejection, and preservation of detailed status reporting.",
     "steps": [
-      "Run focused pytest coverage for worker, routing, harness, reporting, and progress modules.",
-      "Verify the suite covers both the new shell wrapper and startup-error summarization paths.",
-      "Confirm compileall still succeeds for all touched modules and tests."
+      "Run focused pytest coverage for notifier, progress, reporting, and coding-task routing behavior.",
+      "Verify the suite covers long-note trimming and prompt-only updates not sending new proactive notifications.",
+      "Confirm compileall still succeeds for all touched coding-task modules and tests."
     ],
     "passes": true
   },
   {
     "id": 6,
     "category": "integration",
-    "description": "A real codex-remote launch path shows the worker enters true Codex execution after choosing 按新任务开始, without the previous brew/zsh bootstrap failure.",
+    "description": "A real active coding task such as 543a97d0 produces a short proactive Telegram-style summary while explicit status inspection still shows the full dirty history.",
     "steps": [
-      "Launch a real coding task against /Users/miau/Documents/codex-remote after the completed-harness confirmation step.",
-      "Verify the tmux pane no longer shows the brew shell bootstrap error or the earlier operation-not-permitted failure.",
-      "Confirm the artifact log and pane include real codex exec --json events."
+      "Load a real active coding task from the workspace and build the proactive notification content through the live runtime path.",
+      "Verify the proactive content is short and no longer echoes the full repo note or plan-progress string.",
+      "Verify coding-task status for that same task still exposes the full detailed report."
     ],
     "passes": true
   },
   {
     "id": 7,
     "category": "docs",
-    "description": "README and PROGRESS document the isolated worker-launch behavior, validation evidence, and any remaining runtime caveats.",
+    "description": "PROGRESS.md records the root cause, new notification strategy, and validation evidence for the Telegram long-message fix.",
     "steps": [
-      "Open README.md and verify the coding-task section explains the isolated worker environment at a high level.",
-      "Open PROGRESS.md and verify it records the launch failure root cause, the new launch strategy, and the final validation result.",
-      "Confirm PLAN.json is fully marked complete once all verification passes."
+      "Open PROGRESS.md and verify it records why Telegram received a long message and what changed in the notifier path.",
+      "Confirm PLAN.json is fully marked complete once verification passes.",
+      "Verify the final checkpoint commit captures only this notification-shortening harness work."
     ],
     "passes": true
   }

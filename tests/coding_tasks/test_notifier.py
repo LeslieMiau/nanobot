@@ -40,7 +40,10 @@ def test_notifier_throttles_duplicate_progress_notifications(tmp_path) -> None:
     asyncio.run(notifier.maybe_notify(task.id, report))
 
     assert len(sent) == 1
+    assert "编程任务进行中" in sent[0].content
+    assert "目标: notify" in sent[0].content
     assert "Running pytest" in sent[0].content
+    assert "已完成 1/2 项" not in sent[0].content
 
 
 def test_notifier_suppresses_unchanged_content_even_after_throttle_window(tmp_path) -> None:
@@ -109,3 +112,43 @@ def test_notifier_allows_new_status_with_new_content(tmp_path) -> None:
         or "仓库里已有未完成的 harness" in sent[0].content
         or "仓库里已有已完成的 harness" in sent[0].content
     )
+
+
+def test_notifier_shortens_dirty_repo_note_for_running_task(tmp_path) -> None:
+    import asyncio
+
+    store = CodingTaskStore(tmp_path / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(tmp_path, store)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    task = manager.create_task(
+        repo_path=str(repo),
+        goal="替换底部 tab 图标",
+        metadata={"origin_channel": "telegram", "origin_chat_id": "chat-1"},
+    )
+    task = manager.mark_starting(
+        task.id,
+        summary=(
+            "已完成 1/1 项，剩余 0 项 | 最近记录: 尝试按仓库流程补本地提交时，被当前沙箱拦截："
+            "`git add package.json scripts/probe-isolated-worker.sh && git commit ...` 失败。 | 当前输出: ❯"
+        ),
+    )
+    task = manager.mark_running(task.id, summary=task.last_progress_summary)
+    report = TaskProgressReport(
+        latest_note="尝试按仓库流程补本地提交时，被当前沙箱拦截",
+        plan_progress=PlanProgress(completed=1, remaining=0, total=1),
+        live_output="",
+        branch_name="",
+        recent_commit_summary="",
+        summary=task.last_progress_summary,
+    )
+    sent: list[OutboundMessage] = []
+    notifier = CodingTaskNotifier(manager, lambda msg: _send_collector(sent, msg), throttle_s=60)
+
+    asyncio.run(notifier.maybe_notify(task.id, report))
+
+    assert len(sent) == 1
+    assert "编程任务进行中" in sent[0].content
+    assert "尝试按仓库流程补本地提交时，被当前沙箱拦截" in sent[0].content
+    assert "已完成 1/1 项" not in sent[0].content
+    assert "scripts/probe-isolated-worker.sh" not in sent[0].content

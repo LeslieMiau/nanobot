@@ -8,6 +8,7 @@ import pytest
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.progress import (
     CodexProgressMonitor,
+    build_notification_progress,
     build_task_progress_report,
     extract_latest_progress_note,
     summarize_plan_progress,
@@ -132,6 +133,44 @@ def test_build_task_progress_report_prefers_error_over_prompt_noise(tmp_path: Pa
     report = build_task_progress_report(repo, pane_output)
 
     assert "当前输出: Error: The current working directory must be readable to miau to run brew." in report.summary
+
+
+def test_build_notification_progress_prefers_live_output(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _prepare_repo(repo)
+    report = build_task_progress_report(
+        repo,
+        '{"item":{"type":"command_execution","command":"pytest tests/coding_tasks/test_notifier.py"}}',
+    )
+
+    progress = build_notification_progress(report, last_progress_summary=report.summary)
+
+    assert progress == "执行命令: pytest tests/coding_tasks/test_notifier.py"
+
+
+def test_build_notification_progress_shortens_latest_note_when_summary_is_dirty(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _prepare_repo(repo)
+    report = build_task_progress_report(repo, "❯\n")
+    dirty_summary = (
+        "已完成 1/1 项，剩余 0 项 | 最近记录: 尝试按仓库流程补本地提交时，被当前沙箱拦截："
+        "`git add package.json scripts/probe-isolated-worker.sh && git commit ...` 失败。 | 当前输出: ❯"
+    )
+
+    progress = build_notification_progress(report, last_progress_summary=dirty_summary)
+
+    assert progress == "尝试按仓库流程补本地提交时，被当前沙箱拦截"
+    assert "已完成 1/1 项" not in progress
+
+
+def test_build_notification_progress_ignores_plan_only_summary(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _prepare_repo(repo)
+    report = build_task_progress_report(repo, "❯\n")
+
+    progress = build_notification_progress(report, last_progress_summary="已完成 1/1 项，剩余 0 项")
+
+    assert progress == ""
 
 
 def test_build_task_report_is_read_only_for_task_metadata(tmp_path: Path) -> None:

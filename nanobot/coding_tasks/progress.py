@@ -41,6 +41,17 @@ class TaskProgressReport:
     summary: str
 
 
+def build_notification_progress(report: TaskProgressReport, *, last_progress_summary: str = "") -> str:
+    """Build a short proactive-notification summary from detailed task progress."""
+    if waiting_reason := detect_waiting_reason(report.live_output):
+        return _trim_summary(waiting_reason, limit=96)
+    if live_output := _normalize_notification_candidate(report.live_output):
+        return live_output
+    if summary_progress := _extract_progress_from_summary(last_progress_summary):
+        return summary_progress
+    return ""
+
+
 def extract_latest_progress_note(repo_path: str | Path) -> str:
     """Read PROGRESS.md and return the newest non-empty session note."""
     path = Path(repo_path) / "PROGRESS.md"
@@ -168,6 +179,23 @@ def _extract_live_output(pane_output: str) -> str:
     return ""
 
 
+def _extract_progress_from_summary(summary: str) -> str:
+    if not summary:
+        return ""
+    parts = [part.strip() for part in summary.split(" | ") if part.strip()]
+    for part in parts:
+        if part.startswith("当前输出:"):
+            if live_output := _normalize_notification_candidate(part.removeprefix("当前输出:").strip()):
+                return live_output
+    for part in parts:
+        if part.startswith("最近记录:"):
+            if note := _normalize_notification_candidate(part.removeprefix("最近记录:").strip(), prefer_clause=True):
+                return note
+    if len(parts) == 1 and not summary.startswith("已完成 "):
+        return _normalize_notification_candidate(summary, prefer_clause=True)
+    return ""
+
+
 def _summarize_codex_event_line(line: str) -> str:
     try:
         payload = json.loads(line)
@@ -194,6 +222,25 @@ def _is_shell_noise_line(line: str) -> bool:
     if (line.startswith("~/") or line.startswith("/Users/")) and " " not in line:
         return True
     return False
+
+
+def _normalize_notification_candidate(text: str, *, prefer_clause: bool = False) -> str:
+    compact = " ".join(text.split())
+    if not compact or _is_shell_noise_line(compact):
+        return ""
+    if compact.startswith("已完成 ") and "最近记录:" not in compact and "当前输出:" not in compact:
+        return ""
+    if prefer_clause:
+        compact = _first_clause(compact)
+    return _trim_summary(compact, limit=96)
+
+
+def _first_clause(text: str) -> str:
+    for separator in ("：", ":", "。", ";", "；", "!", "！", "?", "？"):
+        head, found, _tail = text.partition(separator)
+        if found and head.strip():
+            return head.strip()
+    return text
 
 
 def _trim_summary(text: str, limit: int = 160) -> str:

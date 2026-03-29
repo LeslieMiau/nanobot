@@ -272,6 +272,36 @@
 - Remaining blockers / follow-up:
   - The live Telegram path still depends on restarting the gateway onto this new launcher build; the worker-launch code itself is now isolated and validated.
   - Real background runs can still stop on external Codex account limits, but that is downstream of startup and no longer the tmux/bootstrap bug tracked by this harness.
+
+## Harness reboot - 2026-03-29 (telegram coding-task long messages)
+- Task pivot:
+  - Superseded the finished worker-launch isolation work with the next live behavior bug: Telegram proactive coding-task pushes are too long because nanobot currently sends the detailed report summary directly to chat.
+- Existing work detected before implementation:
+  - `CodingTaskNotifier` still returns `report.summary` for `starting` and `running` tasks, so proactive messages inherit the full `PLAN.json` progress, `PROGRESS.md` latest note, and live tmux output in one string.
+  - The current active task `543a97d0` demonstrates the failure clearly: its persisted progress is already contaminated by an old repo-side probe note, and Telegram would proactively replay that long mismatched note even though the user only asked to replace a tab icon.
+  - Explicit status inspection is still useful and should stay detailed; the bug is specifically in background push formatting, not in CLI or Telegram `状态` diagnostics.
+- Key decisions:
+  - Split proactive Telegram notification formatting from the detailed status-report path instead of weakening status diagnostics.
+  - Prefer short live output or explicit blockers for proactive pushes, and only fall back to trimmed persisted progress when no better signal exists.
+
+## Session update - 2026-03-29 (telegram coding-task long messages)
+- Completed features:
+  - Refactored [nanobot/coding_tasks/notifier.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/notifier.py) so `starting` and `running` tasks no longer send `report.summary` directly; they now emit a compact 3-line Telegram notification with status, repo, goal, and one short progress line.
+  - Added a dedicated short-progress extraction path in [nanobot/coding_tasks/progress.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/progress.py) that prefers meaningful live output or blockers, rejects prompt noise, strips plan-only summaries, and shortens dirty historical notes before they can reach proactive Telegram pushes.
+  - Preserved detailed diagnostics for explicit status inspection: CLI `coding-task status` and Telegram `状态` still use the detailed report path and continue to show plan progress, latest note, and live report.
+  - Extended [tests/coding_tasks/test_notifier.py](/Users/miau/Documents/nanobot/tests/coding_tasks/test_notifier.py) and [tests/coding_tasks/test_progress.py](/Users/miau/Documents/nanobot/tests/coding_tasks/test_progress.py) to cover short proactive notifications, prompt-noise rejection, and dirty-note shortening.
+- Verification:
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0, with the same unrelated pytest warning bundle in `/tmp/nanobot-harness-pytest.log`
+  - `.venv/bin/pytest tests/coding_tasks/test_notifier.py tests/coding_tasks/test_progress.py tests/coding_tasks/test_reporting.py tests/agent/test_coding_task_routing.py tests/cli/test_commands.py -k 'coding_task_status_shows_details_and_recent_events or test_private_telegram_start_coding_waits_for_confirmation_when_repo_has_completed_harness or test_private_telegram_start_coding_waits_for_confirmation_when_repo_has_active_harness or test_notifier_throttles_duplicate_progress_notifications or test_notifier_suppresses_unchanged_content_even_after_throttle_window or test_notifier_allows_new_status_with_new_content or test_notifier_shortens_dirty_repo_note_for_running_task or test_build_notification_progress_prefers_live_output or test_build_notification_progress_shortens_latest_note_when_summary_is_dirty or test_build_notification_progress_ignores_plan_only_summary'` -> passed (10 selected tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks tests/coding_tasks/test_notifier.py tests/coding_tasks/test_progress.py tests/coding_tasks/test_reporting.py tests/agent/test_coding_task_routing.py tests/cli/test_commands.py` -> passed
+  - Manual/runtime validation:
+    - `./.venv/bin/nanobot coding-task status 543a97d0` still returns the full detailed dirty history for diagnosis.
+    - A direct notifier smoke against the real workspace task `543a97d0` now produces only:
+      - `编程任务启动中 · codex-remote`
+      - `目标: 底部的tab icon 替换一下`
+      - `进展: 尝试按仓库流程补本地提交时，被当前沙箱拦截`
+- Remaining blockers / follow-up:
+  - This harness intentionally does not repair old task data; it only prevents proactive Telegram pushes from replaying those long dirty notes.
 - Verification:
   - `.venv/bin/pytest tests/coding_tasks/test_recovery.py tests/coding_tasks/test_progress.py tests/coding_tasks/test_worker.py tests/coding_tasks/test_manager.py tests/agent/test_coding_task_routing.py` -> passed (22 tests)
   - `.venv/bin/pytest tests/cli/test_commands.py -k "gateway_reports_coding_task_counts or coding_task_status_shows_details_and_recent_events or coding_task_run_launches_tmux_worker or coding_task_create_persists_task or coding_task_create_rejects_missing_repo or coding_task_list_shows_status_and_recoverability or test_coding_task_cancel_updates_status_and_reason or test_coding_task_resume_moves_failed_task_back_to_starting"` -> passed (8 selected tests)
