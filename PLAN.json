@@ -140,7 +140,7 @@
       "Run the harness detection logic for both repos.",
       "Verify the detected state distinguishes existing harnesses from missing ones."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 14,
@@ -151,7 +151,7 @@
       "Verify the prompt explicitly instructs Codex to read `PROGRESS.md`, `PLAN.json`, and run the repo init sequence first.",
       "Confirm the prompt includes the user goal without overwriting the repo's own instructions."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 15,
@@ -162,7 +162,7 @@
       "Verify the prompt instructs Codex to generate `PLAN.json`, `PROGRESS.md`, and `init.sh` before coding.",
       "Confirm the prompt still includes the requested task goal and execution boundaries."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 16,
