@@ -45,3 +45,19 @@
   - `nanobot.repo_sync.service` is still missing, so full-repo pytest remains an unrelated baseline blocker
   - Gateway wiring is only at startup/runtime visibility level today; Telegram command routing and real Codex worker launch are not implemented yet
   - The current harness plan now tracks the coding-task initiative from this new foundation feature onward
+
+## Session update - 2026-03-29 (feature #2)
+- Completed feature:
+  - Wired the active `nanobot gateway` CLI entrypoint to load the coding-task runtime from the workspace and print tracked/recoverable coding-task counts during startup
+- Important findings:
+  - The user-facing `nanobot gateway` path still lives in `nanobot/cli/commands.py`; the richer `nanobot/app/gateway.py` path exists in the tree but is not the active entrypoint
+  - Missing `nanobot.app.prompts`, `nanobot.app.runtime`, and `nanobot.repo_sync.service` affect the dormant `app/gateway.py` branch, but they do not block this completed CLI gateway feature
+- Verification:
+  - `.venv/bin/pytest tests/cli/test_commands.py -k "gateway_reports_coding_task_counts or gateway_uses_configured_port_when_cli_flag_is_missing or gateway_cli_port_overrides_configured_port or gateway_uses_workspace_directory_for_cron_store"` -> passed (4 selected tests)
+  - `.venv/bin/pytest tests/coding_tasks/test_store.py tests/coding_tasks/test_manager.py` -> passed (6 tests)
+- Key decisions:
+  - Treat the CLI gateway entrypoint as the authoritative runtime path for near-term coding-task work
+  - Defer repairing the dormant `app/gateway.py` dependency chain until a feature explicitly needs that richer runtime
+- Remaining blockers / follow-up:
+  - Full-repo pytest is still red because `tests/test_repo_sync_service.py` imports missing `nanobot.repo_sync.service`
+  - The next feature should move from startup visibility into user control, most likely by adding CLI creation/listing commands or Telegram command routing for coding tasks

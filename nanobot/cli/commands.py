@@ -510,6 +510,7 @@ def gateway(
     from nanobot.agent.loop import AgentLoop
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
+    from nanobot.coding_tasks import CodexWorkerManager, CodingTaskStore
     from nanobot.cron.service import CronService
     from nanobot.cron.types import CronJob
     from nanobot.heartbeat.service import HeartbeatService
@@ -527,6 +528,10 @@ def gateway(
     bus = MessageBus()
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
+    coding_task_store = CodingTaskStore(
+        config.workspace_path / "automation" / "coding" / "tasks.json"
+    )
+    codex_workers = CodexWorkerManager(config.workspace_path, coding_task_store)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
@@ -674,6 +679,13 @@ def gateway(
     cron_status = cron.status()
     if cron_status["jobs"] > 0:
         console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
+    tracked_coding_tasks = coding_task_store.list_tasks()
+    recoverable_coding_tasks = codex_workers.recoverable_tasks()
+    console.print(
+        "[green]✓[/green] Coding tasks: "
+        f"{len(tracked_coding_tasks)} tracked, "
+        f"{len(recoverable_coding_tasks)} recoverable"
+    )
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 

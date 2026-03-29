@@ -19,7 +19,7 @@
       "Verify startup output reports the number of tracked and recoverable coding tasks alongside existing cron and heartbeat status.",
       "Confirm gateway startup still reaches the normal ready state instead of failing before channel bootstrap."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,

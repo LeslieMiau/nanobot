@@ -899,6 +899,105 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
     assert "port 18792" in result.stdout
 
 
+def test_gateway_reports_coding_task_counts(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.coding_tasks.manager import CodexWorkerManager
+    from nanobot.coding_tasks.store import CodingTaskStore
+
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    queued = manager.create_task(repo_path="/tmp/repo-a", goal="Queue")
+    running = manager.create_task(repo_path="/tmp/repo-b", goal="Run")
+    manager.mark_starting(running.id, summary="Boot")
+    manager.mark_running(running.id, summary="Working")
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
+    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+
+    class _FakeBus:
+        pass
+
+    class _FakeAgentLoop:
+        def __init__(self, *args, **kwargs) -> None:
+            self.model = config.agents.defaults.model
+            self.channels_config = config.channels
+            self.sessions = MagicMock()
+            self.sessions.get_or_create.return_value = MagicMock()
+
+        async def process_direct(self, *args, **kwargs):
+            return MagicMock(content="")
+
+        async def run(self) -> None:
+            return None
+
+        async def close_mcp(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeCron:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeHeartbeat:
+        def __init__(self, *args, **kwargs) -> None:
+            return None
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeChannels:
+        enabled_channels: list[str] = []
+
+        def __init__(self, _config, _bus) -> None:
+            return None
+
+        async def start_all(self) -> None:
+            return None
+
+        async def stop_all(self) -> None:
+            return None
+
+    def _stop_asyncio_run(coro):
+        coro.close()
+        raise _StopGatewayError("stop")
+
+    monkeypatch.setattr("nanobot.bus.queue.MessageBus", _FakeBus)
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
+    monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _FakeHeartbeat)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannels)
+    monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
+    monkeypatch.setattr("nanobot.cli.commands.asyncio.run", _stop_asyncio_run)
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert isinstance(result.exception, _StopGatewayError)
+    assert "Coding tasks: 2 tracked, 1 recoverable" in _strip_ansi(result.stdout)
+
+
 def test_channels_login_requires_channel_name() -> None:
     result = runner.invoke(app, ["channels", "login"])
 
