@@ -928,7 +928,8 @@ def test_gateway_reports_coding_task_counts(monkeypatch, tmp_path: Path) -> None
     )
 
     class _FakeBus:
-        pass
+        async def publish_outbound(self, _msg) -> None:
+            return None
 
     class _FakeAgentLoop:
         def __init__(self, *args, **kwargs) -> None:

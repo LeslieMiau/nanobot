@@ -67,6 +67,22 @@ def test_build_task_progress_report_combines_harness_and_pane_output(tmp_path: P
     assert "当前输出: Running pytest tests/coding_tasks" in report.summary
 
 
+def test_build_task_progress_report_summarizes_codex_json_events(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _prepare_repo(repo)
+
+    pane_output = (
+        '{"type":"thread.started","thread_id":"abc"}\n'
+        '{"type":"item.completed","item":{"id":"item_4","type":"command_execution",'
+        '"command":"/bin/zsh -lc \\"cat /tmp/example/SKILL.md\\"","aggregated_output":"very long output"}}\n'
+    )
+
+    report = build_task_progress_report(repo, pane_output)
+
+    assert "当前输出: 执行命令: /bin/zsh -lc" in report.summary
+    assert "aggregated_output" not in report.summary
+
+
 @pytest.mark.asyncio
 async def test_poll_task_updates_progress_summary_and_timestamp(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"

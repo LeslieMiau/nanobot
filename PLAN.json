@@ -569,6 +569,6 @@
       "Verify Codex starts in the target repo, reads or initializes the harness, and updates task state on disk.",
       "Confirm nanobot can report the live task status back through its user-facing control path."
     ],
-    "passes": false
+    "passes": true
   }
 ]

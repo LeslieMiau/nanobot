@@ -140,4 +140,34 @@ def _extract_live_output(pane_output: str) -> str:
     lines = [line.strip() for line in pane_output.splitlines() if line.strip()]
     if not lines:
         return ""
-    return lines[-1]
+    for line in reversed(lines):
+        if summary := _summarize_codex_event_line(line):
+            return summary
+    return _trim_summary(lines[-1])
+
+
+def _summarize_codex_event_line(line: str) -> str:
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        return _trim_summary(line)
+
+    item = payload.get("item")
+    if not isinstance(item, dict):
+        return ""
+
+    item_type = item.get("type")
+    if item_type == "agent_message":
+        return _trim_summary(str(item.get("text") or ""))
+    if item_type == "command_execution":
+        command = str(item.get("command") or "").strip()
+        if command:
+            return _trim_summary(f"执行命令: {command}")
+    return ""
+
+
+def _trim_summary(text: str, limit: int = 160) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3] + "..."

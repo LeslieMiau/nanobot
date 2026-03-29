@@ -286,3 +286,24 @@
   - Reuse the active CLI gateway path for the single-instance lock instead of relying on the dormant `app/gateway.py` branch
 - Remaining blockers / follow-up:
   - Only feature `#52` remains: a true manual end-to-end run against a local repo through the nanobot entrypoint
+
+## Session update - 2026-03-29 (feature #52)
+- Completed feature:
+  - Ran a real manual end-to-end coding task against an isolated local git repo under `/tmp`, using `nanobot coding-task create`, `nanobot coding-task run`, and `nanobot coding-task status` with a dedicated workspace/config override
+  - Verified nanobot persisted the coding task record plus append-only run log under the workspace automation directory, then launched a real tmux-backed Codex worker for the task
+  - Verified the target repo received real harness files from the live Codex run (`PLAN.json`, `PROGRESS.md`, `init.sh`, `.gitignore`) and that nanobot status could read them back into a single summary with plan counts, latest progress note, recent commit metadata, and current worker activity
+  - Tightened live-status summarization so tmux output from `codex exec --json` is collapsed into concise agent/command summaries instead of dumping raw JSON event payloads to users
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_progress.py tests/cli/test_commands.py -k "coding_task_status_shows_details_and_recent_events or build_task_progress_report_summarizes_codex_json_events or build_task_progress_report_combines_harness_and_pane_output"` -> passed (3 selected tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks/progress.py tests/coding_tasks/test_progress.py` -> passed
+  - Manual E2E:
+    - `.venv/bin/nanobot coding-task create /tmp/nanobot-coding-e2e.pIh22M/repo --goal "Initialize the repo harness and append one short status line to README.md." --config /tmp/nanobot-coding-e2e.pIh22M/config.json --workspace /tmp/nanobot-coding-e2e.pIh22M/workspace` -> created task `180c187a`
+    - `.venv/bin/nanobot coding-task run 180c187a --config /tmp/nanobot-coding-e2e.pIh22M/config.json --workspace /tmp/nanobot-coding-e2e.pIh22M/workspace` -> launched tmux session `codex-task-repo-180c187a`
+    - `.venv/bin/nanobot coding-task status 180c187a --config /tmp/nanobot-coding-e2e.pIh22M/config.json --workspace /tmp/nanobot-coding-e2e.pIh22M/workspace` -> reported branch `main`, recent commit `286435a init repo`, repo harness progress `已完成 0/12 项，剩余 12 项`, the latest `PROGRESS.md` note, and a concise current-worker summary
+- Key decisions:
+  - Treat the real local repo run as the acceptance proof for feature `#52`; the task does not need to finish the repo change to prove nanobot can create, launch, persist, and summarize a live coding task
+  - Fix the JSON-event summarization in nanobot itself rather than hand-waving around verbose raw Codex output, so the verified E2E path matches the intended operator experience
+  - Keep the isolated manual-run repo under `/tmp` and out of the nanobot worktree so the acceptance proof does not contaminate the main repository history
+- Remaining blockers / follow-up:
+  - `PLAN.json` is now fully complete for the nanobot coding-task orchestration initiative
+  - The unrelated repo-wide baseline remains red because `tests/test_repo_sync_service.py` still imports missing `nanobot.repo_sync.service`
