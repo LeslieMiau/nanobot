@@ -171,3 +171,22 @@
 - Remaining blockers / follow-up:
   - The new harness module is not wired into a real Codex worker launch path yet, so feature `#16` remains the next major integration step
   - Progress is still based on persisted task metadata rather than live tmux/Codex session output
+
+## Session update - 2026-03-29 (features #16, #17, #18, #19)
+- Completed features:
+  - Added a tmux-backed `CodexWorkerLauncher` that can create a new tmux session for a coding task, write the bootstrap prompt to an artifact file, and mark the task as `starting`
+  - Reused existing tmux sessions for repeated launches of the same task instead of spawning duplicate sessions, with a best-effort `C-c` reset before relaunch
+  - Standardized the Codex startup command so it carries the repo path, generated prompt, and persistent log path in a reproducible shell command
+  - Added session-hint extraction from pane output and persisted that hint back into the coding-task record when present
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_worker.py tests/coding_tasks/test_harness.py tests/coding_tasks/test_manager.py` -> passed (11 tests)
+  - `.venv/bin/pytest tests/cli/test_commands.py -k "coding_task_run_launches_tmux_worker or coding_task_create_persists_task or coding_task_create_rejects_missing_repo or coding_task_list_shows_status_and_recoverability or coding_task_status_shows_details_and_recent_events or test_coding_task_cancel_updates_status_and_reason or test_coding_task_resume_moves_failed_task_back_to_starting"` -> passed (7 selected tests)
+  - `.venv/bin/pytest tests/agent/test_coding_task_routing.py tests/coding_tasks/test_router.py` -> passed (11 tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks nanobot/cli/commands.py tests/coding_tasks/test_worker.py` -> passed
+- Key decisions:
+  - Use `codex exec --json --full-auto` inside tmux for the first launcher cut so task output is scrapeable and startup remains reproducible
+  - Keep worker launching behind a dedicated `nanobot coding-task run <id>` CLI command first, which is enough to validate tmux/session reuse behavior before wiring launch directly into Telegram controls
+  - Store prompt artifacts and Codex logs under the workspace automation directory so future recovery and diagnosis do not depend on transient terminal history alone
+- Remaining blockers / follow-up:
+  - The worker can launch, but nanobot still does not poll pane output or synthesize progress from live tmux output yet, so feature `#20` is the next integration gap
+  - Telegram `继续` still updates persisted state only; it does not yet invoke the live worker launcher

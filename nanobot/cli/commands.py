@@ -866,6 +866,31 @@ def coding_task_resume(
     console.print(f"Note: {note}")
 
 
+@coding_task_app.command("run")
+def coding_task_run(
+    task_id: str = typer.Argument(..., help="Coding task id"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Launch a coding task inside a tmux-backed Codex worker."""
+    from nanobot.coding_tasks import CodexWorkerLauncher
+
+    config_obj = _load_runtime_config(config, workspace)
+    _store, manager = _load_coding_task_runtime(config_obj)
+    launcher = CodexWorkerLauncher(config_obj.workspace_path, manager)
+    result = launcher.launch_task(task_id)
+
+    console.print(f"[green]✓[/green] Launched coding task {result.task.id}")
+    console.print(f"Status: {result.task.status}")
+    console.print(f"tmux: {result.task.tmux_session}")
+    console.print(f"Reuse: {'yes' if result.session_reused else 'no'}")
+    console.print(f"Harness state: {result.task.harness_state}")
+    console.print(f"Prompt: {result.prompt_path}")
+    console.print(f"Log: {result.log_path}")
+    if result.session_hint:
+        console.print(f"Codex session: {result.session_hint}")
+
+
 
 
 # ============================================================================

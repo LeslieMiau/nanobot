@@ -1225,6 +1225,58 @@ def test_coding_task_resume_moves_failed_task_back_to_starting(monkeypatch, tmp_
     assert any(event.event == "user_control" and event.message == "resume" for event in events)
 
 
+def test_coding_task_run_launches_tmux_worker(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.coding_tasks.manager import CodexWorkerManager
+    from nanobot.coding_tasks.store import CodingTaskStore
+    from nanobot.coding_tasks.worker import CodexLaunchResult
+
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    workspace = tmp_path / "workspace"
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    task_store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, task_store)
+    task = manager.create_task(repo_path=str(repo), goal="Launch me")
+
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+
+    class _FakeLauncher:
+        def __init__(self, workspace_path, worker_manager):
+            assert workspace_path == workspace
+            assert worker_manager is manager
+
+        def launch_task(self, task_id: str):
+            assert task_id == task.id
+            launched = manager.mark_starting(task.id, harness_state="missing", summary="Launching Codex worker")
+            return CodexLaunchResult(
+                task=launched,
+                session_reused=False,
+                command="codex exec ...",
+                prompt_path=str(workspace / "automation" / "coding" / "artifacts" / f"{task.id}.prompt.txt"),
+                log_path=str(workspace / "automation" / "coding" / "artifacts" / f"{task.id}.codex.log"),
+                session_hint="sess-123",
+            )
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands._load_coding_task_runtime", lambda _config: (task_store, manager))
+    monkeypatch.setattr("nanobot.coding_tasks.CodexWorkerLauncher", _FakeLauncher)
+
+    result = runner.invoke(app, ["coding-task", "run", task.id, "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    output = _strip_ansi(result.stdout)
+    assert f"Launched coding task {task.id}" in output
+    assert "Status: starting" in output
+    assert "tmux:" in output
+    assert "Reuse: no" in output
+    assert "Codex session: sess-123" in output
+
+
 def test_channels_login_requires_channel_name() -> None:
     result = runner.invoke(app, ["channels", "login"])
 

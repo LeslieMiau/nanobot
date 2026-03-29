@@ -173,7 +173,7 @@
       "Verify a tmux session is created or attached for that task id.",
       "Confirm the task state records the tmux session and moves to `starting`."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 17,
@@ -184,7 +184,7 @@
       "Trigger resume or continue for the same task.",
       "Verify nanobot writes into the original tmux target instead of creating a second session."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 18,
@@ -195,7 +195,7 @@
       "Verify the repo path, goal, and no-push execution boundary are all present.",
       "Confirm repeated launches for the same task preserve the same goal and repo routing."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 19,
@@ -206,7 +206,7 @@
       "Verify nanobot stores a session hint in the coding task record when that information is present.",
       "Confirm the stored hint survives reloading the coding task from disk."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 20,
