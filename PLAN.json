@@ -8,7 +8,7 @@
       "Open PROGRESS.md and verify the reboot entry records the current baseline and the decision to keep CLI run semantics unchanged.",
       "Confirm the new task scope is limited to Telegram start-command launch behavior and its focused regressions."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 2,
@@ -19,7 +19,7 @@
       "Verify nanobot creates the task and immediately calls the launcher for that new task id.",
       "Confirm the Telegram acknowledgement reports the launched status instead of leaving the task queued."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,
@@ -30,7 +30,7 @@
       "Verify it delegates launch to the shared launcher abstraction already used by `nanobot coding-task run`.",
       "Confirm no second worker-start implementation or ad hoc tmux logic is added to the router."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,
@@ -41,7 +41,7 @@
       "Verify the task is still persisted successfully.",
       "Confirm the acknowledgement remains usable and does not claim a worker was launched."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,
@@ -52,7 +52,7 @@
       "Verify the task record still exists in the coding-task store.",
       "Confirm the Telegram reply explains that creation succeeded but launch failed."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,
@@ -63,7 +63,7 @@
       "Verify the new assertions cover both the happy path and the failure boundary.",
       "Confirm the regression suite remains scoped away from unrelated global pytest failures."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,
@@ -74,6 +74,6 @@
       "Verify it states that Telegram start commands now create and launch automatically.",
       "Confirm the docs still mention the CLI create/run workflow as an explicit alternative."
     ],
-    "passes": false
+    "passes": true
   }
 ]

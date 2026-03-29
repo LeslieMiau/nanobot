@@ -8,10 +8,45 @@ import pytest
 from nanobot.bus.events import InboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.coding_tasks.manager import CodexWorkerManager
+from nanobot.coding_tasks.runtime import build_coding_task_runtime
 from nanobot.coding_tasks.store import CodingTaskStore
 
 
-def _make_loop(tmp_path: Path):
+class _FakeLauncher:
+    def __init__(self, manager: CodexWorkerManager, *, fail_on_launch: bool = False) -> None:
+        self.manager = manager
+        self.fail_on_launch = fail_on_launch
+        self.launched_ids: list[str] = []
+
+    def launch_task(self, task_id: str):
+        self.launched_ids.append(task_id)
+        if self.fail_on_launch:
+            raise RuntimeError("tmux unavailable")
+        launched = self.manager.mark_starting(task_id, harness_state="missing", summary="Launching Codex worker")
+
+        class _Result:
+            task = launched
+            session_reused = False
+            session_hint = None
+
+        return _Result()
+
+    def capture_pane(self, _session: str) -> str:
+        return ""
+
+    def has_session(self, _session: str) -> bool:
+        return False
+
+    def interrupt_task(self, task_id: str):
+        return self.manager.require_task(task_id)
+
+
+def _make_loop(
+    tmp_path: Path,
+    *,
+    attach_launcher: bool = True,
+    fail_on_launch: bool = False,
+):
     from nanobot.agent.loop import AgentLoop
 
     bus = MessageBus()
@@ -19,6 +54,11 @@ def _make_loop(tmp_path: Path):
     provider.get_default_model.return_value = "test-model"
     store = CodingTaskStore(tmp_path / "automation" / "coding_tasks.json")
     manager = CodexWorkerManager(tmp_path, store)
+    runtime = None
+    launcher = None
+    if attach_launcher:
+        launcher = _FakeLauncher(manager, fail_on_launch=fail_on_launch)
+        runtime = build_coding_task_runtime(tmp_path, manager=manager, launcher=launcher)
 
     with patch("nanobot.agent.loop.ContextBuilder"), \
          patch("nanobot.agent.loop.SessionManager"), \
@@ -27,9 +67,10 @@ def _make_loop(tmp_path: Path):
             bus=bus,
             provider=provider,
             workspace=tmp_path,
+            coding_task_runtime=runtime,
             coding_task_manager=manager,
         )
-    return loop, store
+    return loop, store, manager, launcher
 
 
 def _create_origin_task(store: CodingTaskStore, tmp_path: Path, *, status: str = "queued", summary: str = ""):
@@ -59,7 +100,7 @@ def _create_origin_task(store: CodingTaskStore, tmp_path: Path, *, status: str =
 
 @pytest.mark.asyncio
 async def test_private_telegram_start_coding_creates_task_and_acknowledges(tmp_path: Path) -> None:
-    loop, store = _make_loop(tmp_path)
+    loop, store, _manager, launcher = _make_loop(tmp_path, attach_launcher=True)
     repo_path = tmp_path / "demo-repo"
     repo_path.mkdir()
 
@@ -74,13 +115,15 @@ async def test_private_telegram_start_coding_creates_task_and_acknowledges(tmp_p
     )
 
     assert response is not None
-    assert "已创建编程任务" in response.content
-    assert "状态: queued" in response.content
+    assert "已创建并启动编程任务" in response.content
+    assert "状态: starting" in response.content
 
     tasks = store.list_tasks()
     assert len(tasks) == 1
+    assert launcher.launched_ids == [tasks[0].id]
     assert tasks[0].repo_path == str(repo_path)
     assert tasks[0].goal == "修复登录回调"
+    assert tasks[0].status == "starting"
     assert tasks[0].metadata["origin_channel"] == "telegram"
     assert tasks[0].metadata["origin_chat_id"] == "chat-1"
     assert tasks[0].metadata["requested_via"] == "telegram_private_chat"
@@ -88,7 +131,7 @@ async def test_private_telegram_start_coding_creates_task_and_acknowledges(tmp_p
 
 @pytest.mark.asyncio
 async def test_private_telegram_start_coding_without_repo_or_goal_returns_usage(tmp_path: Path) -> None:
-    loop, store = _make_loop(tmp_path)
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
 
     response = await loop._process_message(
         InboundMessage(
@@ -107,7 +150,7 @@ async def test_private_telegram_start_coding_without_repo_or_goal_returns_usage(
 
 @pytest.mark.asyncio
 async def test_private_telegram_status_routes_to_latest_origin_task(tmp_path: Path) -> None:
-    loop, store = _make_loop(tmp_path)
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
     _manager, task = _create_origin_task(store, tmp_path, status="running", summary="正在修改登录逻辑")
 
     response = await loop._process_message(
@@ -130,7 +173,7 @@ async def test_private_telegram_status_routes_to_latest_origin_task(tmp_path: Pa
 
 @pytest.mark.asyncio
 async def test_private_telegram_cancel_routes_to_origin_task(tmp_path: Path) -> None:
-    loop, store = _make_loop(tmp_path)
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
     _manager, task = _create_origin_task(store, tmp_path)
 
     response = await loop._process_message(
@@ -153,7 +196,7 @@ async def test_private_telegram_cancel_routes_to_origin_task(tmp_path: Path) -> 
 
 @pytest.mark.asyncio
 async def test_private_telegram_continue_rejects_cancelled_task(tmp_path: Path) -> None:
-    loop, store = _make_loop(tmp_path)
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
     _manager, task = _create_origin_task(store, tmp_path)
 
     await loop._process_message(
@@ -183,7 +226,7 @@ async def test_private_telegram_continue_rejects_cancelled_task(tmp_path: Path) 
 
 @pytest.mark.asyncio
 async def test_private_telegram_resume_routes_to_failed_origin_task(tmp_path: Path) -> None:
-    loop, store = _make_loop(tmp_path)
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
     _manager, task = _create_origin_task(store, tmp_path, status="failed")
 
     response = await loop._process_message(
@@ -206,7 +249,7 @@ async def test_private_telegram_resume_routes_to_failed_origin_task(tmp_path: Pa
 
 @pytest.mark.asyncio
 async def test_private_telegram_resume_reuses_live_tmux_worker_session(tmp_path: Path) -> None:
-    loop, store = _make_loop(tmp_path)
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
     manager, task = _create_origin_task(store, tmp_path, status="failed")
 
     class _FakeLauncher:
@@ -249,7 +292,7 @@ async def test_private_telegram_resume_reuses_live_tmux_worker_session(tmp_path:
 
 @pytest.mark.asyncio
 async def test_private_telegram_stop_interrupts_live_worker_and_marks_waiting(tmp_path: Path) -> None:
-    loop, store = _make_loop(tmp_path)
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
     manager, task = _create_origin_task(store, tmp_path, status="running")
 
     class _FakeLauncher:
@@ -292,7 +335,7 @@ async def test_private_telegram_stop_interrupts_live_worker_and_marks_waiting(tm
 
 @pytest.mark.asyncio
 async def test_private_telegram_rejects_second_active_coding_task(tmp_path: Path) -> None:
-    loop, store = _make_loop(tmp_path)
+    loop, store, _manager, _launcher = _make_loop(tmp_path, attach_launcher=True)
     repo_path = tmp_path / "demo-repo"
     repo_path.mkdir()
     other_repo_path = tmp_path / "other-repo"
@@ -328,7 +371,7 @@ async def test_private_telegram_rejects_second_active_coding_task(tmp_path: Path
 
 @pytest.mark.asyncio
 async def test_private_telegram_rejects_missing_repo_path_before_task_creation(tmp_path: Path) -> None:
-    loop, store = _make_loop(tmp_path)
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
     missing_repo = tmp_path / "missing-repo"
 
     response = await loop._process_message(
@@ -344,3 +387,57 @@ async def test_private_telegram_rejects_missing_repo_path_before_task_creation(t
     assert response is not None
     assert "仓库路径不存在" in response.content
     assert store.list_tasks() == []
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_start_coding_without_launcher_falls_back_to_create_only(tmp_path: Path) -> None:
+    loop, store, manager, _launcher = _make_loop(tmp_path)
+    repo_path = tmp_path / "demo-repo"
+    repo_path.mkdir()
+
+    from nanobot.coding_tasks.router import register_coding_task_commands
+    loop.commands = loop.commands.__class__()
+    from nanobot.command import register_builtin_commands
+    register_builtin_commands(loop.commands)
+    register_coding_task_commands(loop.commands, manager, launcher=None, monitor=None)
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content=f"开始编程 {repo_path} 修复登录回调",
+            metadata={"is_group": False, "message_id": 42},
+        )
+    )
+
+    assert response is not None
+    assert "已创建编程任务" in response.content
+    assert "状态: queued" in response.content
+    tasks = store.list_tasks()
+    assert len(tasks) == 1
+    assert tasks[0].status == "queued"
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_start_coding_reports_launch_failure_and_keeps_task(tmp_path: Path) -> None:
+    loop, store, _manager, launcher = _make_loop(tmp_path, attach_launcher=True, fail_on_launch=True)
+    repo_path = tmp_path / "demo-repo"
+    repo_path.mkdir()
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content=f"开始编程 {repo_path} 修复登录回调",
+            metadata={"is_group": False, "message_id": 42},
+        )
+    )
+
+    assert response is not None
+    assert "已创建编程任务，但自动启动失败" in response.content
+    assert "tmux unavailable" in response.content
+    tasks = store.list_tasks()
+    assert len(tasks) == 1
+    assert tasks[0].status == "failed"

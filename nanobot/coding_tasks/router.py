@@ -114,11 +114,16 @@ def register_coding_task_commands(
 ) -> None:
     """Register chat-level interceptors for coding-task lifecycle actions."""
     task_policy = policy or CodingTaskPolicy(manager)
-    router.intercept(_make_start_coding_handler(manager, task_policy))
+    router.intercept(_make_start_coding_handler(manager, task_policy, launcher=launcher))
     router.intercept(_make_control_handler(manager, task_policy, launcher=launcher, monitor=monitor))
 
 
-def _make_start_coding_handler(manager: CodexWorkerManager, policy: CodingTaskPolicy):
+def _make_start_coding_handler(
+    manager: CodexWorkerManager,
+    policy: CodingTaskPolicy,
+    *,
+    launcher: CodexWorkerLauncher | None = None,
+):
     async def _handle_start_coding(ctx: CommandContext) -> OutboundMessage | None:
         msg = ctx.msg
         if msg.channel != "telegram":
@@ -179,15 +184,54 @@ def _make_start_coding_handler(manager: CodexWorkerManager, policy: CodingTaskPo
                 "message_id": msg.metadata.get("message_id"),
             },
         )
+        if launcher is None:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    "已创建编程任务\n"
+                    f"任务ID: {task.id}\n"
+                    f"状态: {task.status}\n"
+                    f"仓库: {task.repo_path}\n"
+                    f"目标: {task.goal}"
+                ),
+                metadata={"render_as": "text"},
+            )
+
+        try:
+            launched = launcher.launch_task(task.id)
+        except Exception as exc:
+            failed = manager.mark_failed(
+                task.id,
+                summary=f"Automatic Telegram launch failed: {type(exc).__name__}: {exc}",
+            )
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    "已创建编程任务，但自动启动失败\n"
+                    f"任务ID: {failed.id}\n"
+                    f"状态: {failed.status}\n"
+                    f"仓库: {failed.repo_path}\n"
+                    f"目标: {failed.goal}\n"
+                    f"错误: {type(exc).__name__}: {exc}\n"
+                    "可发送“继续”重试启动，或使用 CLI 手动运行该任务。"
+                ),
+                metadata={"render_as": "text"},
+            )
+
+        updated = launched.task
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
             content=(
-                "已创建编程任务\n"
-                f"任务ID: {task.id}\n"
-                f"状态: {task.status}\n"
-                f"仓库: {task.repo_path}\n"
-                f"目标: {task.goal}"
+                "已创建并启动编程任务\n"
+                f"任务ID: {updated.id}\n"
+                f"状态: {updated.status}\n"
+                f"仓库: {updated.repo_path}\n"
+                f"目标: {updated.goal}\n"
+                f"复用 tmux: {'yes' if launched.session_reused else 'no'}\n"
+                f"Harness 状态: {updated.harness_state}"
             ),
             metadata={"render_as": "text"},
         )

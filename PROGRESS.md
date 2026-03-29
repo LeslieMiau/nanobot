@@ -418,3 +418,19 @@
   - Keep the change narrow: Telegram start should call the existing shared launcher, not invent a second worker-start path
   - Preserve current CLI `coding-task create` and `coding-task run` semantics as an explicit alternative workflow
   - If launch fails, keep the created task on disk and report the failure clearly to Telegram instead of silently rolling back the task record
+
+## Session update - 2026-03-29 (telegram coding-task auto-launch)
+- Completed features:
+  - Updated [nanobot/coding_tasks/router.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/router.py) so Telegram private-chat `开始编程` now delegates to the shared `launcher.launch_task()` path immediately after task creation when a launcher is available
+  - Added clear failure handling for auto-launch: nanobot now keeps the task record, marks it failed, and replies with a Telegram-visible error message instead of silently losing the task
+  - Preserved create-only fallback behavior when no launcher is wired, so narrower runtimes can still persist tasks without pretending to launch workers
+  - Updated [tests/agent/test_coding_task_routing.py](/Users/miau/Documents/nanobot/tests/agent/test_coding_task_routing.py) to use a fake launcher by default, and added focused regressions for auto-launch success, no-launcher fallback, and launch-failure retention
+  - Updated [README.md](/Users/miau/Documents/nanobot/README.md) to document that Telegram `开始编程` now launches Codex immediately while the CLI create/run path remains available
+- Verification:
+  - `.venv/bin/pytest tests/agent/test_coding_task_routing.py tests/coding_tasks/test_router.py` -> passed (16 tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks/router.py tests/agent/test_coding_task_routing.py` -> passed
+  - Manual smoke:
+    - `.venv/bin/python - <<'PY' ...` with a temporary workspace, real `AgentLoop` routing, and a fake launcher -> Telegram `开始编程 <repo> 修复登录回调` returned `已创建并启动编程任务` and persisted the task in `starting` status
+- Remaining blockers / follow-up:
+  - Repo-wide pytest still has the unrelated baseline failures recorded in the previous session (`tests/cli/test_commands.py`, `tests/config/test_config_migration.py`, `tests/test_openai_oauth_provider.py`, and `tests/tools/test_tool_validation.py`)
+  - The Telegram path still depends on the gateway being active; this session did not change gateway startup or outbound notification plumbing

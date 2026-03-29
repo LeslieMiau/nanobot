@@ -113,7 +113,7 @@ For long-running coding work, nanobot now uses a three-layer split:
 The user-visible control flow is:
 
 1. Send `开始编程 ...` in Telegram private chat or create a task from the CLI.
-2. nanobot persists the coding task and launches or reuses a tmux-backed Codex worker.
+2. Telegram start commands now persist the coding task and immediately launch or reuse a tmux-backed Codex worker; the CLI still keeps explicit `coding-task create` and `coding-task run` steps for manual control.
 3. Codex restores or initializes the target repo harness before editing.
 4. nanobot polls tmux output and harness files to build status summaries.
 5. Telegram controls such as `状态`, `继续`, `停止`, and `取消` act on the same tracked coding task instead of creating duplicate work.
