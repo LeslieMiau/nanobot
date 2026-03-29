@@ -737,10 +737,17 @@ def coding_task_create(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Create a persisted coding task record."""
+    from nanobot.coding_tasks.router import validate_repo_path
+
     config_obj = _load_runtime_config(config, workspace)
     _, manager = _load_coding_task_runtime(config_obj)
+    resolved_repo_path, validation_error = validate_repo_path(repo_path)
+    if validation_error:
+        console.print(f"[red]Error:[/red] {validation_error}")
+        raise typer.Exit(code=1)
+
     task = manager.create_task(
-        repo_path=repo_path,
+        repo_path=resolved_repo_path,
         goal=goal,
         title=title,
         branch_name=branch,

@@ -5,12 +5,16 @@ from __future__ import annotations
 import re
 import shlex
 from dataclasses import dataclass
+from pathlib import Path
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.coding_tasks.manager import CodexWorkerManager
 
 _START_PREFIX = "开始编程"
+_STATUS_COMMANDS = {"状态"}
+_RESUME_COMMANDS = {"继续"}
+_CANCEL_COMMANDS = {"取消"}
 
 _FIELD_PATTERNS = {
     "repo_path": re.compile(r"^(?:仓库|repo|repo_path|路径)\s*[:：=]\s*(.+)$", re.IGNORECASE),
@@ -80,9 +84,26 @@ def parse_start_coding_request(text: str) -> ParsedCodingTaskRequest | None:
     return ParsedCodingTaskRequest(repo_path=candidate_repo, goal=goal, title=title)
 
 
+def validate_repo_path(repo_path: str) -> tuple[str | None, str | None]:
+    """Validate a local repository path before creating a coding task."""
+    raw = repo_path.strip()
+    if not raw:
+        return None, "仓库路径不能为空。"
+    if re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", raw):
+        return None, "当前只支持本地仓库路径，不支持 URL。"
+
+    resolved = Path(raw).expanduser()
+    if not resolved.exists():
+        return None, f"仓库路径不存在: {resolved}"
+    if not resolved.is_dir():
+        return None, f"仓库路径不是目录: {resolved}"
+    return str(resolved), None
+
+
 def register_coding_task_commands(router: CommandRouter, manager: CodexWorkerManager) -> None:
     """Register chat-level interceptors for coding-task lifecycle actions."""
     router.intercept(_make_start_coding_handler(manager))
+    router.intercept(_make_control_handler(manager))
 
 
 def _make_start_coding_handler(manager: CodexWorkerManager):
@@ -111,8 +132,31 @@ def _make_start_coding_handler(manager: CodexWorkerManager):
                 metadata={"render_as": "text"},
             )
 
+        if active_task := manager.latest_active_task():
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    "当前已有一个活跃的编程任务，MVP 模式下一次只支持一个。\n"
+                    f"任务ID: {active_task.id}\n"
+                    f"状态: {active_task.status}\n"
+                    f"仓库: {active_task.repo_path}\n"
+                    "请先发送“状态”查看进度，或发送“取消”结束当前任务。"
+                ),
+                metadata={"render_as": "text"},
+            )
+
+        repo_path, validation_error = validate_repo_path(parsed.repo_path)
+        if validation_error:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=validation_error,
+                metadata={"render_as": "text"},
+            )
+
         task = manager.create_task(
-            repo_path=parsed.repo_path,
+            repo_path=repo_path,
             goal=parsed.goal,
             title=parsed.title,
             metadata={
@@ -137,6 +181,94 @@ def _make_start_coding_handler(manager: CodexWorkerManager):
         )
 
     return _handle_start_coding
+
+
+def _make_control_handler(manager: CodexWorkerManager):
+    async def _handle_control(ctx: CommandContext) -> OutboundMessage | None:
+        msg = ctx.msg
+        if msg.channel != "telegram":
+            return None
+        if msg.metadata.get("is_group", True):
+            return None
+
+        command = ctx.raw.strip()
+        if command not in _STATUS_COMMANDS | _RESUME_COMMANDS | _CANCEL_COMMANDS:
+            return None
+
+        task = manager.latest_active_task_for_origin(msg.channel, msg.chat_id)
+        if task is None:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content="当前私聊里还没有可控制的编程任务。先发送“开始编程 ...”创建一个任务。",
+                metadata={"render_as": "text"},
+            )
+
+        if command in _STATUS_COMMANDS:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=_format_task_status(task),
+                metadata={"render_as": "text"},
+            )
+
+        if command in _CANCEL_COMMANDS:
+            updated = manager.cancel_task(task.id, summary="Cancelled from Telegram private chat")
+            manager.record_user_control(updated.id, "cancel")
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    "已取消编程任务\n"
+                    f"任务ID: {updated.id}\n"
+                    f"状态: {updated.status}\n"
+                    f"仓库: {updated.repo_path}"
+                ),
+                metadata={"render_as": "text"},
+            )
+
+        if task.status in {"waiting_user", "failed"}:
+            manager.record_user_control(task.id, "resume")
+            updated = manager.mark_starting(task.id, summary="Resumed from Telegram private chat")
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    "已继续编程任务\n"
+                    f"任务ID: {updated.id}\n"
+                    f"状态: {updated.status}\n"
+                    f"仓库: {updated.repo_path}"
+                ),
+                metadata={"render_as": "text"},
+            )
+
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=(
+                "当前编程任务不需要继续操作\n"
+                f"任务ID: {task.id}\n"
+                f"状态: {task.status}"
+            ),
+            metadata={"render_as": "text"},
+        )
+
+    return _handle_control
+
+
+def _format_task_status(task) -> str:
+    lines = [
+        "当前编程任务状态",
+        f"任务ID: {task.id}",
+        f"状态: {task.status}",
+        f"仓库: {task.repo_path}",
+        f"目标: {task.goal}",
+    ]
+    if task.last_progress_summary:
+        lines.append(f"最近进展: {task.last_progress_summary}")
+    if task.tmux_session:
+        lines.append(f"tmux: {task.tmux_session}")
+    return "\n".join(lines)
 
 
 def _looks_like_repo_path(token: str) -> bool:

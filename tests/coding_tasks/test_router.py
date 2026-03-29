@@ -2,6 +2,7 @@ from nanobot.coding_tasks.router import (
     ParsedCodingTaskRequest,
     is_start_coding_request,
     parse_start_coding_request,
+    validate_repo_path,
 )
 
 
@@ -30,3 +31,19 @@ def test_parse_start_coding_request_with_structured_fields() -> None:
 def test_is_start_coding_request_matches_only_expected_prefix() -> None:
     assert is_start_coding_request("开始编程 /tmp/repo 做点事") is True
     assert is_start_coding_request("帮我看看这个 repo") is False
+
+
+def test_validate_repo_path_rejects_missing_or_file_targets(tmp_path) -> None:
+    missing = tmp_path / "missing-repo"
+    file_path = tmp_path / "notes.txt"
+    file_path.write_text("hello", encoding="utf-8")
+
+    resolved, error = validate_repo_path(str(missing))
+    assert resolved is None
+    assert error is not None
+    assert "不存在" in error
+
+    resolved, error = validate_repo_path(str(file_path))
+    assert resolved is None
+    assert error is not None
+    assert "不是目录" in error

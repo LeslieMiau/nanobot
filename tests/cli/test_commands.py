@@ -1043,6 +1043,43 @@ def test_coding_task_create_persists_task(monkeypatch, tmp_path: Path) -> None:
     assert tasks[0].goal == "Implement feature #4"
 
 
+def test_coding_task_create_rejects_missing_repo(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.coding_tasks.store import CodingTaskStore
+
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    workspace = tmp_path / "workspace"
+    missing_repo = tmp_path / "missing-repo"
+
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+
+    result = runner.invoke(
+        app,
+        [
+            "coding-task",
+            "create",
+            str(missing_repo),
+            "--goal",
+            "Implement feature #12",
+            "--config",
+            str(config_file),
+        ],
+    )
+
+    assert result.exit_code == 1
+    output = _strip_ansi(result.stdout)
+    assert "仓库路径不存在" in output
+
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    assert store.list_tasks() == []
+
+
 def test_coding_task_list_shows_status_and_recoverability(monkeypatch, tmp_path: Path) -> None:
     from nanobot.coding_tasks.manager import CodexWorkerManager
     from nanobot.coding_tasks.store import CodingTaskStore

@@ -136,3 +136,21 @@
 - Remaining blockers / follow-up:
   - Telegram control messages such as `状态` / `继续` / `取消` are still not routed onto active coding tasks yet, so feature `#10` remains the next chat-control gap
   - The new chat route only creates persisted tasks; it does not launch or resume a real Codex worker session yet
+
+## Session update - 2026-03-29 (features #10, #11, #12)
+- Completed features:
+  - Routed Telegram private-chat control messages `状态` / `继续` / `取消` onto the latest active coding task for the same originating chat instead of treating them as generic assistant messages
+  - Enforced the MVP single-active-task rule on Telegram private-chat task creation so a second `开始编程` request is rejected while another coding task is still non-terminal
+  - Added repo-path validation to coding-task creation entrypoints so missing paths, file paths, and URL-like values are rejected before task records are written
+- Verification:
+  - `.venv/bin/pytest tests/agent/test_coding_task_routing.py tests/coding_tasks/test_router.py tests/coding_tasks/test_manager.py` -> passed (14 tests)
+  - `.venv/bin/pytest tests/cli/test_commands.py -k "coding_task_create_persists_task or coding_task_create_rejects_missing_repo or coding_task_list_shows_status_and_recoverability or coding_task_status_shows_details_and_recent_events or test_coding_task_cancel_updates_status_and_reason or test_coding_task_resume_moves_failed_task_back_to_starting or gateway_reports_coding_task_counts or gateway_uses_configured_port_when_cli_flag_is_missing or gateway_cli_port_overrides_configured_port"` -> passed (9 selected tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks nanobot/cli/commands.py tests/agent/test_coding_task_routing.py tests/coding_tasks/test_router.py` -> passed
+- Key decisions:
+  - Use the latest non-terminal task in the same Telegram private chat as the control target for feature `#10`, then layer the stricter single-active-task creation rule on top in feature `#11`
+  - Keep active-task enforcement at the Telegram private-chat entrypoint for now so existing CLI task-management flows remain available as operator tooling
+  - Leave `CodexWorkerManager.create_task()` itself permissive for this round; validation now lives in user-facing creation entrypoints where the error can be explained cleanly
+  - Fixed a latent status-formatting bug in the new router while touching the control path so task status replies now always return text even if tmux metadata is absent
+- Remaining blockers / follow-up:
+  - There is still no harness detection or prompt-building layer yet, so feature `#13` is the next natural step before real Codex worker launch
+  - Telegram control currently manipulates persisted task state only; it still does not talk to a live tmux/Codex worker session

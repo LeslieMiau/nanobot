@@ -107,7 +107,7 @@
       "Send control messages such as `状态`, `继续`, and `取消` in the same chat.",
       "Verify nanobot routes those controls to the tracked coding task instead of answering with generic assistant text."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 11,
@@ -118,7 +118,7 @@
       "Attempt to start a second coding task in the same workspace.",
       "Verify nanobot refuses the second start or queues it explicitly instead of launching both concurrently."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 12,
@@ -129,7 +129,7 @@
       "Verify nanobot rejects each invalid target with a clear explanation.",
       "Confirm no task record is created for rejected inputs."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 13,

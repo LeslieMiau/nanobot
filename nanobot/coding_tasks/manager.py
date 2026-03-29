@@ -82,6 +82,35 @@ class CodexWorkerManager:
     def recoverable_tasks(self) -> list[CodingTask]:
         return self.store.list_tasks_by_status("starting", "running", "waiting_user")
 
+    def latest_active_task(self) -> CodingTask | None:
+        """Return the newest non-terminal task in this workspace, if any."""
+        tasks = sorted(
+            self.store.list_tasks(),
+            key=lambda task: (task.updated_at_ms, task.created_at_ms),
+            reverse=True,
+        )
+        for task in tasks:
+            if task.status not in {"completed", "cancelled"}:
+                return task
+        return None
+
+    def tasks_for_origin(self, channel: str, chat_id: str) -> list[CodingTask]:
+        """Return tasks created from the given origin channel/chat, newest first."""
+        tasks = [
+            task
+            for task in self.store.list_tasks()
+            if task.metadata.get("origin_channel") == channel
+            and task.metadata.get("origin_chat_id") == chat_id
+        ]
+        return sorted(tasks, key=lambda task: (task.updated_at_ms, task.created_at_ms), reverse=True)
+
+    def latest_active_task_for_origin(self, channel: str, chat_id: str) -> CodingTask | None:
+        """Return the newest non-terminal task for an origin chat, if any."""
+        for task in self.tasks_for_origin(channel, chat_id):
+            if task.status not in {"completed", "cancelled"}:
+                return task
+        return None
+
     def record_user_control(self, task_id: str, control: str) -> CodingTask:
         task = self.require_task(task_id)
         updated = replace(
