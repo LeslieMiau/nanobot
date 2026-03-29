@@ -2,100 +2,100 @@
   {
     "id": 1,
     "category": "setup",
-    "description": "The Telegram coding-intent refactor is initialized as a standalone harness separate from the completed auto-launch task.",
+    "description": "The repo-harness conflict fix is initialized as a standalone harness separate from the completed Telegram coding-intent refactor.",
     "steps": [
-      "Open PLAN.json and verify it only tracks the Telegram coding-intent refactor.",
-      "Open PROGRESS.md and verify the reboot entry records the current parser limitations and the new intent-driven scope.",
-      "Confirm the task scope is limited to Telegram private-chat coding-task detection and repo resolution."
+      "Open PLAN.json and verify it only tracks the repo-harness conflict fix.",
+      "Open PROGRESS.md and verify the reboot entry explains why new Telegram goals were being hijacked by an old in-repo harness.",
+      "Confirm the scope is limited to Telegram coding-task launch conflicts and does not reopen unrelated parser work."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 2,
     "category": "functional",
-    "description": "Configuration can provide a repo alias table for coding tasks, and the runtime wires that alias map into the Telegram coding-task entrypoint.",
+    "description": "The coding-task launcher can inspect an active repo harness and surface a concise summary instead of blindly resuming it.",
     "steps": [
-      "Load config with a coding-task repo alias map.",
-      "Verify the active coding-task runtime receives the alias map without changing CLI coding-task behavior.",
-      "Confirm the gateway path still boots with no alias map configured."
+      "Inspect a repo with PLAN.json, PROGRESS.md, and init.sh present.",
+      "Verify the launcher-side harness inspection returns both the active state and a human-facing summary.",
+      "Confirm repos without a complete harness continue to report no conflict summary."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 3,
     "category": "functional",
-    "description": "A dedicated repo resolver resolves repo refs by checking configured aliases first and then falling back to ~/Documents/<repo>.",
+    "description": "Telegram start-coding flow detects when a new goal targets a repo with an active harness and pauses for confirmation instead of auto-launching.",
     "steps": [
-      "Resolve a configured alias and verify it returns the configured absolute path.",
-      "Resolve an unconfigured repo name that exists under ~/Documents and verify it falls back correctly.",
-      "Resolve a missing repo ref and confirm it returns a clear validation failure."
+      "Send a Telegram private-chat start command for a repo with an active harness in a focused routing test.",
+      "Verify nanobot creates the coding task but leaves it in waiting_user rather than starting Codex immediately.",
+      "Confirm the reply explains both the existing harness summary and the newly requested goal."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 4,
     "category": "functional",
-    "description": "Telegram coding-task entry uses explicit entry detection plus a unified slot extractor instead of hardcoded multi-branch sentence parsing.",
+    "description": "Conflict-state Telegram controls let the user explicitly continue the old harness or start the new goal.",
     "steps": [
-      "Feed the extractor explicit Telegram commands using both 开始编程 and /coding.",
-      "Verify it extracts the same repo ref and goal from natural expressions like repo 的 goal and repo goal.",
-      "Confirm ordinary non-coding chat without an explicit entry does not produce a coding-task request."
+      "From a waiting_user conflict state, send 继续旧任务 and verify the shared launcher resumes the existing harness path.",
+      "From the same conflict state, send 按新任务开始 and verify the task launches with the explicit new-goal override recorded.",
+      "Confirm bare 继续 remains ambiguous in conflict mode and asks for an explicit choice."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 5,
     "category": "integration",
-    "description": "Telegram private-chat coding-task routing uses the new intent and repo-resolution layers while preserving the existing shared launcher and fallback behavior.",
+    "description": "Starting a new goal against an active harness uses an explicit prompt mode so Codex treats the old harness as background, not the primary task.",
     "steps": [
-      "Send a Telegram private-chat explicit coding command with a repo alias in a focused routing test.",
-      "Verify nanobot resolves the repo, creates the task, and auto-launches via the shared launcher.",
-      "Confirm no new worker-launch path is added outside the existing launcher abstraction."
+      "Launch a task with the new-goal override against an active harness repo.",
+      "Inspect the generated Codex bootstrap prompt and verify it says not to continue the old unfinished features as the primary task.",
+      "Confirm the old harness summary is preserved as context while the new goal becomes the task focus."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 6,
     "category": "functional",
-    "description": "Telegram private-chat coding commands still fall back cleanly when no launcher is available or when launch fails.",
+    "description": "Existing non-conflict launch behavior remains unchanged for repos without an active harness or when the user explicitly resumes the old one.",
     "steps": [
-      "Run the Telegram start flow with no launcher wired and verify it still creates a queued task.",
-      "Run the Telegram start flow with a failing launcher and verify the task is preserved with a clear failure response.",
-      "Confirm these behaviors continue to work with repo alias resolution enabled."
+      "Launch a Telegram coding task against a repo with no complete harness and verify it still auto-starts immediately.",
+      "Launch a conflict task and choose 继续旧任务; verify it follows the same shared launcher path as before.",
+      "Confirm create-only and launch-failure fallbacks still work."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 7,
     "category": "testing",
-    "description": "Focused tests cover the explicit-entry detector, slot extractor, repo resolver, and Telegram routing behavior.",
+    "description": "Focused tests cover conflict detection, waiting-user reports, Telegram conflict controls, and prompt-mode generation.",
     "steps": [
-      "Run the coding-task router and agent routing test files.",
-      "Verify the suite covers alias-map resolution, ~/Documents fallback, explicit-entry parsing, and launch fallback paths.",
-      "Confirm the tests remain scoped away from unrelated repo-wide baseline failures."
+      "Run worker, reporting, router, and Telegram routing focused tests.",
+      "Verify the suite covers conflict summary extraction, explicit choice handling, and non-conflict regressions.",
+      "Confirm the tests stay scoped away from unrelated repo-wide failures."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 8,
     "category": "docs",
-    "description": "README explains the new explicit-entry plus intent-extraction behavior and the alias-table plus Documents fallback repo resolution model.",
+    "description": "README and progress notes explain how nanobot now handles active in-repo harness conflicts for new Telegram goals.",
     "steps": [
       "Open the updated README coding-task section.",
-      "Verify it documents 开始编程 and /coding as explicit triggers with natural goal wording.",
-      "Confirm it explains alias-table priority and the ~/Documents fallback."
+      "Verify it explains that active repo harnesses require explicit user confirmation before resuming or replacing work.",
+      "Confirm PROGRESS.md records the reasoning and the new control phrases."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 9,
     "category": "integration",
-    "description": "The live nanobot gateway can be restarted in-place and manually exercise a Telegram coding command that uses natural repo-plus-goal phrasing.",
+    "description": "The live nanobot gateway can be restarted in place and manually confirm that a repo with an active harness no longer hijacks a new Telegram goal silently.",
     "steps": [
-      "Restart the existing nanobot tmux gateway in-place after the refactor.",
-      "Send a Telegram private-chat command like 开始编程 codex-remote 底部tab设置icon换一个.",
-      "Verify the task enters the coding-task flow instead of falling through to normal chat."
+      "Restart the existing nanobot tmux gateway in place after the conflict fix.",
+      "Send a Telegram private-chat command that targets a repo with an active harness and a different new goal.",
+      "Verify nanobot replies with an explicit conflict confirmation flow instead of silently resuming old work."
     ],
-    "passes": true
+    "passes": false
   }
 ]

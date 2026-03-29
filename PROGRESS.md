@@ -467,3 +467,18 @@
 - Remaining blockers / follow-up:
   - Repo-wide pytest still has unrelated baseline failures outside this harness, including config migration, OpenAI OAuth lazy import behavior, and exec PATH assumptions
   - Full end-to-end inbound Telegram confirmation for the exact natural-language phrase still depends on a real user message, but the live gateway was restarted successfully and the same routing path was exercised in a post-restart smoke
+
+## Harness reboot - 2026-03-29 (repo harness conflict confirmation)
+- Task pivot:
+  - Start a new standalone harness to fix the case where a new Telegram coding goal hits a repo with an unfinished in-repo harness and silently resumes the old work instead
+- Existing work detected before re-planning:
+  - Telegram coding-task entry now parses explicit repo-plus-goal messages correctly and launches the shared Codex worker path
+  - Live verification showed the real failure mode is downstream of parsing: when the target repo already has an active harness, Codex restores that harness and its old unfinished task, even if the newly created nanobot task has a different goal
+  - The current Telegram control surface only supports generic `继续 / 停止 / 取消`, so it cannot disambiguate “continue the old harness” from “start my new goal anyway”
+- Baseline validation before feature work:
+  - `git status --short` -> only untracked `.codex/` before this reboot
+  - The active gateway in `nanobot:0.0` was already running commit `9f09c1d` when the issue reproduced
+- Key decisions:
+  - Keep the fix narrow: intercept active-harness conflicts before Codex launch instead of redesigning the whole coding-task lifecycle
+  - Reuse `waiting_user` rather than inventing a new persistent status, with conflict details stored in task metadata
+  - Require explicit conflict commands such as `继续旧任务` and `按新任务开始`; bare `继续` is too ambiguous in this state
