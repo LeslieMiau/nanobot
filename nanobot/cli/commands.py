@@ -525,13 +525,11 @@ def _migrate_cron_store(config: "Config") -> None:
         shutil.move(str(legacy_path), str(new_path))
 
 
-def _load_coding_task_runtime(config: "Config"):
+def _load_coding_task_runtime(config: "Config", *, send_callback=None):
     """Build the workspace-scoped coding task store and manager."""
-    from nanobot.coding_tasks import CodexWorkerManager, CodingTaskStore
+    from nanobot.coding_tasks import build_coding_task_runtime
 
-    store = CodingTaskStore(config.workspace_path / "automation" / "coding" / "tasks.json")
-    manager = CodexWorkerManager(config.workspace_path, store)
-    return store, manager
+    return build_coding_task_runtime(config.workspace_path, send_callback=send_callback)
 
 
 # ============================================================================
@@ -574,18 +572,14 @@ def gateway(
         bus = MessageBus()
         provider = _make_provider(config)
         session_manager = SessionManager(config.workspace_path)
-        coding_task_store, codex_workers = _load_coding_task_runtime(config)
-        from nanobot.coding_tasks import (
-            CodingTaskNotifier,
-            CodexProgressMonitor,
-            CodexTaskRecovery,
-            CodexWorkerLauncher,
-        )
-        coding_task_launcher = CodexWorkerLauncher(config.workspace_path, codex_workers)
-        coding_task_monitor = CodexProgressMonitor(codex_workers, coding_task_launcher)
-        coding_task_recovery = CodexTaskRecovery(codex_workers, coding_task_launcher, coding_task_monitor)
+        coding_task_runtime = _load_coding_task_runtime(config, send_callback=bus.publish_outbound)
+        coding_task_store = coding_task_runtime.store
+        codex_workers = coding_task_runtime.manager
+        coding_task_launcher = coding_task_runtime.launcher
+        coding_task_monitor = coding_task_runtime.monitor
+        coding_task_recovery = coding_task_runtime.recovery
         coding_task_recovery.recover_tasks()
-        coding_task_notifier = CodingTaskNotifier(codex_workers, bus.publish_outbound)
+        coding_task_notifier = coding_task_runtime.notifier
 
         # Preserve existing single-workspace installs, but keep custom workspaces clean.
         if is_default_workspace(config.workspace_path):
@@ -612,6 +606,7 @@ def gateway(
             mcp_servers=config.tools.mcp_servers,
             channels_config=config.channels,
             timezone=config.agents.defaults.timezone,
+            coding_task_runtime=coding_task_runtime,
             coding_task_manager=codex_workers,
         )
 
@@ -753,7 +748,8 @@ def gateway(
                         report = await coding_task_monitor.poll_task(task.id)
                     else:
                         report = coding_task_monitor.build_task_report(task.id)
-                    await coding_task_notifier.maybe_notify(task.id, report)
+                    if coding_task_notifier is not None:
+                        await coding_task_notifier.maybe_notify(task.id, report)
                 await asyncio.sleep(5)
 
         async def run():
@@ -804,7 +800,8 @@ def coding_task_create(
     from nanobot.coding_tasks.router import validate_repo_path
 
     config_obj = _load_runtime_config(config, workspace)
-    _, manager = _load_coding_task_runtime(config_obj)
+    runtime = _load_coding_task_runtime(config_obj)
+    manager = runtime.manager
     resolved_repo_path, validation_error = validate_repo_path(repo_path)
     if validation_error:
         console.print(f"[red]Error:[/red] {validation_error}")
@@ -831,7 +828,9 @@ def coding_task_list(
 ):
     """List persisted coding tasks."""
     config_obj = _load_runtime_config(config, workspace)
-    store, manager = _load_coding_task_runtime(config_obj)
+    runtime = _load_coding_task_runtime(config_obj)
+    store = runtime.store
+    manager = runtime.manager
     tasks = store.list_tasks()
 
     if not tasks:
@@ -856,16 +855,12 @@ def coding_task_status(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Show detailed status for one coding task."""
-    from nanobot.coding_tasks import (
-        CodexProgressMonitor,
-        CodexWorkerLauncher,
-        build_completion_report,
-        build_failure_report,
-        build_waiting_user_report,
-    )
+    from nanobot.coding_tasks import build_completion_report, build_failure_report, build_waiting_user_report
 
     config_obj = _load_runtime_config(config, workspace)
-    store, manager = _load_coding_task_runtime(config_obj)
+    runtime = _load_coding_task_runtime(config_obj)
+    store = runtime.store
+    manager = runtime.manager
     task = store.get_task(task_id)
     if task is None:
         console.print(f"[red]Unknown coding task: {task_id}[/red]")
@@ -883,8 +878,7 @@ def coding_task_status(
     console.print(f"Harness state: {task.harness_state}")
     console.print(f"Recoverable: {recoverable}")
     console.print(f"Last progress: {task.last_progress_summary or '-'}")
-    monitor = CodexProgressMonitor(manager, CodexWorkerLauncher(config_obj.workspace_path, manager))
-    report = monitor.build_task_report(task.id)
+    report = runtime.monitor.build_task_report(task.id)
     refreshed = store.get_task(task.id) or task
     console.print(f"Branch: {refreshed.branch_name or '-'}")
     console.print(f"Recent commit: {refreshed.metadata.get('recent_commit_summary', '-')}")
@@ -917,7 +911,9 @@ def coding_task_cancel(
 ):
     """Cancel a persisted coding task."""
     config_obj = _load_runtime_config(config, workspace)
-    store, manager = _load_coding_task_runtime(config_obj)
+    runtime = _load_coding_task_runtime(config_obj)
+    store = runtime.store
+    manager = runtime.manager
     task = store.get_task(task_id)
     if task is None:
         console.print(f"[red]Unknown coding task: {task_id}[/red]")
@@ -938,7 +934,9 @@ def coding_task_resume(
 ):
     """Resume a failed or waiting coding task."""
     config_obj = _load_runtime_config(config, workspace)
-    store, manager = _load_coding_task_runtime(config_obj)
+    runtime = _load_coding_task_runtime(config_obj)
+    store = runtime.store
+    manager = runtime.manager
     task = store.get_task(task_id)
     if task is None:
         console.print(f"[red]Unknown coding task: {task_id}[/red]")
@@ -958,12 +956,9 @@ def coding_task_run(
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
 ):
     """Launch a coding task inside a tmux-backed Codex worker."""
-    from nanobot.coding_tasks import CodexWorkerLauncher
-
     config_obj = _load_runtime_config(config, workspace)
-    _store, manager = _load_coding_task_runtime(config_obj)
-    launcher = CodexWorkerLauncher(config_obj.workspace_path, manager)
-    result = launcher.launch_task(task_id)
+    runtime = _load_coding_task_runtime(config_obj)
+    result = runtime.launcher.launch_task(task_id)
 
     console.print(f"[green]✓[/green] Launched coding task {result.task.id}")
     console.print(f"Status: {result.task.status}")

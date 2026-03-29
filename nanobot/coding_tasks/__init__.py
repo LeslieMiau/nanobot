@@ -20,6 +20,7 @@ from nanobot.coding_tasks.reporting import (
     detect_waiting_reason,
     inspect_repo_snapshot,
 )
+from nanobot.coding_tasks.runtime import CodingTaskRuntime, build_coding_task_runtime
 from nanobot.coding_tasks.store import CodingTaskStore
 from nanobot.coding_tasks.types import CodingRunEvent, CodingTask
 from nanobot.coding_tasks.worker import CodexLaunchResult, CodexWorkerLauncher
@@ -27,6 +28,7 @@ from nanobot.coding_tasks.worker import CodexLaunchResult, CodexWorkerLauncher
 __all__ = [
     "CodexLaunchResult",
     "CodingTaskNotifier",
+    "CodingTaskRuntime",
     "CodexProgressMonitor",
     "CodexTaskRecovery",
     "PlanProgress",
@@ -36,6 +38,7 @@ __all__ = [
     "TaskProgressReport",
     "build_codex_bootstrap_prompt",
     "build_completion_report",
+    "build_coding_task_runtime",
     "build_failure_report",
     "build_task_progress_report",
     "build_waiting_user_report",

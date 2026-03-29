@@ -926,6 +926,10 @@ def test_gateway_reports_coding_task_counts(monkeypatch, tmp_path: Path) -> None
         "nanobot.coding_tasks.CodexTaskRecovery",
         lambda *_args, **_kwargs: type("R", (), {"recover_tasks": lambda self: None})(),
     )
+    monkeypatch.setattr(
+        "nanobot.coding_tasks.runtime.CodexTaskRecovery",
+        lambda *_args, **_kwargs: type("R", (), {"recover_tasks": lambda self: None})(),
+    )
 
     class _FakeBus:
         async def publish_outbound(self, _msg) -> None:
@@ -1194,6 +1198,8 @@ def test_coding_task_list_distinguishes_all_major_statuses(monkeypatch, tmp_path
 
 
 def test_coding_task_status_shows_details_and_recent_events(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.coding_tasks.progress import CodexProgressMonitor
+    from nanobot.coding_tasks.runtime import CodingTaskRuntime
     from nanobot.coding_tasks.manager import CodexWorkerManager
     from nanobot.coding_tasks.store import CodingTaskStore
 
@@ -1211,20 +1217,24 @@ def test_coding_task_status_shows_details_and_recent_events(monkeypatch, tmp_pat
     manager.mark_starting(task.id, summary="Boot")
     manager.mark_running(task.id, summary="Working")
 
-    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands._load_coding_task_runtime", lambda _config: (store, manager))
-
     class _FakeLauncher:
-        def __init__(self, workspace_path, worker_manager):
-            assert workspace_path == workspace
-            assert worker_manager is manager
-
         def capture_pane(self, session: str) -> str:
             assert session == task.tmux_session
             return "Running pytest tests/coding_tasks\n"
 
-    monkeypatch.setattr("nanobot.coding_tasks.CodexWorkerLauncher", _FakeLauncher)
+    runtime = CodingTaskRuntime(
+        workspace=workspace,
+        store=store,
+        manager=manager,
+        launcher=_FakeLauncher(),
+        monitor=CodexProgressMonitor(manager, _FakeLauncher()),  # type: ignore[arg-type]
+        recovery=type("R", (), {"recover_tasks": lambda self: None})(),
+        notifier=None,
+    )
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands._load_coding_task_runtime", lambda _config, send_callback=None: runtime)
 
     result = runner.invoke(app, ["coding-task", "status", task.id, "--config", str(config_file)])
 
@@ -1317,6 +1327,7 @@ def test_coding_task_resume_moves_failed_task_back_to_starting(monkeypatch, tmp_
 
 def test_coding_task_run_launches_tmux_worker(monkeypatch, tmp_path: Path) -> None:
     from nanobot.coding_tasks.manager import CodexWorkerManager
+    from nanobot.coding_tasks.runtime import CodingTaskRuntime
     from nanobot.coding_tasks.store import CodingTaskStore
     from nanobot.coding_tasks.worker import CodexLaunchResult
 
@@ -1335,10 +1346,6 @@ def test_coding_task_run_launches_tmux_worker(monkeypatch, tmp_path: Path) -> No
     config.agents.defaults.workspace = str(workspace)
 
     class _FakeLauncher:
-        def __init__(self, workspace_path, worker_manager):
-            assert workspace_path == workspace
-            assert worker_manager is manager
-
         def launch_task(self, task_id: str):
             assert task_id == task.id
             launched = manager.mark_starting(task.id, harness_state="missing", summary="Launching Codex worker")
@@ -1351,10 +1358,19 @@ def test_coding_task_run_launches_tmux_worker(monkeypatch, tmp_path: Path) -> No
                 session_hint="sess-123",
             )
 
+    runtime = CodingTaskRuntime(
+        workspace=workspace,
+        store=task_store,
+        manager=manager,
+        launcher=_FakeLauncher(),
+        monitor=type("M", (), {"build_task_report": lambda self, task_id: None})(),
+        recovery=type("R", (), {"recover_tasks": lambda self: None})(),
+        notifier=None,
+    )
+
     monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands._load_coding_task_runtime", lambda _config: (task_store, manager))
-    monkeypatch.setattr("nanobot.coding_tasks.CodexWorkerLauncher", _FakeLauncher)
+    monkeypatch.setattr("nanobot.cli.commands._load_coding_task_runtime", lambda _config, send_callback=None: runtime)
 
     result = runner.invoke(app, ["coding-task", "run", task.id, "--config", str(config_file)])
 

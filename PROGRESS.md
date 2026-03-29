@@ -322,3 +322,18 @@
   - Keep the new plan intentionally narrow: only clean up debt created by the coding-task harness rollout, not pre-existing gateway or repo_sync issues
   - Preserve current user-facing behavior while refactoring internals, so the cleanup plan focuses on composition boundaries and state ownership rather than changing the external protocol
   - Replace the completed `PLAN.json` with a fresh remaining-work plan for this new task, while keeping the earlier delivery history in `PROGRESS.md`
+
+## Session update - 2026-03-29 (features #1, #2, #3, #4, #5)
+- Completed features:
+  - Added a shared `nanobot.coding_tasks.runtime` module that assembles the store, manager, launcher, monitor, recovery helper, and optional notifier from a single workspace root
+  - Updated the active CLI gateway path to use that shared runtime instead of manually wiring coding-task collaborators inline
+  - Updated CLI coding-task commands to reuse the shared runtime, removing the ad hoc launcher/monitor construction that had already drifted between `status`, `run`, and the gateway setup path
+  - Updated `AgentLoop` to consume the same runtime contract for Telegram coding-task interception instead of privately reconstructing launcher and monitor state from the manager alone
+  - Added focused runtime tests that verify the same workspace-scoped automation store is reused whether notifier support is enabled or not
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_runtime.py tests/coding_tasks/test_progress.py tests/coding_tasks/test_recovery.py tests/coding_tasks/test_notifier.py tests/agent/test_coding_task_routing.py tests/cli/test_commands.py -k "gateway_reports_coding_task_counts or coding_task_status_shows_details_and_recent_events or coding_task_run_launches_tmux_worker or test_build_runtime_assembles_shared_workspace_collaborators or test_build_runtime_can_attach_optional_notifier_without_rewiring_store or private_telegram"` -> passed (15 selected tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks/runtime.py nanobot/cli/commands.py nanobot/agent/loop.py tests/coding_tasks/test_runtime.py tests/cli/test_commands.py` -> passed
+- Key decisions:
+  - Keep the shared runtime builder as the one sanctioned composition root for new coding-task collaborators, even when only part of the runtime is needed by a given command path
+  - Preserve backward compatibility for existing tests and call sites by allowing `AgentLoop` to accept either a full runtime or just a manager, but normalize onto the runtime contract internally
+  - Leave policy extraction and read/write separation for follow-up features so the first cleanup checkpoint only attacks wiring duplication

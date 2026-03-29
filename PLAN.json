@@ -8,7 +8,7 @@
       "Confirm every collaborator points at the same workspace-scoped automation path rather than creating divergent task stores.",
       "Run focused coding-task tests and verify the new runtime assembly does not break existing persistence behavior."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 2,
@@ -19,7 +19,7 @@
       "Verify create/list/status style commands still have access to store, manager, launcher, and monitor without constructing extra helper objects.",
       "Build the same runtime with an outbound callback and confirm notifier support is available for gateway paths."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,
@@ -30,7 +30,7 @@
       "Verify startup still reports tracked and recoverable coding-task counts.",
       "Confirm the gateway path no longer assembles launcher, monitor, recovery, and notifier by hand in the command body."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,
@@ -41,7 +41,7 @@
       "Verify the commands still succeed and report the same task data as before.",
       "Inspect the command implementations and confirm they all resolve collaborators through the shared runtime path."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,
@@ -52,7 +52,7 @@
       "Verify Telegram coding-task command interception still works for start, status, stop, cancel, and resume.",
       "Confirm AgentLoop no longer constructs a separate launcher/monitor stack outside the shared runtime contract."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,

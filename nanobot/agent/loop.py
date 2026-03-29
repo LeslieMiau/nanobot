@@ -35,6 +35,7 @@ from nanobot.session.manager import Session, SessionManager
 if TYPE_CHECKING:
     from nanobot.config.schema import ChannelsConfig, ExecToolConfig, WebSearchConfig
     from nanobot.coding_tasks.manager import CodexWorkerManager
+    from nanobot.coding_tasks.runtime import CodingTaskRuntime
     from nanobot.cron.service import CronService
 
 
@@ -69,6 +70,7 @@ class AgentLoop:
         mcp_servers: dict | None = None,
         channels_config: ChannelsConfig | None = None,
         timezone: str | None = None,
+        coding_task_runtime: CodingTaskRuntime | None = None,
         coding_task_manager: CodexWorkerManager | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
@@ -77,6 +79,9 @@ class AgentLoop:
         self.channels_config = channels_config
         self.provider = provider
         self.workspace = workspace
+        self.coding_task_runtime = coding_task_runtime
+        if self.coding_task_runtime is not None and coding_task_manager is None:
+            coding_task_manager = self.coding_task_runtime.manager
         self.coding_task_manager = coding_task_manager
         self.model = model or provider.get_default_model()
         self.max_iterations = max_iterations
@@ -131,16 +136,19 @@ class AgentLoop:
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
         if self.coding_task_manager is not None:
-            from nanobot.coding_tasks import CodexProgressMonitor, CodexWorkerLauncher
+            from nanobot.coding_tasks import build_coding_task_runtime
             from nanobot.coding_tasks.router import register_coding_task_commands
 
-            coding_task_launcher = CodexWorkerLauncher(workspace, self.coding_task_manager)
-            coding_task_monitor = CodexProgressMonitor(self.coding_task_manager, coding_task_launcher)
+            runtime = self.coding_task_runtime or build_coding_task_runtime(
+                workspace,
+                manager=self.coding_task_manager,
+            )
+            self.coding_task_runtime = runtime
             register_coding_task_commands(
                 self.commands,
-                self.coding_task_manager,
-                launcher=coding_task_launcher,
-                monitor=coding_task_monitor,
+                runtime.manager,
+                launcher=runtime.launcher,
+                monitor=runtime.monitor,
             )
 
     def _register_default_tools(self) -> None:
