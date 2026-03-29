@@ -815,6 +815,49 @@ def coding_task_status(
         console.print(f"- {event.event} status={event.status} message={message}")
 
 
+@coding_task_app.command("cancel")
+def coding_task_cancel(
+    task_id: str = typer.Argument(..., help="Coding task id"),
+    reason: str = typer.Option("Cancelled by user.", "--reason", "-r", help="Cancellation reason"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Cancel a persisted coding task."""
+    config_obj = _load_runtime_config(config, workspace)
+    store, manager = _load_coding_task_runtime(config_obj)
+    task = store.get_task(task_id)
+    if task is None:
+        console.print(f"[red]Unknown coding task: {task_id}[/red]")
+        raise typer.Exit(1)
+
+    updated = manager.cancel_task(task_id, summary=reason)
+    console.print(f"[green]✓[/green] Cancelled coding task {updated.id}")
+    console.print(f"Status: {updated.status}")
+    console.print(f"Reason: {reason}")
+
+
+@coding_task_app.command("resume")
+def coding_task_resume(
+    task_id: str = typer.Argument(..., help="Coding task id"),
+    note: str = typer.Option("Resume requested by user.", "--note", "-n", help="Resume note"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Resume a failed or waiting coding task."""
+    config_obj = _load_runtime_config(config, workspace)
+    store, manager = _load_coding_task_runtime(config_obj)
+    task = store.get_task(task_id)
+    if task is None:
+        console.print(f"[red]Unknown coding task: {task_id}[/red]")
+        raise typer.Exit(1)
+
+    manager.record_user_control(task_id, "resume")
+    updated = manager.mark_starting(task_id, summary=note)
+    console.print(f"[green]✓[/green] Resuming coding task {updated.id}")
+    console.print(f"Status: {updated.status}")
+    console.print(f"Note: {note}")
+
+
 
 
 # ============================================================================

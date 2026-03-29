@@ -74,7 +74,7 @@
       "Issue the CLI cancellation command with a short reason.",
       "Verify the task status becomes `cancelled` and the reason is visible in the run history."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 8,
@@ -85,7 +85,7 @@
       "Run the CLI resume command for that task id.",
       "Verify the task transitions back to `starting` instead of creating a duplicate task record."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 9,

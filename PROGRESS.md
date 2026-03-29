@@ -108,3 +108,16 @@
 - Remaining blockers / follow-up:
   - There is still no CLI cancel/resume path, so features `#7` and `#8` remain the next control-plane gaps
   - A real Codex worker launcher still does not exist, so the new status view is currently inspecting persisted metadata rather than a live running worker
+
+## Session update - 2026-03-29 (features #7 and #8)
+- Completed features:
+  - Added `nanobot coding-task cancel <task_id>` to cancel persisted coding tasks with a stored user-facing reason
+  - Added `nanobot coding-task resume <task_id>` to move failed or waiting tasks back into `starting` while recording an explicit resume control event
+- Verification:
+  - `.venv/bin/pytest tests/cli/test_commands.py -k "coding_task_create_persists_task or coding_task_list_shows_status_and_recoverability or coding_task_status_shows_details_and_recent_events or test_coding_task_cancel_updates_status_and_reason or test_coding_task_resume_moves_failed_task_back_to_starting or gateway_reports_coding_task_counts or gateway_uses_configured_port_when_cli_flag_is_missing or gateway_cli_port_overrides_configured_port"` -> passed (8 selected tests)
+- Key decisions:
+  - Reuse the existing `CodexWorkerManager` transitions directly rather than inventing a second control-plane state machine in CLI code
+  - Record `resume` as an explicit user-control event before moving the task back to `starting`, so later task audits can distinguish user action from automatic retries
+- Remaining blockers / follow-up:
+  - There is still no real Codex worker launch/reuse path, so cancel/resume currently operate on persisted task state rather than a live tmux-backed worker
+  - Telegram command routing and active-task selection are still missing, so coding-task control remains CLI-only

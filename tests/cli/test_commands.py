@@ -1115,6 +1115,79 @@ def test_coding_task_status_shows_details_and_recent_events(monkeypatch, tmp_pat
     assert "status_changed" in output
 
 
+def test_coding_task_cancel_updates_status_and_reason(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.coding_tasks.manager import CodexWorkerManager
+    from nanobot.coding_tasks.store import CodingTaskStore
+
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    task = manager.create_task(repo_path="/tmp/repo-a", goal="Cancel me")
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+
+    result = runner.invoke(
+        app,
+        ["coding-task", "cancel", task.id, "--reason", "No longer needed", "--config", str(config_file)],
+    )
+
+    assert result.exit_code == 0
+    output = _strip_ansi(result.stdout)
+    assert f"Cancelled coding task {task.id}" in output
+    assert "Status: cancelled" in output
+    assert "Reason: No longer needed" in output
+
+    reloaded = store.get_task(task.id)
+    assert reloaded is not None
+    assert reloaded.status == "cancelled"
+
+
+def test_coding_task_resume_moves_failed_task_back_to_starting(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.coding_tasks.manager import CodexWorkerManager
+    from nanobot.coding_tasks.store import CodingTaskStore
+
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    task = manager.create_task(repo_path="/tmp/repo-a", goal="Resume me")
+    manager.mark_failed(task.id, summary="Needs retry")
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+
+    result = runner.invoke(
+        app,
+        ["coding-task", "resume", task.id, "--note", "Try again", "--config", str(config_file)],
+    )
+
+    assert result.exit_code == 0
+    output = _strip_ansi(result.stdout)
+    assert f"Resuming coding task {task.id}" in output
+    assert "Status: starting" in output
+    assert "Note: Try again" in output
+
+    reloaded = store.get_task(task.id)
+    assert reloaded is not None
+    assert reloaded.status == "starting"
+    events = store.read_run_events(task.id)
+    assert any(event.event == "user_control" and event.message == "resume" for event in events)
+
+
 def test_channels_login_requires_channel_name() -> None:
     result = runner.invoke(app, ["channels", "login"])
 
