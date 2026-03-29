@@ -213,6 +213,7 @@ def run_gateway(
 
     from nanobot.bus.events import OutboundMessage
     from nanobot.channels.manager import ChannelManager
+    from nanobot.coding_tasks import CodexWorkerManager, CodingTaskStore
     from nanobot.cron.types import CronJob
     from nanobot.debug.runtime_diagnostics import build_report, render_failure_brief
     from nanobot.heartbeat.service import HeartbeatService
@@ -280,6 +281,10 @@ def run_gateway(
         console.print(f"{__logo__} Starting nanobot gateway on port {effective_port}...")
         sync_templates_fn(config.workspace_path)
         session_manager = SessionManager(config.workspace_path)
+        coding_task_store = CodingTaskStore(
+            config.workspace_path / "automation" / "coding" / "tasks.json"
+        )
+        codex_workers = CodexWorkerManager(config.workspace_path, coding_task_store)
         repo_sync_cfg = config.gateway.repo_sync
         legacy_repo_sync_marker = "__repo_sync__::"
         restart_requested = False
@@ -597,6 +602,13 @@ def run_gateway(
             console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
         if repo_sync_watcher:
             console.print(f"[green]✓[/green] Repo sync watcher: every {repo_sync_cfg.watch_interval_s}s")
+        tracked_coding_tasks = coding_task_store.list_tasks()
+        recoverable_coding_tasks = codex_workers.recoverable_tasks()
+        console.print(
+            "[green]✓[/green] Coding tasks: "
+            f"{len(tracked_coding_tasks)} tracked, "
+            f"{len(recoverable_coding_tasks)} recoverable"
+        )
         console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
         async def run() -> None:

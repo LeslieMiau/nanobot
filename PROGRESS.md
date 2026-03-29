@@ -23,3 +23,25 @@
   - Full repo baseline is still red because `tests/test_repo_sync_service.py` imports missing `nanobot.repo_sync.service`
   - `openai_codex` still defaults to `text.verbosity = "medium"`; parity work is not included in this session
   - Git write operations are blocked in this environment (`fatal: Unable to create '.git/index.lock': Operation not permitted`), so the required init checkpoint commit and feature commit could not be created from this session
+
+## Harness reboot - 2026-03-29
+- Task pivot:
+  - Superseded the prior narrow OpenAI OAuth follow-up plan with the new long-running initiative: let `nanobot` orchestrate coding tasks, let `codex` execute code changes, and let each target repo's harness hold long-term task state
+- Existing work detected before re-planning:
+  - `nanobot` already had orchestration primitives worth reusing: gateway supervision, cron, heartbeat, session management, and background worker patterns
+  - The repo still lacks `nanobot.repo_sync.service`, so repo-wide pytest remains red before any coding-task work
+- Completed feature this session:
+  - Added a new workspace-scoped `nanobot.coding_tasks` module with persistent coding task metadata, append-only run logs, recoverable-state queries, and a `CodexWorkerManager` lifecycle scaffold
+  - Wired gateway startup to initialize the coding task runtime and report tracked/recoverable coding-task counts at boot
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_store.py tests/coding_tasks/test_manager.py` -> passed (6 tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks` -> passed
+  - `.venv/bin/python -c "from nanobot.coding_tasks import CodexWorkerManager, CodingTaskStore; print('coding_tasks ok')"` -> passed
+- Key decisions:
+  - Treat this session's feature as foundation only: durable task state first, real Codex launching and Telegram command routing later
+  - Keep verification focused on the new coding-task module until the unrelated repo_sync baseline is repaired
+  - Preserve the no-push-by-default execution model in the future task design; this session only stores the policy boundary
+- Remaining blockers / follow-up:
+  - `nanobot.repo_sync.service` is still missing, so full-repo pytest remains an unrelated baseline blocker
+  - Gateway wiring is only at startup/runtime visibility level today; Telegram command routing and real Codex worker launch are not implemented yet
+  - The current harness plan now tracks the coding-task initiative from this new foundation feature onward

@@ -1,573 +1,573 @@
 [
   {
     "id": 1,
-    "category": "functional",
-    "description": "OpenAI OAuth provider defaults GPT-5.4 responses to low verbosity so routine replies stay concise.",
+    "category": "setup",
+    "description": "Workspace-scoped coding task runtime persists Codex task metadata, tmux session hints, recoverable states, and append-only run logs.",
     "steps": [
-      "Run the OpenAI OAuth provider test and verify the request body contains text.verbosity set to low.",
-      "Confirm a simple system prompt like 'Be concise.' still passes through unchanged.",
-      "Verify the provider still returns parsed assistant text and tool calls after the payload change."
+      "Run `.venv/bin/pytest tests/coding_tasks/test_store.py tests/coding_tasks/test_manager.py` and verify the persistence and lifecycle tests pass.",
+      "Confirm creating a coding task writes `tasks.json` plus a matching `runs/<task_id>.jsonl` entry under the workspace automation directory.",
+      "Verify tasks in `starting`, `running`, or `waiting_user` are surfaced as recoverable by the worker manager after reloading from disk."
     ],
     "passes": true
   },
   {
     "id": 2,
-    "category": "testing",
-    "description": "OpenAI OAuth provider regression tests reflect the current SSE-backed implementation instead of the removed AsyncOpenAI client path.",
+    "category": "integration",
+    "description": "Gateway startup wires the coding task runtime and reports tracked versus recoverable coding tasks without breaking existing startup flow.",
     "steps": [
-      "Run the focused OpenAI OAuth test file.",
-      "Verify the test stubs the internal codex request helper rather than a removed SDK symbol.",
-      "Confirm the test fails if verbosity or request routing regresses."
+      "Start `nanobot gateway` in a controlled workspace with coding task files present.",
+      "Verify startup output reports the number of tracked and recoverable coding tasks alongside existing cron and heartbeat status.",
+      "Confirm gateway startup still reaches the normal ready state instead of failing before channel bootstrap."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 3,
-    "category": "testing",
-    "description": "Lazy provider exports include OpenAIOAuthProvider so package-level imports stay accurate.",
+    "category": "functional",
+    "description": "Coding task IDs and default tmux session names are stable, repo-derived, and safe for reuse across restarts.",
     "steps": [
-      "Run the provider init test file.",
-      "Verify nanobot.providers.__all__ includes OpenAIOAuthProvider.",
-      "Confirm importing OpenAIOAuthProvider through nanobot.providers works without eagerly importing unrelated backends."
+      "Create a coding task for a repo with a normal directory name.",
+      "Verify the generated tmux session name includes the repo basename and task id in a shell-safe format.",
+      "Confirm reloading the stored task preserves the same session name rather than deriving a new one."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 4,
-    "category": "docs",
-    "description": "Repository progress log records the current baseline issues discovered before the feature change.",
+    "category": "api",
+    "description": "CLI can create a new coding task record with repo path, goal, and default execution policy.",
     "steps": [
-      "Open PROGRESS.md after the session update.",
-      "Verify it records the failing repo_sync baseline and stale provider test findings.",
-      "Confirm the next session can understand why only focused tests were used for this feature."
+      "Run the new CLI command to create a coding task against a sample repo path.",
+      "Verify the command returns the task id and initial status.",
+      "Confirm the created task is visible in the persisted coding task store."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 5,
-    "category": "setup",
-    "description": "Harness init script can reproduce environment, smoke-test, and CLI-health checks without aborting on the first failure.",
+    "category": "api",
+    "description": "CLI can list coding tasks with status, repo, last progress summary, and recoverability.",
     "steps": [
-      "Run ./init.sh manually.",
-      "Verify it exits successfully even if pytest reports failures.",
-      "Confirm it prints where failing logs were written."
+      "Create multiple coding tasks in different statuses.",
+      "Run the list command and verify all tasks are shown with status and repo path.",
+      "Confirm recoverable tasks are visually distinguished from queued, completed, and failed tasks."
     ],
     "passes": false
   },
   {
     "id": 6,
-    "category": "analysis",
-    "description": "Document the exact behavioral difference between nanobot and openclaw OpenAI reply verbosity defaults.",
+    "category": "api",
+    "description": "CLI can show detailed status for a single coding task including session metadata and recent run events.",
     "steps": [
-      "Compare the nanobot and openclaw provider payload builders.",
-      "Verify the recorded difference mentions medium versus low verbosity.",
-      "Confirm the comparison references both code paths accurately."
+      "Create a coding task and move it through at least one state transition.",
+      "Run the detailed status command for that task id.",
+      "Verify the response includes tmux session, last progress summary, and recent run-log events."
     ],
     "passes": false
   },
   {
     "id": 7,
-    "category": "functional",
-    "description": "OpenAI Codex provider parity is evaluated so nanobot can later align concise behavior across OAuth-backed OpenAI transports.",
+    "category": "api",
+    "description": "CLI can cancel a coding task and persist the cancellation reason to the task run log.",
     "steps": [
-      "Inspect the OpenAI Codex payload builder.",
-      "Verify whether it still defaults text.verbosity to medium.",
-      "Record parity follow-up notes without changing behavior unexpectedly."
+      "Create a queued or running coding task.",
+      "Issue the CLI cancellation command with a short reason.",
+      "Verify the task status becomes `cancelled` and the reason is visible in the run history."
     ],
     "passes": false
   },
   {
     "id": 8,
-    "category": "functional",
-    "description": "OpenAI OAuth provider keeps tool calling enabled after the concise default change.",
+    "category": "api",
+    "description": "CLI can resume a failed or waiting coding task by moving it back into the startup path for the same worker session.",
     "steps": [
-      "Run the focused OpenAI OAuth provider tests.",
-      "Verify the request still includes converted function tools and auto tool_choice.",
-      "Confirm tool call parsing still returns the expected call id and arguments."
+      "Prepare a task in `failed` or `waiting_user` state.",
+      "Run the CLI resume command for that task id.",
+      "Verify the task transitions back to `starting` instead of creating a duplicate task record."
     ],
     "passes": false
   },
   {
     "id": 9,
     "category": "functional",
-    "description": "OpenAI OAuth provider keeps reasoning payload support after the concise default change.",
+    "description": "Telegram private-chat command parsing can create a coding task from a natural-language '开始编程' request.",
     "steps": [
-      "Run the OpenAI OAuth provider tests with reasoning_effort configured.",
-      "Verify the request body still includes reasoning.effort when provided.",
-      "Confirm there is no regression to finish_reason handling."
+      "Send a private Telegram message that requests starting a coding task against a repo.",
+      "Verify nanobot creates exactly one coding task record with the parsed repo and goal.",
+      "Confirm the chat receives an acknowledgement containing the task id and initial state."
     ],
     "passes": false
   },
   {
     "id": 10,
     "category": "functional",
-    "description": "OpenAI OAuth provider still respects explicit model prefixes for hyphen and underscore variants.",
+    "description": "Telegram private-chat control messages map onto the active coding task lifecycle instead of being treated as normal chat.",
     "steps": [
-      "Run the strip_model_prefix unit tests.",
-      "Verify both openai-oauth/gpt-5.4 and openai_oauth/gpt-5.4 resolve correctly.",
-      "Confirm gpt-5.4-mini remains supported."
+      "Start a coding task from Telegram private chat.",
+      "Send control messages such as `状态`, `继续`, and `取消` in the same chat.",
+      "Verify nanobot routes those controls to the tracked coding task instead of answering with generic assistant text."
     ],
     "passes": false
   },
   {
     "id": 11,
-    "category": "testing",
-    "description": "Provider retry behavior remains unaffected by the concise OpenAI OAuth payload change.",
+    "category": "functional",
+    "description": "Nanobot enforces a single active coding task per workspace in the MVP so Telegram control messages stay unambiguous.",
     "steps": [
-      "Run provider retry tests relevant to generation defaults if touched later.",
-      "Verify generation defaults still flow through chat_with_retry.",
-      "Confirm no retry-only regressions are introduced by the feature."
+      "Start one coding task and leave it running.",
+      "Attempt to start a second coding task in the same workspace.",
+      "Verify nanobot refuses the second start or queues it explicitly instead of launching both concurrently."
     ],
     "passes": false
   },
   {
     "id": 12,
     "category": "functional",
-    "description": "Agent defaults continue to pass max_tokens, temperature, and reasoning_effort into provider generation settings.",
+    "description": "Repo path validation rejects missing paths, non-directories, and paths outside the allowed local filesystem expectations before task creation.",
     "steps": [
-      "Inspect CLI provider construction after the change.",
-      "Verify no existing generation wiring is removed.",
-      "Confirm the concise behavior comes from payload verbosity rather than breaking generation defaults."
+      "Attempt to create coding tasks for a missing path and a file path.",
+      "Verify nanobot rejects each invalid target with a clear explanation.",
+      "Confirm no task record is created for rejected inputs."
     ],
     "passes": false
   },
   {
     "id": 13,
-    "category": "docs",
-    "description": "Session notes clearly distinguish baseline red tests from regressions introduced by the concise-response feature.",
+    "category": "functional",
+    "description": "Harness detection can identify whether a target repo already has `PLAN.json`, `PROGRESS.md`, or `init.sh` before Codex is launched.",
     "steps": [
-      "Review the latest PROGRESS.md entry.",
-      "Verify it names the unrelated repo_sync failure separately from feature verification.",
-      "Confirm the note explains why targeted tests are the reliable gate for this change."
+      "Create one repo fixture with harness files and one without.",
+      "Run the harness detection logic for both repos.",
+      "Verify the detected state distinguishes existing harnesses from missing ones."
     ],
     "passes": false
   },
   {
     "id": 14,
-    "category": "testing",
-    "description": "Focused provider verification command is documented in progress notes for repeatable future sessions.",
+    "category": "functional",
+    "description": "Prompt building for existing-harness repos tells Codex to restore state first and honor the repo's startup sequence before editing.",
     "steps": [
-      "Review PROGRESS.md after the session.",
-      "Verify the exact pytest command is recorded.",
-      "Confirm another session can rerun the same verification without rediscovery."
+      "Build the initial Codex prompt for a repo that already contains harness files.",
+      "Verify the prompt explicitly instructs Codex to read `PROGRESS.md`, `PLAN.json`, and run the repo init sequence first.",
+      "Confirm the prompt includes the user goal without overwriting the repo's own instructions."
     ],
     "passes": false
   },
   {
     "id": 15,
     "category": "functional",
-    "description": "OpenAI OAuth errors remain user-readable after payload changes.",
+    "description": "Prompt building for repos without a harness tells Codex to initialize the harness before starting feature work.",
     "steps": [
-      "Inspect the exception-to-LLMResponse path in the provider.",
-      "Verify the change does not alter the error wrapping branch.",
-      "Confirm the provider still returns finish_reason='error' on request failures."
+      "Build the initial Codex prompt for a repo that does not have harness files.",
+      "Verify the prompt instructs Codex to generate `PLAN.json`, `PROGRESS.md`, and `init.sh` before coding.",
+      "Confirm the prompt still includes the requested task goal and execution boundaries."
     ],
     "passes": false
   },
   {
     "id": 16,
-    "category": "refactor",
-    "description": "Shared concise-verbosity helper feasibility is evaluated without coupling unrelated providers in this session.",
+    "category": "integration",
+    "description": "Codex launcher can start a new tmux-backed worker session for a coding task and persist the tmux target back into task state.",
     "steps": [
-      "Review OpenAI OAuth and Codex payload builders side by side.",
-      "Verify whether a shared helper would be mechanical and low-risk.",
-      "Record the result in PROGRESS.md without forcing a broad refactor."
+      "Create a coding task and launch the Codex worker.",
+      "Verify a tmux session is created or attached for that task id.",
+      "Confirm the task state records the tmux session and moves to `starting`."
     ],
     "passes": false
   },
   {
     "id": 17,
-    "category": "functional",
-    "description": "OpenAI OAuth default behavior stays compatible with gpt-5.4-mini as a lighter variant.",
+    "category": "integration",
+    "description": "Codex launcher can reuse an existing tmux session for the same task instead of spawning duplicate worker shells.",
     "steps": [
-      "Inspect the README and model prefix helper for the mini model path.",
-      "Verify no model-specific condition blocks low verbosity for gpt-5.4-mini.",
-      "Confirm tests still allow mini model prefix parsing."
+      "Launch a coding task once to create its tmux session.",
+      "Trigger resume or continue for the same task.",
+      "Verify nanobot writes into the original tmux target instead of creating a second session."
     ],
     "passes": false
   },
   {
     "id": 18,
-    "category": "docs",
-    "description": "OpenAI OAuth README guidance can later mention concise-mode expectations if user-facing docs need parity with behavior.",
+    "category": "integration",
+    "description": "Codex startup command carries repo path, task goal, and execution boundaries into the worker in a reproducible way.",
     "steps": [
-      "Review the current OpenAI OAuth README section.",
-      "Verify whether it documents response-style behavior today.",
-      "Record whether a docs update is necessary after the code change."
+      "Launch a coding task and inspect the command or prompt sent into the Codex worker.",
+      "Verify the repo path, goal, and no-push execution boundary are all present.",
+      "Confirm repeated launches for the same task preserve the same goal and repo routing."
     ],
     "passes": false
   },
   {
     "id": 19,
-    "category": "functional",
-    "description": "OpenAI OAuth provider continues to use the ChatGPT backend codex responses endpoint with OAuth headers intact.",
+    "category": "integration",
+    "description": "Codex session hints extracted from the running worker can be persisted for later resume and diagnosis.",
     "steps": [
-      "Inspect the provider request path after the change.",
-      "Verify the endpoint and headers are unchanged.",
-      "Confirm only the verbosity default differs."
+      "Launch a coding task and capture the first visible Codex session metadata or banner output.",
+      "Verify nanobot stores a session hint in the coding task record when that information is present.",
+      "Confirm the stored hint survives reloading the coding task from disk."
     ],
     "passes": false
   },
   {
     "id": 20,
-    "category": "testing",
-    "description": "OpenAI OAuth provider test asserts the payload sent to _request_codex so future regressions are caught at the contract boundary.",
+    "category": "integration",
+    "description": "Worker polling can capture recent tmux pane output for a running Codex task without blocking the gateway event loop.",
     "steps": [
-      "Run the focused provider tests.",
-      "Verify assertions cover model, instructions, text.verbosity, reasoning, tool_choice, and tools.",
-      "Confirm the test no longer depends on removed SDK internals."
+      "Run a coding task long enough to produce several lines of output in tmux.",
+      "Invoke the pane polling logic while the task continues running.",
+      "Verify nanobot retrieves recent output without freezing cron, heartbeat, or chat handling."
     ],
     "passes": false
   },
   {
     "id": 21,
     "category": "functional",
-    "description": "OpenAI OAuth provider still sets prompt cache keys after the concise change.",
+    "description": "Pane-output polling updates the coding task's last progress summary and timestamp when visible work advances.",
     "steps": [
-      "Inspect the request body in the focused provider test.",
-      "Verify prompt_cache_key is still present.",
-      "Confirm it is derived from messages and not dropped during refactor."
+      "Poll a running coding task after new terminal output appears.",
+      "Verify the task's last progress summary changes to reflect the new work.",
+      "Confirm the progress timestamp updates at the same time."
     ],
     "passes": false
   },
   {
     "id": 22,
     "category": "functional",
-    "description": "OpenAI OAuth provider still enables parallel tool calls after the concise change.",
+    "description": "Progress summarization can read the target repo's `PROGRESS.md` and extract the latest session note for reporting.",
     "steps": [
-      "Review the payload assertions in tests.",
-      "Verify parallel_tool_calls remains true.",
-      "Confirm no tool execution policy was changed incidentally."
+      "Prepare a repo with a populated `PROGRESS.md` containing multiple session entries.",
+      "Run the progress summarizer against that repo.",
+      "Verify the latest session note appears in the coding task report."
     ],
     "passes": false
   },
   {
     "id": 23,
-    "category": "testing",
-    "description": "Provider package lazy-import tests remain the single-source regression net for top-level export ordering.",
+    "category": "functional",
+    "description": "Progress summarization can read the target repo's `PLAN.json` and compute completed versus remaining feature counts.",
     "steps": [
-      "Run the provider init test file.",
-      "Verify export ordering matches current package expectations.",
-      "Confirm OpenAIOAuthProvider is represented in both __all__ and lazy imports."
+      "Prepare a repo with a `PLAN.json` containing a mix of passing and pending features.",
+      "Run the summarizer against that repo.",
+      "Verify the resulting report includes accurate completed and remaining counts."
     ],
     "passes": false
   },
   {
     "id": 24,
     "category": "functional",
-    "description": "OpenAI OAuth provider still retries with verify=False only on certificate failures.",
+    "description": "Nanobot can synthesize harness files and terminal output into a concise progress report for a coding task.",
     "steps": [
-      "Inspect the SSL fallback branch after the concise change.",
-      "Verify the exception filter remains limited to certificate failures.",
-      "Confirm the new behavior does not broaden retry scope."
+      "Run a coding task in a repo that has both harness files and recent worker output.",
+      "Request task status through the reporting path.",
+      "Verify the response includes what was completed, what is in progress, and the next blocker or next step."
     ],
     "passes": false
   },
   {
     "id": 25,
-    "category": "testing",
-    "description": "Targeted verification stays fast enough for per-feature checkpoints in this repo.",
+    "category": "integration",
+    "description": "Gateway restart recovery can reload coding task state and reconnect to tasks left in `starting`, `running`, or `waiting_user`.",
     "steps": [
-      "Run the focused pytest subset for this feature.",
-      "Verify it completes successfully without invoking the unrelated failing baseline test module.",
-      "Confirm the command is practical for future feature-level checkpoints."
+      "Leave a coding task in a recoverable state and restart the gateway.",
+      "Verify the gateway reloads the task state from disk on startup.",
+      "Confirm the task becomes observable again without creating a duplicate record."
     ],
     "passes": false
   },
   {
     "id": 26,
-    "category": "docs",
-    "description": "Progress log records that openclaw achieves shorter replies via low verbosity rather than a different GPT-5.4 version.",
+    "category": "integration",
+    "description": "If a recoverable task's tmux session is missing after restart, nanobot marks the task failed with an actionable recovery hint.",
     "steps": [
-      "Read the comparison notes in PROGRESS.md.",
-      "Verify they mention strategy difference rather than model-version difference.",
-      "Confirm a later session can reuse the comparison without re-reading openclaw."
+      "Delete or kill the tmux session for a recoverable coding task before gateway restart.",
+      "Restart the gateway and trigger recovery scanning.",
+      "Verify the task moves to `failed` and the status message explains how to resume or relaunch it."
     ],
     "passes": false
   },
   {
     "id": 27,
     "category": "functional",
-    "description": "OpenAI OAuth provider preserves user system prompts instead of replacing them with a fixed concise prompt.",
+    "description": "Telegram `状态` requests return the active coding task summary rather than a generic assistant answer.",
     "steps": [
-      "Run the focused provider tests.",
-      "Verify the request instructions equal the caller-supplied system prompt.",
-      "Confirm concise behavior comes from text verbosity, not prompt rewriting."
+      "Start a coding task from Telegram private chat.",
+      "Send `状态` while the task is active.",
+      "Verify the reply contains task status, repo, last progress, and recoverability."
     ],
     "passes": false
   },
   {
     "id": 28,
     "category": "functional",
-    "description": "OpenAI OAuth provider remains compatible with explicit provider forcing plus bare model names in config.",
+    "description": "Telegram `继续` requests send a control instruction into the same Codex worker session for the active task.",
     "steps": [
-      "Inspect README examples and prefix stripping behavior.",
-      "Verify provider forcing still resolves to gpt-5.4 correctly.",
-      "Confirm the concise default does not rely on the prefixed model string."
+      "Start a coding task and let it reach a paused or waiting state.",
+      "Send `继续` from the same Telegram private chat.",
+      "Verify nanobot writes the resume instruction into the existing worker session instead of creating a new task."
     ],
     "passes": false
   },
   {
     "id": 29,
-    "category": "testing",
-    "description": "Regression tests continue to validate parsed tool call arguments as dictionaries after the request helper stub change.",
+    "category": "functional",
+    "description": "Telegram `停止` requests can gracefully interrupt the running Codex worker while preserving task state for later resume.",
     "steps": [
-      "Run the focused OpenAI OAuth test.",
-      "Verify the response fixture exercises a function_call event.",
-      "Confirm the returned tool call arguments are parsed JSON objects."
+      "Run a coding task until the worker is actively doing work.",
+      "Send `停止` from Telegram private chat.",
+      "Verify the worker is interrupted and the task status becomes `waiting_user` or another resumable state."
     ],
     "passes": false
   },
   {
     "id": 30,
     "category": "functional",
-    "description": "OpenAI OAuth provider still strips the provider prefix before sending the model to the backend.",
+    "description": "Telegram `取消` requests fully cancel the coding task and prevent later resume without an explicit relaunch.",
     "steps": [
-      "Run the strip_model_prefix test and focused provider test.",
-      "Verify the payload model equals gpt-5.4 rather than openai-oauth/gpt-5.4.",
-      "Confirm no backend request includes the prefixed model name."
+      "Start a coding task and then send `取消` in Telegram.",
+      "Verify the task status becomes `cancelled` and the run log records the control action.",
+      "Confirm later `继续` attempts are rejected for that cancelled task."
     ],
     "passes": false
   },
   {
     "id": 31,
-    "category": "analysis",
-    "description": "Baseline unrelated failures are preserved as known blockers rather than silently masked by narrower tests.",
+    "category": "functional",
+    "description": "Coding task creation stores a no-push default approval policy so Codex can commit locally without pushing automatically.",
     "steps": [
-      "Review the current session notes.",
-      "Verify the missing nanobot.repo_sync.service failure is explicitly mentioned.",
-      "Confirm the session does not claim the whole repo is green."
+      "Create a coding task with the default execution policy.",
+      "Verify the persisted task record shows the expected no-push or local-only approval policy.",
+      "Confirm the initial Codex prompt reflects that boundary."
     ],
     "passes": false
   },
   {
     "id": 32,
     "category": "functional",
-    "description": "OpenAI OAuth provider remains store-disabled after the concise-response change.",
+    "description": "Codex startup prompt explicitly instructs the worker to honor the target repo's `AGENTS.md` and harness startup sequence before editing.",
     "steps": [
-      "Inspect the request body assertion in tests.",
-      "Verify store remains false.",
-      "Confirm the feature does not alter retention semantics."
+      "Generate the startup prompt for a repo that contains custom `AGENTS.md` instructions.",
+      "Verify the prompt tells Codex to follow repo-specific instructions first.",
+      "Confirm the prompt still preserves the user goal and nanobot execution boundary."
     ],
     "passes": false
   },
   {
     "id": 33,
-    "category": "functional",
-    "description": "OpenAI OAuth provider continues to stream responses while using low verbosity.",
+    "category": "integration",
+    "description": "A repo without an existing harness triggers a Codex harness-init flow before the first implementation step.",
     "steps": [
-      "Inspect the request body assertion in tests.",
-      "Verify stream remains true.",
-      "Confirm the concise change does not switch the provider to non-streaming mode."
+      "Launch a coding task against a repo that lacks `PLAN.json`, `PROGRESS.md`, and `init.sh`.",
+      "Verify Codex initializes the harness files before touching implementation files.",
+      "Confirm the coding task report reflects that the harness was created first."
     ],
     "passes": false
   },
   {
     "id": 34,
-    "category": "testing",
-    "description": "OpenAI OAuth provider tests cover both content and finish_reason after the concise-response change.",
+    "category": "integration",
+    "description": "A repo with an existing harness triggers a Codex recovery flow that reads progress and baseline state before new coding work begins.",
     "steps": [
-      "Run the focused provider tests.",
-      "Verify the response content assertion still passes.",
-      "Confirm the expected finish_reason remains tool_calls when tool calls are present."
+      "Launch a coding task against a repo with an active harness and prior progress entries.",
+      "Verify the first visible worker actions are reading `PROGRESS.md`, `PLAN.json`, and running the repo init sequence.",
+      "Confirm progress reporting references the pre-existing harness context rather than ignoring it."
     ],
     "passes": false
   },
   {
     "id": 35,
     "category": "functional",
-    "description": "OpenAI OAuth provider remains free of direct SDK coupling in the request path.",
+    "description": "Every significant coding task lifecycle change appends a structured run event so later sessions can audit what happened.",
     "steps": [
-      "Inspect the provider implementation.",
-      "Verify requests go through _request_codex rather than AsyncOpenAI.",
-      "Confirm tests align with the actual implementation."
+      "Create a coding task and move it through multiple states.",
+      "Inspect the corresponding `runs/<task_id>.jsonl` file.",
+      "Verify each lifecycle change appears as a structured append-only event in chronological order."
     ],
     "passes": false
   },
   {
     "id": 36,
-    "category": "testing",
-    "description": "The concise-response feature is verified with the repository-preferred .venv pytest interpreter.",
+    "category": "functional",
+    "description": "User control actions such as continue, pause, and cancel are appended to the run log separately from automatic worker status changes.",
     "steps": [
-      "Run the focused pytest subset with .venv/bin/pytest.",
-      "Verify no system-python fallback is used.",
-      "Confirm the command succeeds after the code change."
+      "Send at least two control messages against an active coding task.",
+      "Inspect the task's run log.",
+      "Verify the control actions are recorded as distinct events rather than being folded into generic status updates."
     ],
     "passes": false
   },
   {
     "id": 37,
-    "category": "docs",
-    "description": "Progress notes identify whether README behavior documentation should be updated in a future session.",
+    "category": "functional",
+    "description": "Progress notifications are throttled so nanobot does not spam Telegram while Codex emits many short terminal updates.",
     "steps": [
-      "Inspect the final PROGRESS.md entry.",
-      "Verify it states whether the docs still omit verbosity behavior.",
-      "Confirm a future docs-only follow-up would be well-scoped."
+      "Run a coding task that produces frequent worker output over a short period.",
+      "Observe the outgoing Telegram progress notifications.",
+      "Verify notifications are grouped or throttled instead of sending one message per terminal line."
     ],
     "passes": false
   },
   {
     "id": 38,
     "category": "functional",
-    "description": "OpenAI OAuth provider request payload continues to include reasoning.encrypted_content in the include list.",
+    "description": "Successful completion reports include task outcome, verification summary, repo branch, and recent commit information.",
     "steps": [
-      "Inspect the payload assertion in tests or code review notes.",
-      "Verify the include list remains unchanged.",
-      "Confirm only verbosity changed."
+      "Complete a coding task that makes at least one commit.",
+      "Observe the final completion message sent to Telegram or CLI.",
+      "Verify it includes the outcome, test status, branch, and recent commit summary."
     ],
     "passes": false
   },
   {
     "id": 39,
     "category": "functional",
-    "description": "Focused concise-response change stays limited to OpenAI OAuth unless parity work is intentionally scheduled.",
+    "description": "Failure reports include the last successful step, current blocker, and a concrete resume hint.",
     "steps": [
-      "Review the git diff after the feature is complete.",
-      "Verify no unrelated providers changed unless explicitly documented.",
-      "Confirm scope stayed within the agreed single feature."
+      "Force a coding task into a failure state after some progress has been made.",
+      "Request or observe the failure report.",
+      "Verify the report includes what completed successfully, what failed, and how to resume."
     ],
     "passes": false
   },
   {
     "id": 40,
-    "category": "testing",
-    "description": "Provider export tests remain isolated from unrelated repo baseline failures.",
+    "category": "functional",
+    "description": "Tasks that need human approval can move into `waiting_user` with a summary that explains what Codex is waiting on.",
     "steps": [
-      "Run tests/providers/test_providers_init.py directly.",
-      "Verify it passes independently.",
-      "Confirm success does not require the missing repo_sync module."
+      "Run a coding task against a repo whose instructions require a plan confirmation before major edits.",
+      "Verify nanobot moves the task into `waiting_user` when that pause point is reached.",
+      "Confirm the stored summary explains exactly what confirmation or decision is needed."
     ],
     "passes": false
   },
   {
     "id": 41,
     "category": "functional",
-    "description": "OpenAI OAuth provider still builds OAuth headers from the stored token before sending requests.",
+    "description": "Task metadata can persist the working branch once Codex creates or switches branches in the target repo.",
     "steps": [
-      "Review the focused provider test setup.",
-      "Verify the helper receives account_id and access token-derived headers.",
-      "Confirm the concise change does not disturb auth header wiring."
+      "Run a coding task that creates or switches to a dedicated branch.",
+      "Inspect the stored coding task metadata after the branch change.",
+      "Verify the branch name is persisted for status and completion reporting."
     ],
     "passes": false
   },
   {
     "id": 42,
-    "category": "analysis",
-    "description": "OpenAI OAuth config path differences between nanobot and openclaw are documented for future parity decisions.",
+    "category": "functional",
+    "description": "Task metadata can persist a recent commit summary so completion and status messages do not need to rescan git every time.",
     "steps": [
-      "Review the comparison notes after the session.",
-      "Verify they distinguish nanobot's flat defaults from openclaw's model.primary plus model params.",
-      "Confirm the notes explain why openclaw can attach fastMode per model."
+      "Run a coding task that makes at least one commit.",
+      "Update task metadata from the repo state.",
+      "Verify the coding task record stores a recent commit summary that matches `git log --oneline`."
     ],
     "passes": false
   },
   {
     "id": 43,
     "category": "functional",
-    "description": "Low verbosity remains the default only when the provider builds the payload, not by mutating agent-wide prompt text.",
+    "description": "Multiple queued coding tasks can survive restart even though only one active task is allowed in the first release.",
     "steps": [
-      "Inspect the final code diff.",
-      "Verify there is no global system prompt rewrite for concision.",
-      "Confirm the change is localized to request payload construction and tests."
+      "Create several queued coding tasks without running them all at once.",
+      "Restart the gateway or reload the store.",
+      "Verify all queued tasks remain intact and none are dropped or duplicated."
     ],
     "passes": false
   },
   {
     "id": 44,
-    "category": "testing",
-    "description": "OpenAI OAuth provider tests remain readable and maintainable after converting to request-helper stubs.",
+    "category": "functional",
+    "description": "Status listing cleanly distinguishes queued, running, waiting, completed, failed, and cancelled coding tasks.",
     "steps": [
-      "Review the updated test file.",
-      "Verify the fixture setup is concise and follows current implementation boundaries.",
-      "Confirm future maintainers can see which payload fields define concise behavior."
+      "Populate the coding task store with tasks in each supported status.",
+      "Run the list/status reporting path.",
+      "Verify each status appears distinctly and maps to the correct stored task."
     ],
     "passes": false
   },
   {
     "id": 45,
-    "category": "docs",
-    "description": "Feature checkpoint commit message clearly describes the concise OpenAI OAuth behavior change.",
+    "category": "data",
+    "description": "Workspace artifacts directory can store auxiliary coding-task material such as prompt snapshots or progress extracts used for reporting.",
     "steps": [
-      "Inspect the feature commit message.",
-      "Verify it describes the behavior in a concise, specific way.",
-      "Confirm the required Codex co-author trailer is present exactly once."
+      "Run a coding task that emits at least one saved artifact.",
+      "Inspect the workspace automation artifacts directory after the run.",
+      "Verify the saved artifact is namespaced by task and does not overwrite unrelated task data."
     ],
     "passes": false
   },
   {
     "id": 46,
-    "category": "functional",
-    "description": "OpenAI OAuth provider still leaves tool_choice configurable by callers after the concise change.",
+    "category": "testing",
+    "description": "Targeted tests cover coding task storage, lifecycle transitions, and prompt-building helpers without relying on the repo-wide red baseline.",
     "steps": [
-      "Inspect the focused provider test or final diff.",
-      "Verify tool_choice defaults to auto only when callers do not override it.",
-      "Confirm the concise feature does not hardcode a stricter tool policy."
+      "Run the focused coding task test suite.",
+      "Verify the suite covers store persistence, status transitions, and prompt-shaping logic.",
+      "Confirm the focused suite passes even while the unrelated repo_sync baseline remains red."
     ],
     "passes": false
   },
   {
     "id": 47,
-    "category": "functional",
-    "description": "OpenAI OAuth provider still uses the caller-supplied tools only when present.",
+    "category": "testing",
+    "description": "Targeted tests cover restart recovery and missing-session failure handling for recoverable coding tasks.",
     "steps": [
-      "Inspect the provider implementation after the feature.",
-      "Verify the tools field is conditional and unchanged.",
-      "Confirm concise behavior does not alter tool schema conversion."
+      "Create recoverable and broken coding task fixtures.",
+      "Run the recovery-focused tests.",
+      "Verify live sessions reconnect while missing sessions are marked failed with recovery hints."
     ],
     "passes": false
   },
   {
     "id": 48,
     "category": "testing",
-    "description": "The harness plan can be resumed cleanly in a later session without redoing current diagnosis work.",
+    "description": "Targeted tests cover Telegram command parsing and control-message routing for coding tasks.",
     "steps": [
-      "Review PLAN.json and PROGRESS.md together.",
-      "Verify the next session can see the completed concise-response feature and remaining follow-ups.",
-      "Confirm the state files match the current repository reality."
+      "Run the Telegram command-parsing test suite for coding tasks.",
+      "Verify `开始编程`, `状态`, `继续`, `停止`, and `取消` are all routed correctly.",
+      "Confirm ordinary chat messages still bypass the coding-task control path."
     ],
     "passes": false
   },
   {
     "id": 49,
-    "category": "analysis",
-    "description": "Future optional parity work for openai_codex concise defaults is explicitly separated from the current approved feature.",
+    "category": "docs",
+    "description": "Repository documentation explains nanobot's role as orchestrator, Codex's role as coding worker, and the target repo harness as the long-term memory layer.",
     "steps": [
-      "Review the current session notes.",
-      "Verify codex parity is recorded as follow-up rather than silently bundled in.",
-      "Confirm the approved feature scope remains intact."
+      "Open the updated docs or architecture section after implementation.",
+      "Verify it explains the three-layer split between nanobot, Codex, and repo harness.",
+      "Confirm it includes the user-visible control flow for Telegram-driven coding tasks."
     ],
     "passes": false
   },
   {
     "id": 50,
     "category": "docs",
-    "description": "Session completion notes state exactly what was verified and what remains unverified due baseline failures.",
+    "description": "Progress notes record the known unrelated repo_sync baseline failure separately from coding-task verification so later sessions do not misdiagnose it.",
     "steps": [
-      "Read the final PROGRESS.md entry.",
-      "Verify it lists the passing focused tests and the unresolved repo baseline issue.",
-      "Confirm it does not overclaim full-repo validation."
+      "Open `PROGRESS.md` after the coding-task session updates.",
+      "Verify it names the missing `nanobot.repo_sync.service` baseline issue separately from coding-task tests.",
+      "Confirm later sessions can rerun the focused coding-task verification command directly from the notes."
     ],
     "passes": false
   },
   {
     "id": 51,
-    "category": "setup",
-    "description": "Harness initialization checkpoint is committed so later sessions can restore task state before editing.",
+    "category": "integration",
+    "description": "Gateway runtime keeps the existing single-instance safety checks while adding coding-task orchestration so duplicate gateways do not duplicate coding work.",
     "steps": [
-      "Review git log after the init checkpoint.",
-      "Verify init.sh, PLAN.json, and PROGRESS.md are included in the commit.",
-      "Confirm the repository can resume from that checkpoint without reconstructing task context."
+      "Attempt to start a second gateway process while one is already active.",
+      "Verify the duplicate process is rejected before coding-task orchestration starts.",
+      "Confirm the original gateway retains ownership of tracked coding tasks."
     ],
     "passes": false
   },
   {
     "id": 52,
-    "category": "functional",
-    "description": "The current session ends with a clean checkpoint even if broader repo validation is still blocked by unrelated failures.",
+    "category": "integration",
+    "description": "An end-to-end manual run can start a real coding task against a local repo, launch Codex, persist state, and return a status summary through nanobot.",
     "steps": [
-      "Inspect git log and PROGRESS.md at session end.",
-      "Verify the feature work is committed.",
-      "Confirm the remaining blocker is documented for the next session."
+      "Launch a real coding task against a local test repo from the nanobot entrypoint.",
+      "Verify Codex starts in the target repo, reads or initializes the harness, and updates task state on disk.",
+      "Confirm nanobot can report the live task status back through its user-facing control path."
     ],
     "passes": false
   }
