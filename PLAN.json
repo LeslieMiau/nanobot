@@ -162,7 +162,7 @@
       "Verify it states where runtime assembly, policy, report building, and lifecycle refresh now live.",
       "Confirm the docs do not reintroduce the old duplicated wiring story."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 16,
@@ -173,6 +173,6 @@
       "Launch the worker and inspect status through the refactored runtime path.",
       "Verify nanobot still surfaces the same task identity, harness state, and live report shape after the refactor."
     ],
-    "passes": false
+    "passes": true
   }
 ]

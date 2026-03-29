@@ -118,6 +118,12 @@ The user-visible control flow is:
 4. nanobot polls tmux output and harness files to build status summaries.
 5. Telegram controls such as `状态`, `继续`, `停止`, and `取消` act on the same tracked coding task instead of creating duplicate work.
 
+Internally, the coding-task orchestration now has a dedicated composition root:
+
+- `nanobot.coding_tasks.runtime` assembles the shared store, manager, launcher, monitor, recovery helper, notifier, and policy objects from one workspace root so CLI, gateway, and AgentLoop do not drift apart.
+- `nanobot.coding_tasks.policy` owns task-selection and single-active-task rules, keeping Telegram routing behavior aligned with the rest of the orchestration stack.
+- `nanobot.coding_tasks.progress` now separates read-only report building from explicit state refresh, so `status` views can inspect live task state without mutating persisted metadata as a side effect.
+
 ## Table of Contents
 
 - [News](#-news)

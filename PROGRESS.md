@@ -352,3 +352,22 @@
   - Keep the current MVP behavior intact by making the new policy layer a pure extraction of existing selection rules, not a semantics change
   - Treat `status` as a strictly read-only surface from this point on, even if that means duplicating some display-time merge logic between persisted state and the ephemeral report
   - Use the explicit `refresh_task` API as the only sanctioned mutation path for repo metadata and progress summaries outside the manager itself
+
+## Session update - 2026-03-29 (features #15, #16)
+- Completed features:
+  - Updated the README architecture section to document the refactored coding-task boundaries explicitly: shared runtime assembly, extracted policy ownership, and the split between pure reporting and explicit refresh
+  - Re-ran a real isolated `create -> run -> status` smoke path after the cleanup to confirm the refactored runtime still supports end-to-end task launch and status inspection
+- Verification:
+  - Documentation:
+    - Updated `README.md` under `Codex-Orchestrated Coding Tasks` to explain `nanobot.coding_tasks.runtime`, `nanobot.coding_tasks.policy`, and the pure-report versus refresh split
+  - Manual smoke:
+    - `.venv/bin/nanobot coding-task create /tmp/nanobot-arch-smoke.5ptDdU/repo --goal "Initialize the repo harness and append one short status line to README.md." --config /tmp/nanobot-arch-smoke.5ptDdU/config.json --workspace /tmp/nanobot-arch-smoke.5ptDdU/workspace` -> created task `31da04f9`
+    - `.venv/bin/nanobot coding-task run 31da04f9 --config /tmp/nanobot-arch-smoke.5ptDdU/config.json --workspace /tmp/nanobot-arch-smoke.5ptDdU/workspace` -> launched tmux session `codex-task-repo-31da04f9`
+    - `.venv/bin/nanobot coding-task status 31da04f9 --config /tmp/nanobot-arch-smoke.5ptDdU/config.json --workspace /tmp/nanobot-arch-smoke.5ptDdU/workspace` -> reported the same task id, `starting` status, `missing` harness state, branch `main`, recent commit `2dbb53a init repo`, and a live report summary
+    - Post-status inspection of `/tmp/nanobot-arch-smoke.5ptDdU/workspace/automation/coding/tasks.json` confirmed `branch_name` and `recent_commit_summary` remained unset, proving the status path stayed read-only after the refactor
+- Key decisions:
+  - Keep the smoke repo isolated under `/tmp` and tear down the tmux session after verification so the architecture cleanup leaves no long-lived worker behind in the main development environment
+  - Accept a lightweight smoke run rather than a full task completion, because this cleanup task is about preserving the orchestration path and state boundaries, not re-validating the entire original coding-task feature set from scratch
+- Remaining blockers / follow-up:
+  - `PLAN.json` is now fully complete for the coding-task architecture-cleanup harness
+  - The unrelated repo-wide baseline remains red because `tests/test_repo_sync_service.py` still imports missing `nanobot.repo_sync.service`
