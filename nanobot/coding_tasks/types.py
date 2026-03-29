@@ -27,6 +27,7 @@ HARNESS_STATE_VALUES = (
     "missing",
     "initializing",
     "active",
+    "completed",
 )
 
 HARNESS_RESOLUTION_VALUES = (

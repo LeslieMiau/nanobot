@@ -2,100 +2,67 @@
   {
     "id": 1,
     "category": "setup",
-    "description": "The repo-harness conflict fix is initialized as a standalone harness separate from the completed Telegram coding-intent refactor.",
+    "description": "The completed-harness false-positive fix is tracked as its own harness task so future sessions do not confuse it with the earlier active-harness conflict work.",
     "steps": [
-      "Open PLAN.json and verify it only tracks the repo-harness conflict fix.",
-      "Open PROGRESS.md and verify the reboot entry explains why new Telegram goals were being hijacked by an old in-repo harness.",
-      "Confirm the scope is limited to Telegram coding-task launch conflicts and does not reopen unrelated parser work."
+      "Open PLAN.json and verify it only tracks the completed-harness false-positive fix.",
+      "Open PROGRESS.md and verify the reboot entry explains that completed harnesses were being mislabeled as unfinished.",
+      "Confirm the scope is limited to harness-state detection, conflict wording, and prompt semantics."
     ],
     "passes": true
   },
   {
     "id": 2,
     "category": "functional",
-    "description": "The coding-task launcher can inspect an active repo harness and surface a concise summary instead of blindly resuming it.",
+    "description": "Repo harness detection distinguishes missing, active, and completed harness states based on PLAN.json completion instead of file presence alone.",
     "steps": [
-      "Inspect a repo with PLAN.json, PROGRESS.md, and init.sh present.",
-      "Verify the launcher-side harness inspection returns both the active state and a human-facing summary.",
-      "Confirm repos without a complete harness continue to report no conflict summary."
+      "Inspect a repo with all harness files present and unfinished PLAN.json items.",
+      "Verify detect_repo_harness reports active for unfinished plans and completed for plans with zero remaining work.",
+      "Confirm missing and partial harness repos still report missing or initializing correctly."
     ],
     "passes": true
   },
   {
     "id": 3,
     "category": "functional",
-    "description": "Telegram start-coding flow detects when a new goal targets a repo with an active harness and pauses for confirmation instead of auto-launching.",
+    "description": "Telegram start-coding flow pauses for confirmation on both active and completed harness repos, but uses different conflict reasons and user-facing wording.",
     "steps": [
-      "Send a Telegram private-chat start command for a repo with an active harness in a focused routing test.",
-      "Verify nanobot creates the coding task but leaves it in waiting_user rather than starting Codex immediately.",
-      "Confirm the reply explains both the existing harness summary and the newly requested goal."
+      "Send a private-chat start command for an unfinished harness repo and verify nanobot says the repo has an unfinished harness.",
+      "Send the same flow for a completed harness repo and verify nanobot says the repo has a completed harness that can be used as historical context.",
+      "Confirm repos without a complete harness still auto-start directly."
     ],
     "passes": true
   },
   {
     "id": 4,
-    "category": "functional",
-    "description": "Conflict-state Telegram controls let the user explicitly continue the old harness or start the new goal.",
+    "category": "integration",
+    "description": "Codex bootstrap prompt semantics reflect the difference between completed and unfinished harnesses, so completed plans are treated as background context rather than pending work.",
     "steps": [
-      "From a waiting_user conflict state, send 继续旧任务 and verify the shared launcher resumes the existing harness path.",
-      "From the same conflict state, send 按新任务开始 and verify the task launches with the explicit new-goal override recorded.",
-      "Confirm bare 继续 remains ambiguous in conflict mode and asks for an explicit choice."
+      "Inspect the prompt generated for an unfinished harness repo and verify it still restores the current unfinished task state first.",
+      "Inspect the prompt generated for a completed harness repo and verify it describes the old harness as completed historical context.",
+      "Confirm the start_new_goal override still tells Codex not to resume unfinished work as the primary task."
     ],
     "passes": true
   },
   {
     "id": 5,
-    "category": "integration",
-    "description": "Starting a new goal against an active harness uses an explicit prompt mode so Codex treats the old harness as background, not the primary task.",
+    "category": "testing",
+    "description": "Focused tests cover completed-harness detection, waiting-user reporting, router branching, notifier compatibility, and prompt generation.",
     "steps": [
-      "Launch a task with the new-goal override against an active harness repo.",
-      "Inspect the generated Codex bootstrap prompt and verify it says not to continue the old unfinished features as the primary task.",
-      "Confirm the old harness summary is preserved as context while the new goal becomes the task focus."
+      "Run focused pytest coverage for harness, reporting, router, worker, and notifier flows.",
+      "Verify the suite covers both repo_active_harness and repo_completed_harness conflict reasons.",
+      "Confirm compileall still succeeds for the touched coding-task modules and tests."
     ],
     "passes": true
   },
   {
     "id": 6,
-    "category": "functional",
-    "description": "Existing non-conflict launch behavior remains unchanged for repos without an active harness or when the user explicitly resumes the old one.",
-    "steps": [
-      "Launch a Telegram coding task against a repo with no complete harness and verify it still auto-starts immediately.",
-      "Launch a conflict task and choose 继续旧任务; verify it follows the same shared launcher path as before.",
-      "Confirm create-only and launch-failure fallbacks still work."
-    ],
-    "passes": true
-  },
-  {
-    "id": 7,
-    "category": "testing",
-    "description": "Focused tests cover conflict detection, waiting-user reports, Telegram conflict controls, and prompt-mode generation.",
-    "steps": [
-      "Run worker, reporting, router, and Telegram routing focused tests.",
-      "Verify the suite covers conflict summary extraction, explicit choice handling, and non-conflict regressions.",
-      "Confirm the tests stay scoped away from unrelated repo-wide failures."
-    ],
-    "passes": true
-  },
-  {
-    "id": 8,
-    "category": "docs",
-    "description": "README and progress notes explain how nanobot now handles active in-repo harness conflicts for new Telegram goals.",
-    "steps": [
-      "Open the updated README coding-task section.",
-      "Verify it explains that active repo harnesses require explicit user confirmation before resuming or replacing work.",
-      "Confirm PROGRESS.md records the reasoning and the new control phrases."
-    ],
-    "passes": true
-  },
-  {
-    "id": 9,
     "category": "integration",
-    "description": "The live nanobot gateway can be restarted in place and manually confirm that a repo with an active harness no longer hijacks a new Telegram goal silently.",
+    "description": "A real codex-remote validation path shows the completed harness now triggers completed-context wording instead of the old unfinished-harness false positive.",
     "steps": [
-      "Restart the existing nanobot tmux gateway in place after the conflict fix.",
-      "Send a Telegram private-chat command that targets a repo with an active harness and a different new goal.",
-      "Verify nanobot replies with an explicit conflict confirmation flow instead of silently resuming old work."
+      "Use the real /Users/miau/Documents/codex-remote repo, whose current PLAN.json is fully complete.",
+      "Simulate a Telegram start-coding request against that repo through the live routing stack.",
+      "Verify the response explicitly says the repo has a completed harness that can be used as historical context."
     ],
-    "passes": false
+    "passes": true
   }
 ]

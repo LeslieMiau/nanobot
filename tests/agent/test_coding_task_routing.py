@@ -106,7 +106,17 @@ def _create_origin_task(store: CodingTaskStore, tmp_path: Path, *, status: str =
 
 def _init_active_harness(repo_path: Path, *, note: str = "Continue old task") -> None:
     repo_path.mkdir(exist_ok=True)
-    (repo_path / "PLAN.json").write_text("[]", encoding="utf-8")
+    (repo_path / "PLAN.json").write_text('[{"id": 1, "passes": false}]', encoding="utf-8")
+    (repo_path / "PROGRESS.md").write_text(f"## Session update\n- {note}\n", encoding="utf-8")
+    (repo_path / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+
+def _init_completed_harness(repo_path: Path, *, note: str = "Finish the prior plan") -> None:
+    repo_path.mkdir(exist_ok=True)
+    (repo_path / "PLAN.json").write_text(
+        '[{"id": 1, "passes": true}, {"id": 2, "passes": true}]',
+        encoding="utf-8",
+    )
     (repo_path / "PROGRESS.md").write_text(f"## Session update\n- {note}\n", encoding="utf-8")
     (repo_path / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
 
@@ -167,6 +177,32 @@ async def test_private_telegram_start_coding_waits_for_confirmation_when_repo_ha
     assert launcher.launched_ids == []
     assert tasks[0].status == "waiting_user"
     assert tasks[0].metadata["harness_conflict_reason"] == "repo_active_harness"
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_start_coding_waits_for_confirmation_when_repo_has_completed_harness(tmp_path: Path) -> None:
+    loop, store, _manager, launcher = _make_loop(tmp_path, attach_launcher=True)
+    repo_path = tmp_path / "demo-repo"
+    _init_completed_harness(repo_path, note="Finish the prior plan")
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content=f"开始编程 {repo_path} 替换设置图标",
+            metadata={"is_group": False, "message_id": 46},
+        )
+    )
+
+    assert response is not None
+    assert "仓库里已有已完成的 harness" in response.content
+    assert "历史摘要: Finish the prior plan" in response.content
+    tasks = store.list_tasks()
+    assert len(tasks) == 1
+    assert launcher.launched_ids == []
+    assert tasks[0].status == "waiting_user"
+    assert tasks[0].metadata["harness_conflict_reason"] == "repo_completed_harness"
 
 
 @pytest.mark.asyncio

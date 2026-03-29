@@ -80,6 +80,16 @@ def build_waiting_user_report(task: CodingTask) -> str:
         lines.append(f"你的新目标: {task.goal}")
         lines.append("下一步: 回复“继续旧任务”继续原来的 harness，回复“按新任务开始”按这次的新目标启动，或回复“取消”终止。")
         return "\n".join(lines)
+    if task.metadata.get("harness_conflict_reason") == "repo_completed_harness":
+        lines = [
+            "仓库里已有已完成的 harness，可作为历史上下文参考",
+            f"任务ID: {task.id}",
+        ]
+        if existing := task.metadata.get("existing_harness_summary"):
+            lines.append(f"历史摘要: {existing}")
+        lines.append(f"你的新目标: {task.goal}")
+        lines.append("下一步: 回复“继续旧任务”沿用旧 harness 的上下文继续工作，回复“按新任务开始”按这次的新目标启动，或回复“取消”终止。")
+        return "\n".join(lines)
 
     lines = [
         "编程任务等待你的确认",

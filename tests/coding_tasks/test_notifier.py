@@ -104,4 +104,8 @@ def test_notifier_allows_new_status_with_new_content(tmp_path) -> None:
     asyncio.run(notifier.maybe_notify(task.id, report))
 
     assert len(sent) == 1
-    assert "等待你的确认" in sent[0].content or "仓库里已有未完成的 harness" in sent[0].content
+    assert (
+        "等待你的确认" in sent[0].content
+        or "仓库里已有未完成的 harness" in sent[0].content
+        or "仓库里已有已完成的 harness" in sent[0].content
+    )

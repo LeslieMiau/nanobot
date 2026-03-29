@@ -218,6 +218,30 @@
   - Upgraded Telegram `状态` to return coding-task details plus recoverability and live report content instead of a generic assistant answer
   - Upgraded Telegram `继续` to relaunch the coding task through the existing tmux worker session when the task is paused or failed
   - Added Telegram `停止` so nanobot sends `C-c` into the tmux worker and moves the task into a resumable `waiting_user` state
+
+## Harness reboot - 2026-03-29 (completed harness false-positive fix)
+- Task pivot:
+  - Superseded the remaining active-harness conflict follow-up with a narrower fix: completed target-repo harnesses were still being labeled as unfinished, which confused Telegram coding-task confirmations for repos like `/Users/miau/Documents/codex-remote`.
+- Existing work detected before implementation:
+  - `detect_repo_harness()` only distinguished `active`, `initializing`, and `missing` from file presence, so any complete harness with `PLAN.json`, `PROGRESS.md`, and `init.sh` was treated as active even when `PLAN.json` had zero remaining work.
+  - Telegram routing, waiting-user reporting, and Codex bootstrap prompts all inherited that coarse `active` state and reused unfinished-work wording.
+- Key decisions:
+  - Introduce a first-class `completed` harness state derived primarily from `PLAN.json` completion, with light text fallback only when the plan cannot be parsed.
+  - Keep completed harnesses behind an explicit confirmation step, but describe them as historical context rather than unfinished work.
+
+## Session update - 2026-03-29 (completed harness false-positive fix)
+- Completed features:
+  - Added a first-class `completed` harness state to repo detection and prompt generation so full plans no longer masquerade as unfinished work.
+  - Split Telegram conflict metadata and waiting-user wording between `repo_active_harness` and `repo_completed_harness`.
+  - Updated Codex bootstrap prompts so completed harnesses are treated as background context instead of pending work that must be resumed.
+  - Refreshed README wording for the coding-task confirmation flow to cover both unfinished harnesses and completed historical context.
+- Verification:
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0, still reports an unrelated repo-wide pytest warning via `/tmp/nanobot-harness-pytest.log`
+  - `.venv/bin/pytest tests/coding_tasks/test_harness.py tests/coding_tasks/test_reporting.py tests/agent/test_coding_task_routing.py tests/coding_tasks/test_worker.py tests/coding_tasks/test_notifier.py` -> passed (41 tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks tests/coding_tasks/test_harness.py tests/coding_tasks/test_reporting.py tests/agent/test_coding_task_routing.py tests/coding_tasks/test_worker.py tests/coding_tasks/test_notifier.py` -> passed
+  - `.venv/bin/python` temporary-workspace routing smoke against real `/Users/miau/Documents/codex-remote` -> returned `仓库里已有已完成的 harness，可作为历史上下文参考`, with the completed Phase 5 summary instead of the old unfinished-harness warning
+- Remaining blockers / follow-up:
+  - The live gateway process still needs the earlier in-place runtime cleanup before the tmux pane can serve as the canonical manual-validation environment again; this fix validated the real repo path through the routing stack in an isolated workspace instead.
 - Verification:
   - `.venv/bin/pytest tests/coding_tasks/test_recovery.py tests/coding_tasks/test_progress.py tests/coding_tasks/test_worker.py tests/coding_tasks/test_manager.py tests/agent/test_coding_task_routing.py` -> passed (22 tests)
   - `.venv/bin/pytest tests/cli/test_commands.py -k "gateway_reports_coding_task_counts or coding_task_status_shows_details_and_recent_events or coding_task_run_launches_tmux_worker or coding_task_create_persists_task or coding_task_create_rejects_missing_repo or coding_task_list_shows_status_and_recoverability or test_coding_task_cancel_updates_status_and_reason or test_coding_task_resume_moves_failed_task_back_to_starting"` -> passed (8 selected tests)

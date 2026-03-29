@@ -3,17 +3,30 @@ from pathlib import Path
 from nanobot.coding_tasks.harness import build_codex_bootstrap_prompt, detect_repo_harness
 
 
-def test_detect_repo_harness_distinguishes_active_and_missing(tmp_path: Path) -> None:
+def test_detect_repo_harness_distinguishes_completed_active_and_missing(tmp_path: Path) -> None:
     active_repo = tmp_path / "active-repo"
     active_repo.mkdir()
-    (active_repo / "PLAN.json").write_text("[]", encoding="utf-8")
+    (active_repo / "PLAN.json").write_text(
+        '[{"id": 1, "passes": false}, {"id": 2, "passes": true}]',
+        encoding="utf-8",
+    )
     (active_repo / "PROGRESS.md").write_text("## Session update\n- Continue old task\n", encoding="utf-8")
     (active_repo / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    completed_repo = tmp_path / "completed-repo"
+    completed_repo.mkdir()
+    (completed_repo / "PLAN.json").write_text(
+        '[{"id": 1, "passes": true}, {"id": 2, "passes": true}]',
+        encoding="utf-8",
+    )
+    (completed_repo / "PROGRESS.md").write_text("## Session update\n- Finish the prior plan\n", encoding="utf-8")
+    (completed_repo / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
 
     missing_repo = tmp_path / "missing-repo"
     missing_repo.mkdir()
 
     active = detect_repo_harness(active_repo)
+    completed = detect_repo_harness(completed_repo)
     missing = detect_repo_harness(missing_repo)
 
     assert active.has_plan is True
@@ -21,6 +34,10 @@ def test_detect_repo_harness_distinguishes_active_and_missing(tmp_path: Path) ->
     assert active.has_init is True
     assert active.harness_state == "active"
     assert active.summary == "Continue old task"
+
+    assert completed.has_plan is True
+    assert completed.harness_state == "completed"
+    assert completed.summary == "Finish the prior plan"
 
     assert missing.has_plan is False
     assert missing.has_progress is False
@@ -45,7 +62,7 @@ def test_build_codex_bootstrap_prompt_for_existing_harness_repo(tmp_path: Path) 
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / "AGENTS.md").write_text("Follow repo rules", encoding="utf-8")
-    (repo / "PLAN.json").write_text("[]", encoding="utf-8")
+    (repo / "PLAN.json").write_text('[{"id": 1, "passes": false}]', encoding="utf-8")
     (repo / "PROGRESS.md").write_text("## Session update\n- Continue old task\n", encoding="utf-8")
     (repo / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
 
@@ -69,7 +86,7 @@ def test_build_codex_bootstrap_prompt_for_existing_harness_repo(tmp_path: Path) 
 def test_build_codex_bootstrap_prompt_for_new_goal_override_against_existing_harness(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "PLAN.json").write_text("[]", encoding="utf-8")
+    (repo / "PLAN.json").write_text('[{"id": 1, "passes": false}]', encoding="utf-8")
     (repo / "PROGRESS.md").write_text("## Session update\n- Continue old task\n", encoding="utf-8")
     (repo / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
 
@@ -82,6 +99,26 @@ def test_build_codex_bootstrap_prompt_for_new_goal_override_against_existing_har
     assert "user explicitly chose to start a new goal" in prompt
     assert "Do not continue the old unfinished harness features as the primary task." in prompt
     assert "Existing harness summary: Continue old task" in prompt
+
+
+def test_build_codex_bootstrap_prompt_for_completed_harness_repo(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "PLAN.json").write_text(
+        '[{"id": 1, "passes": true}, {"id": 2, "passes": true}]',
+        encoding="utf-8",
+    )
+    (repo / "PROGRESS.md").write_text("## Session update\n- Finish the prior plan\n", encoding="utf-8")
+    (repo / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+
+    prompt = build_codex_bootstrap_prompt(
+        repo_path=repo,
+        goal="Replace the settings icon",
+    )
+
+    assert "Harness mode: completed harness detected." in prompt
+    assert "Treat the prior harness as completed background context" in prompt
+    assert "Completed harness summary: Finish the prior plan" in prompt
 
 
 def test_build_codex_bootstrap_prompt_for_missing_harness_repo(tmp_path: Path) -> None:

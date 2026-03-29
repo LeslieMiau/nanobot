@@ -28,7 +28,7 @@ def _make_launcher(tmp_path: Path, *, has_session: bool, capture_output: str = "
     manager = CodexWorkerManager(tmp_path, store)
     repo = tmp_path / "repo"
     repo.mkdir()
-    (repo / "PLAN.json").write_text("[]", encoding="utf-8")
+    (repo / "PLAN.json").write_text('[{"id": 1, "passes": false}]', encoding="utf-8")
     (repo / "PROGRESS.md").write_text("## Session update\n- Continue old task\n", encoding="utf-8")
     (repo / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
     task = manager.create_task(repo_path=str(repo), goal="Implement worker launch")
@@ -126,6 +126,31 @@ def test_launch_task_writes_new_goal_override_prompt_for_conflict_resolution(tmp
 
     assert "user explicitly chose to start a new goal" in prompt
     assert "Do not continue the old unfinished harness features as the primary task." in prompt
+
+
+def test_launch_task_writes_completed_harness_prompt_for_conflict_resolution(tmp_path: Path) -> None:
+    store = CodingTaskStore(tmp_path / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(tmp_path, store)
+    repo = tmp_path / "repo-completed"
+    repo.mkdir()
+    (repo / "PLAN.json").write_text(
+        '[{"id": 1, "passes": true}, {"id": 2, "passes": true}]',
+        encoding="utf-8",
+    )
+    (repo / "PROGRESS.md").write_text("## Session update\n- Finish the prior plan\n", encoding="utf-8")
+    (repo / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    task = manager.create_task(repo_path=str(repo), goal="Replace icon")
+    manager.update_metadata(
+        task.id,
+        updates={"harness_conflict_resolution": "resume_existing"},
+    )
+    launcher = CodexWorkerLauncher(tmp_path, manager, runner=_FakeRunner(has_session=False))
+
+    result = launcher.launch_task(task.id)
+    prompt = Path(result.prompt_path).read_text(encoding="utf-8")
+
+    assert "Harness mode: completed harness detected." in prompt
+    assert "completed background context" in prompt
 
 
 def test_worker_artifacts_are_namespaced_by_task_id(tmp_path: Path) -> None:

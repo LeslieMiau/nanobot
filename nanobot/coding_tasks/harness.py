@@ -17,10 +17,13 @@ class RepoHarnessState:
     has_init: bool
     latest_note: str = ""
     plan_summary: str = ""
+    plan_completed: bool | None = None
 
     @property
     def harness_state(self) -> str:
         if self.has_plan and self.has_progress and self.has_init:
+            if self.plan_completed is True:
+                return "completed"
             return "active"
         if self.has_plan or self.has_progress or self.has_init:
             return "initializing"
@@ -37,7 +40,9 @@ def detect_repo_harness(repo_path: str | Path) -> RepoHarnessState:
     """Inspect a repository for standard long-running harness files."""
     root = Path(repo_path).expanduser().resolve()
     latest_note = _read_latest_progress_note(root / "PROGRESS.md")
-    plan_summary = _summarize_plan_progress(root / "PLAN.json")
+    plan_summary, plan_completed = _summarize_plan_progress(root / "PLAN.json")
+    if plan_completed is None:
+        plan_completed = _infer_completed_from_text(latest_note, plan_summary)
     return RepoHarnessState(
         repo_path=str(root),
         has_plan=(root / "PLAN.json").exists(),
@@ -45,6 +50,7 @@ def detect_repo_harness(repo_path: str | Path) -> RepoHarnessState:
         has_init=(root / "init.sh").exists(),
         latest_note=latest_note,
         plan_summary=plan_summary,
+        plan_completed=plan_completed,
     )
 
 
@@ -106,6 +112,29 @@ def build_codex_bootstrap_prompt(
                     "Only after restoring context should you continue the requested task goal.",
                 ]
             )
+    elif state.harness_state == "completed":
+        if state.summary:
+            lines.append(f"Completed harness summary: {state.summary}")
+        if harness_resolution == "start_new_goal":
+            lines.extend(
+                [
+                    "Harness mode: completed harness detected, and the user explicitly chose to start a new goal.",
+                    "Before editing anything, read the existing PROGRESS.md and PLAN.json only to recover historical context and constraints.",
+                    "Do not treat the previous completed harness as unfinished work that must be resumed.",
+                    "Treat the completed harness as background reference, then anchor the repository around the new task goal.",
+                    "If repository instructions require a harness refresh for the new goal, update PLAN.json and PROGRESS.md before implementation continues.",
+                    "After that reset step, continue the requested new task goal.",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "Harness mode: completed harness detected.",
+                    "Before editing anything, read the existing PROGRESS.md and PLAN.json to recover historical context and repository conventions.",
+                    "Treat the prior harness as completed background context, not as unfinished work that must be resumed.",
+                    "Then continue the requested task goal with that context in mind.",
+                ]
+            )
     else:
         lines.extend(
             [
@@ -143,16 +172,46 @@ def _read_latest_progress_note(path: Path) -> str:
     return ""
 
 
-def _summarize_plan_progress(path: Path) -> str:
+def _summarize_plan_progress(path: Path) -> tuple[str, bool | None]:
     if not path.exists():
-        return ""
+        return "", None
     try:
         items = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
-        return ""
+        return "", None
     if not isinstance(items, list) or not items:
-        return ""
+        return "", True if isinstance(items, list) else None
     total = len(items)
     completed = sum(1 for item in items if isinstance(item, dict) and item.get("passes"))
     remaining = max(total - completed, 0)
-    return f"PLAN progress: {completed}/{total} complete, {remaining} remaining"
+    return f"PLAN progress: {completed}/{total} complete, {remaining} remaining", remaining == 0
+
+
+def _infer_completed_from_text(*texts: str) -> bool | None:
+    normalized = " ".join(text.strip().lower() for text in texts if text.strip())
+    if not normalized:
+        return None
+    completion_markers = (
+        "剩余 0 项",
+        "0 remaining",
+        "remaining=0",
+        "remaining: 0",
+        "全部完成",
+        "all features complete",
+        "all complete",
+        "已全部完成",
+    )
+    for marker in completion_markers:
+        if marker in normalized:
+            return True
+    active_markers = (
+        "剩余 1 项",
+        "remaining 1",
+        "未完成",
+        "unfinished",
+        "in progress",
+    )
+    for marker in active_markers:
+        if marker in normalized:
+            return False
+    return None

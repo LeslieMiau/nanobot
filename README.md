@@ -130,7 +130,7 @@ Repo resolution is alias-first:
 
 - If `gateway.codingTaskRepos` defines an alias, nanobot uses that absolute path first.
 - Otherwise nanobot falls back to `~/Documents/<repo>`.
-- If the target repo already has an active in-repo harness, nanobot now pauses and asks you to choose between `继续旧任务` and `按新任务开始` instead of silently resuming the old work.
+- If the target repo already has an in-repo harness, nanobot now pauses before launch and distinguishes between unfinished work and completed historical context before asking you to choose between `继续旧任务` and `按新任务开始`.
 
 Example config:
 
