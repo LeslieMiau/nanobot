@@ -63,7 +63,7 @@
       "Run the detailed status command for that task id.",
       "Verify the response includes tmux session, last progress summary, and recent run-log events."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,

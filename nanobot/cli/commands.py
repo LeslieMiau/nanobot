@@ -777,6 +777,44 @@ def coding_task_list(
         )
 
 
+@coding_task_app.command("status")
+def coding_task_status(
+    task_id: str = typer.Argument(..., help="Coding task id"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Show detailed status for one coding task."""
+    config_obj = _load_runtime_config(config, workspace)
+    store, manager = _load_coding_task_runtime(config_obj)
+    task = store.get_task(task_id)
+    if task is None:
+        console.print(f"[red]Unknown coding task: {task_id}[/red]")
+        raise typer.Exit(1)
+
+    recoverable_ids = {item.id for item in manager.recoverable_tasks()}
+    recoverable = "yes" if task.id in recoverable_ids else "no"
+    console.print(f"Task: {task.id}")
+    console.print(f"Title: {task.title}")
+    console.print(f"Status: {task.status}")
+    console.print(f"Repo: {task.repo_path}")
+    console.print(f"Goal: {task.goal}")
+    console.print(f"tmux: {task.tmux_session or '-'}")
+    console.print(f"Codex session: {task.codex_session_hint or '-'}")
+    console.print(f"Harness state: {task.harness_state}")
+    console.print(f"Recoverable: {recoverable}")
+    console.print(f"Last progress: {task.last_progress_summary or '-'}")
+
+    events = store.read_run_events(task.id, limit=5)
+    if not events:
+        console.print("Recent events: none")
+        return
+
+    console.print("Recent events:")
+    for event in events:
+        message = event.message or "-"
+        console.print(f"- {event.event} status={event.status} message={message}")
+
+
 
 
 # ============================================================================

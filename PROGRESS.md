@@ -96,3 +96,15 @@
 - Remaining blockers / follow-up:
   - There is still no single-task detail command, so feature `#6` is the next inspectability gap
   - Coding tasks can be created and listed, but not yet cancelled, resumed, or launched into a real Codex worker
+
+## Session update - 2026-03-29 (feature #6)
+- Completed feature:
+  - Added `nanobot coding-task status <task_id>` so a single coding task can be inspected with status, repo, goal, tmux metadata, recoverability, last progress, and recent run events
+- Verification:
+  - `.venv/bin/pytest tests/cli/test_commands.py -k "coding_task_create_persists_task or coding_task_list_shows_status_and_recoverability or coding_task_status_shows_details_and_recent_events or gateway_reports_coding_task_counts or gateway_uses_configured_port_when_cli_flag_is_missing or gateway_cli_port_overrides_configured_port"` -> passed (6 selected tests)
+- Key decisions:
+  - Keep detail output line-oriented and grep-friendly, matching the current create/list CLI style instead of introducing rich tables yet
+  - Limit recent run events to a short tail so the command stays readable even after longer task histories accumulate
+- Remaining blockers / follow-up:
+  - There is still no CLI cancel/resume path, so features `#7` and `#8` remain the next control-plane gaps
+  - A real Codex worker launcher still does not exist, so the new status view is currently inspecting persisted metadata rather than a live running worker
