@@ -10,6 +10,7 @@ from nanobot.coding_tasks.progress import (
     extract_latest_progress_note,
     summarize_plan_progress,
 )
+from nanobot.coding_tasks.recovery import CodexTaskRecovery, RecoveryResult
 from nanobot.coding_tasks.store import CodingTaskStore
 from nanobot.coding_tasks.types import CodingRunEvent, CodingTask
 from nanobot.coding_tasks.worker import CodexLaunchResult, CodexWorkerLauncher
@@ -17,8 +18,10 @@ from nanobot.coding_tasks.worker import CodexLaunchResult, CodexWorkerLauncher
 __all__ = [
     "CodexLaunchResult",
     "CodexProgressMonitor",
+    "CodexTaskRecovery",
     "PlanProgress",
     "RepoHarnessState",
+    "RecoveryResult",
     "TaskProgressReport",
     "build_codex_bootstrap_prompt",
     "build_task_progress_report",

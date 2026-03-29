@@ -210,3 +210,22 @@
 - Remaining blockers / follow-up:
   - Gateway restart recovery is not implemented yet, so feature `#25` is the next gap before long-lived tasks survive nanobot restarts cleanly
   - Telegram `继续` / `停止` still do not drive the live tmux worker session itself; they only update persisted task state today
+
+## Session update - 2026-03-29 (features #25, #26, #27, #28, #29)
+- Completed features:
+  - Added startup recovery scanning that walks recoverable coding tasks, reconnects those whose tmux sessions still exist, and refreshes their live progress summary
+  - Added failure handling for recoverable tasks whose tmux session disappeared, marking them `failed` with an actionable relaunch hint
+  - Upgraded Telegram `状态` to return coding-task details plus recoverability and live report content instead of a generic assistant answer
+  - Upgraded Telegram `继续` to relaunch the coding task through the existing tmux worker session when the task is paused or failed
+  - Added Telegram `停止` so nanobot sends `C-c` into the tmux worker and moves the task into a resumable `waiting_user` state
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_recovery.py tests/coding_tasks/test_progress.py tests/coding_tasks/test_worker.py tests/coding_tasks/test_manager.py tests/agent/test_coding_task_routing.py` -> passed (22 tests)
+  - `.venv/bin/pytest tests/cli/test_commands.py -k "gateway_reports_coding_task_counts or coding_task_status_shows_details_and_recent_events or coding_task_run_launches_tmux_worker or coding_task_create_persists_task or coding_task_create_rejects_missing_repo or coding_task_list_shows_status_and_recoverability or test_coding_task_cancel_updates_status_and_reason or test_coding_task_resume_moves_failed_task_back_to_starting"` -> passed (8 selected tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks nanobot/agent/loop.py nanobot/cli/commands.py tests/coding_tasks/test_recovery.py tests/agent/test_coding_task_routing.py` -> passed
+- Key decisions:
+  - Keep recovery logic in a dedicated module and invoke it during gateway startup, which avoids burying restart semantics inside CLI-only status commands
+  - Treat tmux session survival as the recovery truth source for now; if the session is gone, nanobot fails the task explicitly rather than pretending it is still recoverable
+  - Drive Telegram `继续` through the live launcher instead of only toggling task metadata, so the same tmux session remains the control point for resumed work
+- Remaining blockers / follow-up:
+  - The live control loop still lacks automatic background polling / notifications, so the next stretch should focus on scheduled observation and user-facing progress push
+  - Telegram `取消` currently cancels task state immediately rather than first interrupting a live tmux process; that may need tightening in later safety polish

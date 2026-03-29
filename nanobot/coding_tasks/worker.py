@@ -120,6 +120,19 @@ class CodexWorkerLauncher:
         )
         return result.stdout or ""
 
+    def has_session(self, session: str) -> bool:
+        """Return True when the tmux session currently exists."""
+        return self._has_session(session)
+
+    def interrupt_task(self, task_id: str) -> CodingTask:
+        """Send Ctrl-C to the tmux pane for an existing coding task."""
+        task = self.manager.require_task(task_id)
+        session_name = task.tmux_session or ""
+        if not session_name or not self.has_session(session_name):
+            raise RuntimeError(f"tmux session missing for coding task {task_id}")
+        self._send_ctrl_c(session_name)
+        return task
+
     @staticmethod
     def extract_session_hint(text: str) -> str | None:
         """Extract a Codex session hint from pane output when present."""

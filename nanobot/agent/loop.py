@@ -131,9 +131,17 @@ class AgentLoop:
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
         if self.coding_task_manager is not None:
+            from nanobot.coding_tasks import CodexProgressMonitor, CodexWorkerLauncher
             from nanobot.coding_tasks.router import register_coding_task_commands
 
-            register_coding_task_commands(self.commands, self.coding_task_manager)
+            coding_task_launcher = CodexWorkerLauncher(workspace, self.coding_task_manager)
+            coding_task_monitor = CodexProgressMonitor(self.coding_task_manager, coding_task_launcher)
+            register_coding_task_commands(
+                self.commands,
+                self.coding_task_manager,
+                launcher=coding_task_launcher,
+                monitor=coding_task_monitor,
+            )
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""

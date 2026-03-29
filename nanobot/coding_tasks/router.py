@@ -10,11 +10,14 @@ from pathlib import Path
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.coding_tasks.manager import CodexWorkerManager
+from nanobot.coding_tasks.progress import CodexProgressMonitor
+from nanobot.coding_tasks.worker import CodexWorkerLauncher
 
 _START_PREFIX = "开始编程"
 _STATUS_COMMANDS = {"状态"}
 _RESUME_COMMANDS = {"继续"}
 _CANCEL_COMMANDS = {"取消"}
+_STOP_COMMANDS = {"停止"}
 
 _FIELD_PATTERNS = {
     "repo_path": re.compile(r"^(?:仓库|repo|repo_path|路径)\s*[:：=]\s*(.+)$", re.IGNORECASE),
@@ -100,10 +103,16 @@ def validate_repo_path(repo_path: str) -> tuple[str | None, str | None]:
     return str(resolved), None
 
 
-def register_coding_task_commands(router: CommandRouter, manager: CodexWorkerManager) -> None:
+def register_coding_task_commands(
+    router: CommandRouter,
+    manager: CodexWorkerManager,
+    *,
+    launcher: CodexWorkerLauncher | None = None,
+    monitor: CodexProgressMonitor | None = None,
+) -> None:
     """Register chat-level interceptors for coding-task lifecycle actions."""
     router.intercept(_make_start_coding_handler(manager))
-    router.intercept(_make_control_handler(manager))
+    router.intercept(_make_control_handler(manager, launcher=launcher, monitor=monitor))
 
 
 def _make_start_coding_handler(manager: CodexWorkerManager):
@@ -183,7 +192,12 @@ def _make_start_coding_handler(manager: CodexWorkerManager):
     return _handle_start_coding
 
 
-def _make_control_handler(manager: CodexWorkerManager):
+def _make_control_handler(
+    manager: CodexWorkerManager,
+    *,
+    launcher: CodexWorkerLauncher | None = None,
+    monitor: CodexProgressMonitor | None = None,
+):
     async def _handle_control(ctx: CommandContext) -> OutboundMessage | None:
         msg = ctx.msg
         if msg.channel != "telegram":
@@ -192,7 +206,7 @@ def _make_control_handler(manager: CodexWorkerManager):
             return None
 
         command = ctx.raw.strip()
-        if command not in _STATUS_COMMANDS | _RESUME_COMMANDS | _CANCEL_COMMANDS:
+        if command not in _STATUS_COMMANDS | _RESUME_COMMANDS | _CANCEL_COMMANDS | _STOP_COMMANDS:
             return None
 
         task = manager.latest_active_task_for_origin(msg.channel, msg.chat_id)
@@ -205,10 +219,15 @@ def _make_control_handler(manager: CodexWorkerManager):
             )
 
         if command in _STATUS_COMMANDS:
+            report = monitor.build_task_report(task.id) if monitor else None
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=_format_task_status(task),
+                content=_format_task_status(
+                    task,
+                    report_summary=report.summary if report else "",
+                    recoverable=task.id in {item.id for item in manager.recoverable_tasks()},
+                ),
                 metadata={"render_as": "text"},
             )
 
@@ -227,9 +246,33 @@ def _make_control_handler(manager: CodexWorkerManager):
                 metadata={"render_as": "text"},
             )
 
+        if command in _STOP_COMMANDS:
+            if launcher:
+                launcher.interrupt_task(task.id)
+            manager.record_user_control(task.id, "stop")
+            updated = manager.mark_waiting_user(task.id, summary="Stopped from Telegram private chat")
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    "已停止编程任务\n"
+                    f"任务ID: {updated.id}\n"
+                    f"状态: {updated.status}\n"
+                    f"仓库: {updated.repo_path}"
+                ),
+                metadata={"render_as": "text"},
+            )
+
         if task.status in {"waiting_user", "failed"}:
             manager.record_user_control(task.id, "resume")
-            updated = manager.mark_starting(task.id, summary="Resumed from Telegram private chat")
+            if launcher:
+                launched = launcher.launch_task(task.id)
+                updated = launched.task
+                reused_text = "yes" if launched.session_reused else "no"
+                session_note = f"\n复用 tmux: {reused_text}"
+            else:
+                updated = manager.mark_starting(task.id, summary="Resumed from Telegram private chat")
+                session_note = ""
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
@@ -238,6 +281,7 @@ def _make_control_handler(manager: CodexWorkerManager):
                     f"任务ID: {updated.id}\n"
                     f"状态: {updated.status}\n"
                     f"仓库: {updated.repo_path}"
+                    f"{session_note}"
                 ),
                 metadata={"render_as": "text"},
             )
@@ -245,10 +289,10 @@ def _make_control_handler(manager: CodexWorkerManager):
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
-            content=(
-                "当前编程任务不需要继续操作\n"
-                f"任务ID: {task.id}\n"
-                f"状态: {task.status}"
+            content=_format_task_status(
+                task,
+                note="当前编程任务不需要继续操作",
+                recoverable=task.id in {item.id for item in manager.recoverable_tasks()},
             ),
             metadata={"render_as": "text"},
         )
@@ -256,16 +300,20 @@ def _make_control_handler(manager: CodexWorkerManager):
     return _handle_control
 
 
-def _format_task_status(task) -> str:
+def _format_task_status(task, *, report_summary: str = "", note: str = "当前编程任务状态", recoverable: bool | None = None) -> str:
     lines = [
-        "当前编程任务状态",
+        note,
         f"任务ID: {task.id}",
         f"状态: {task.status}",
         f"仓库: {task.repo_path}",
         f"目标: {task.goal}",
     ]
+    if recoverable is not None:
+        lines.append(f"可恢复: {'yes' if recoverable else 'no'}")
     if task.last_progress_summary:
         lines.append(f"最近进展: {task.last_progress_summary}")
+    if report_summary:
+        lines.append(f"Live report: {report_summary}")
     if task.tmux_session:
         lines.append(f"tmux: {task.tmux_session}")
     return "\n".join(lines)

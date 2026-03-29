@@ -125,6 +125,7 @@ async def test_private_telegram_status_routes_to_latest_origin_task(tmp_path: Pa
     assert f"任务ID: {task.id}" in response.content
     assert "状态: running" in response.content
     assert "最近进展: 正在修改登录逻辑" in response.content
+    assert "可恢复: yes" in response.content
 
 
 @pytest.mark.asyncio
@@ -171,6 +172,92 @@ async def test_private_telegram_resume_routes_to_failed_origin_task(tmp_path: Pa
     assert updated is not None
     assert updated.status == "starting"
     assert updated.last_user_control == "resume"
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_resume_reuses_live_tmux_worker_session(tmp_path: Path) -> None:
+    loop, store = _make_loop(tmp_path)
+    manager, task = _create_origin_task(store, tmp_path, status="failed")
+
+    class _FakeLauncher:
+        def launch_task(self, task_id: str):
+            assert task_id == task.id
+            launched = manager.mark_starting(task.id, summary="Launching Codex worker")
+
+            class _Result:
+                task = launched
+                session_reused = True
+
+            return _Result()
+
+    from nanobot.coding_tasks.progress import CodexProgressMonitor
+    from nanobot.coding_tasks.router import register_coding_task_commands
+    loop.commands = loop.commands.__class__()
+    from nanobot.command import register_builtin_commands
+    register_builtin_commands(loop.commands)
+    register_coding_task_commands(
+        loop.commands,
+        manager,
+        launcher=_FakeLauncher(),  # type: ignore[arg-type]
+        monitor=CodexProgressMonitor(manager, _FakeLauncher()),  # type: ignore[arg-type]
+    )
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="继续",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "已继续编程任务" in response.content
+    assert "复用 tmux: yes" in response.content
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_stop_interrupts_live_worker_and_marks_waiting(tmp_path: Path) -> None:
+    loop, store = _make_loop(tmp_path)
+    manager, task = _create_origin_task(store, tmp_path, status="running")
+
+    class _FakeLauncher:
+        def interrupt_task(self, task_id: str):
+            assert task_id == task.id
+            return manager.require_task(task_id)
+
+        def capture_pane(self, _session: str) -> str:
+            return "still running\n"
+
+    from nanobot.coding_tasks.progress import CodexProgressMonitor
+    from nanobot.coding_tasks.router import register_coding_task_commands
+    loop.commands = loop.commands.__class__()
+    from nanobot.command import register_builtin_commands
+    register_builtin_commands(loop.commands)
+    register_coding_task_commands(
+        loop.commands,
+        manager,
+        launcher=_FakeLauncher(),  # type: ignore[arg-type]
+        monitor=CodexProgressMonitor(manager, _FakeLauncher()),  # type: ignore[arg-type]
+    )
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="停止",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "已停止编程任务" in response.content
+    updated = store.get_task(task.id)
+    assert updated is not None
+    assert updated.status == "waiting_user"
+    assert updated.last_user_control == "stop"
 
 
 @pytest.mark.asyncio

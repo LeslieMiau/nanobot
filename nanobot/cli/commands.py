@@ -537,6 +537,11 @@ def gateway(
     provider = _make_provider(config)
     session_manager = SessionManager(config.workspace_path)
     coding_task_store, codex_workers = _load_coding_task_runtime(config)
+    from nanobot.coding_tasks import CodexProgressMonitor, CodexTaskRecovery, CodexWorkerLauncher
+    coding_task_launcher = CodexWorkerLauncher(config.workspace_path, codex_workers)
+    coding_task_monitor = CodexProgressMonitor(codex_workers, coding_task_launcher)
+    coding_task_recovery = CodexTaskRecovery(codex_workers, coding_task_launcher, coding_task_monitor)
+    coding_task_recovery.recover_tasks()
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):

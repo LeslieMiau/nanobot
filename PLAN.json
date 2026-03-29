@@ -272,7 +272,7 @@
       "Verify the gateway reloads the task state from disk on startup.",
       "Confirm the task becomes observable again without creating a duplicate record."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 26,
@@ -283,7 +283,7 @@
       "Restart the gateway and trigger recovery scanning.",
       "Verify the task moves to `failed` and the status message explains how to resume or relaunch it."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 27,
@@ -294,7 +294,7 @@
       "Send `状态` while the task is active.",
       "Verify the reply contains task status, repo, last progress, and recoverability."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 28,
@@ -305,7 +305,7 @@
       "Send `继续` from the same Telegram private chat.",
       "Verify nanobot writes the resume instruction into the existing worker session instead of creating a new task."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 29,
@@ -316,7 +316,7 @@
       "Send `停止` from Telegram private chat.",
       "Verify the worker is interrupted and the task status becomes `waiting_user` or another resumable state."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 30,

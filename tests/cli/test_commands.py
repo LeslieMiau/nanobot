@@ -922,6 +922,10 @@ def test_gateway_reports_coding_task_counts(monkeypatch, tmp_path: Path) -> None
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
     monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
+    monkeypatch.setattr(
+        "nanobot.coding_tasks.CodexTaskRecovery",
+        lambda *_args, **_kwargs: type("R", (), {"recover_tasks": lambda self: None})(),
+    )
 
     class _FakeBus:
         pass
