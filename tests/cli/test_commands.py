@@ -1043,6 +1043,42 @@ def test_coding_task_create_persists_task(monkeypatch, tmp_path: Path) -> None:
     assert tasks[0].goal == "Implement feature #4"
 
 
+def test_coding_task_list_shows_status_and_recoverability(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.coding_tasks.manager import CodexWorkerManager
+    from nanobot.coding_tasks.store import CodingTaskStore
+
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    queued = manager.create_task(repo_path="/tmp/repo-a", goal="Queue")
+    running = manager.create_task(repo_path="/tmp/repo-b", goal="Run")
+    manager.mark_starting(running.id, summary="Boot")
+    manager.mark_running(running.id, summary="Working")
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+
+    result = runner.invoke(app, ["coding-task", "list", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    output = _strip_ansi(result.stdout).replace("\n", " ")
+    assert "Coding tasks:" in output
+    assert queued.id in output
+    assert running.id in output
+    assert "queued" in output
+    assert "running" in output
+    assert "/tmp/repo-a" in output
+    assert "/tmp/repo-b" in output
+    assert "recoverable" in output
+
+
 def test_channels_login_requires_channel_name() -> None:
     result = runner.invoke(app, ["channels", "login"])
 

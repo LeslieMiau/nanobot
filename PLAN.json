@@ -52,7 +52,7 @@
       "Run the list command and verify all tasks are shown with status and repo path.",
       "Confirm recoverable tasks are visually distinguished from queued, completed, and failed tasks."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,

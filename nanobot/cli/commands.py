@@ -752,6 +752,31 @@ def coding_task_create(
     console.print(f"tmux: {task.tmux_session}")
 
 
+@coding_task_app.command("list")
+def coding_task_list(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """List persisted coding tasks."""
+    config_obj = _load_runtime_config(config, workspace)
+    store, manager = _load_coding_task_runtime(config_obj)
+    tasks = store.list_tasks()
+
+    if not tasks:
+        console.print("No coding tasks.")
+        return
+
+    console.print("Coding tasks:")
+    recoverable_ids = {task.id for task in manager.recoverable_tasks()}
+    for task in tasks:
+        recoverable = "recoverable" if task.id in recoverable_ids else "non-recoverable"
+        progress = task.last_progress_summary or "-"
+        console.print(
+            f"- {task.id} status={task.status} {task.repo_path} "
+            f"({recoverable}) progress={progress}"
+        )
+
+
 
 
 # ============================================================================

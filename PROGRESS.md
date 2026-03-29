@@ -84,3 +84,15 @@
 - Remaining blockers / follow-up:
   - There is still no user-facing list/status command, so feature `#5` is the natural next step to make created tasks inspectable
   - Telegram command routing still does not exist; coding-task control remains CLI-only at this point
+
+## Session update - 2026-03-29 (feature #5)
+- Completed feature:
+  - Added `nanobot coding-task list` so persisted coding tasks can be inspected from the active CLI path with visible status, repo path, progress summary, and recoverability
+- Verification:
+  - `.venv/bin/pytest tests/cli/test_commands.py -k "coding_task_create_persists_task or coding_task_list_shows_status_and_recoverability or gateway_reports_coding_task_counts or gateway_uses_configured_port_when_cli_flag_is_missing or gateway_cli_port_overrides_configured_port"` -> passed (5 selected tests)
+- Key decisions:
+  - Use plain-text `status=...` output instead of bracketed status labels so Rich formatting cannot swallow the actual state string
+  - Keep list output flat and grep-friendly for now; richer tables or detail views can come with feature `#6`
+- Remaining blockers / follow-up:
+  - There is still no single-task detail command, so feature `#6` is the next inspectability gap
+  - Coding tasks can be created and listed, but not yet cancelled, resumed, or launched into a real Codex worker
