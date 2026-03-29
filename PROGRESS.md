@@ -386,3 +386,20 @@
   - Recover `RepoSyncWatcher` as a small, architecture-safe service layer first, rather than reviving the entire dormant gateway dependency chain
   - Keep watcher lifecycle code separate from any heavier git-sync policy so the fix clears the baseline import failure without coupling new logic to stale runtime paths
   - Treat `app.prompts` / `app.runtime` as explicitly out of scope for this recovery unless a later task asks for the dormant gateway path to run again
+
+## Session update - 2026-03-29 (repo_sync service recovery)
+- Completed features:
+  - Restored the `nanobot.repo_sync` package source layout by adding [nanobot/repo_sync/__init__.py](/Users/miau/Documents/nanobot/nanobot/repo_sync/__init__.py) and [nanobot/repo_sync/service.py](/Users/miau/Documents/nanobot/nanobot/repo_sync/service.py)
+  - Reimplemented `RepoSyncWatcher` as a thin async lifecycle wrapper with constructor compatibility for the dormant gateway path, immediate `run_on_start`, interval polling, idempotent `start()`, clean `stop()`, and serialized `trigger_now()`
+  - Added a safe default `sync_fork_once()` helper that validates the repo path, performs fetch + fast-forward merge only, and returns human-readable failure strings instead of crashing the watcher
+  - Expanded [tests/test_repo_sync_service.py](/Users/miau/Documents/nanobot/tests/test_repo_sync_service.py) to cover stop idempotence, trigger serialization, and default-helper validation
+- Verification:
+  - `.venv/bin/pytest tests/test_repo_sync_service.py` -> passed (6 tests)
+  - `.venv/bin/python -m compileall nanobot/repo_sync tests/test_repo_sync_service.py` -> passed
+  - `.venv/bin/python -c "from nanobot.repo_sync.service import RepoSyncWatcher, sync_fork_once; print(RepoSyncWatcher.__name__, callable(sync_fork_once))"` -> passed
+  - `.venv/bin/pytest` -> no longer fails at `tests/test_repo_sync_service.py` import collection; current suite now reports 6 unrelated failures after collecting and running 715 items
+- Remaining blockers / follow-up:
+  - CLI gateway tests still fail because mocked `MessageBus` objects now reach a code path expecting `publish_outbound`; this is separate from `repo_sync.service`
+  - `tests/config/test_config_migration.py` still expects the deprecated `memory_window` field to disappear entirely
+  - `tests/test_openai_oauth_provider.py` still expects `nanobot.providers.openai_oauth_provider` to be lazily addressable for monkeypatching
+  - `tests/tools/test_tool_validation.py::test_exec_head_tail_truncation` still assumes `python` exists on PATH, while this environment only has `.venv/bin/python`

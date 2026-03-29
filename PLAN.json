@@ -8,7 +8,7 @@
       "Open PROGRESS.md and verify the new reboot entry records the missing module baseline, the scoped goal, and what is intentionally out of scope.",
       "Confirm the harness scope is limited to repo_sync service recovery instead of also reviving missing app.prompts or app.runtime modules."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 2,
@@ -19,7 +19,7 @@
       "Verify RepoSyncWatcher resolves without ModuleNotFoundError.",
       "Confirm the package layout includes source files rather than only stale __pycache__ artifacts."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,
@@ -30,7 +30,7 @@
       "Verify the watcher stores the repo path, branch, remotes, timing controls, and sync runner without raising.",
       "Confirm the watcher can be built both with a custom sync_runner and with the default sync helper."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,
@@ -41,7 +41,7 @@
       "Verify the runner is called once immediately after startup.",
       "Call start() again and confirm no duplicate immediate sync is scheduled."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,
@@ -52,7 +52,7 @@
       "Let it run briefly under asyncio.",
       "Verify the injected sync runner is invoked multiple times before stop() is called."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,
@@ -63,7 +63,7 @@
       "Verify the background task is cancelled cleanly and the watcher no longer reports itself as running.",
       "Confirm repeated stop() calls remain harmless."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,
@@ -74,7 +74,7 @@
       "Verify the calls complete without overlapping runner execution.",
       "Confirm the watcher still records both trigger requests sequentially."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 8,
@@ -85,7 +85,7 @@
       "Verify it returns a human-readable failed status instead of raising uncaught exceptions.",
       "Confirm RepoSyncWatcher can use the default helper without requiring a custom test stub."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 9,
@@ -96,7 +96,7 @@
       "Verify the suite covers immediate startup, interval polling, and idempotent start behavior.",
       "Confirm any new watcher tests exercise serialization or stop semantics directly through the service module."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 10,
@@ -107,7 +107,7 @@
       "Verify test collection proceeds past tests/test_repo_sync_service.py without ModuleNotFoundError.",
       "Record any remaining unrelated failures in PROGRESS.md if additional baseline issues surface."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 11,
@@ -118,6 +118,6 @@
       "Verify it records the source of truth for the missing-module failure and the chosen thin-watcher recovery strategy.",
       "Confirm the log distinguishes repo_sync recovery from the still-dormant app.prompts and app.runtime gaps."
     ],
-    "passes": false
+    "passes": true
   }
 ]
