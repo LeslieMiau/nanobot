@@ -516,3 +516,15 @@
   - `.venv/bin/pytest tests/coding_tasks/test_notifier.py tests/coding_tasks/test_audit.py` -> passed (6 tests)
   - `.venv/bin/python -m compileall nanobot/coding_tasks/notifier.py nanobot/coding_tasks/manager.py tests/coding_tasks/test_notifier.py tests/coding_tasks/test_audit.py` -> passed
   - Restarted the temporary gateway process outside tmux; after the restart, the latest run event for `1ea61eed` stayed fixed at `1774769749669` instead of continuing to grow every 5 seconds
+
+## Session update - 2026-03-29 (telegram /coding command registration)
+- Issue reproduced:
+  - Telegram slash routing supported `/coding ...` in the coding-task router, but the Telegram channel had never registered `/coding` in its bot command menu or command handlers, so the command did not appear in Telegram's command picker and was not forwarded through the slash-command path
+- Fixes applied:
+  - Added `/coding` to [nanobot/channels/telegram.py](/Users/miau/Documents/nanobot/nanobot/channels/telegram.py) `BOT_COMMANDS`
+  - Registered `CommandHandler(\"coding\", self._forward_command)` so slash commands follow the same command-forwarding path as `/new`, `/stop`, and `/status`
+  - Updated the `/help` text and Telegram channel tests
+- Verification:
+  - `.venv/bin/pytest tests/channels/test_telegram_channel.py -k "forward_command_does_not_inject_reply_context or on_help_includes_restart_command or bot_commands_include_coding_entry"` -> passed (3 selected tests)
+  - `.venv/bin/python -m compileall nanobot/channels/telegram.py tests/channels/test_telegram_channel.py` -> passed
+  - Restarted the live gateway process and confirmed `Telegram bot commands registered`
