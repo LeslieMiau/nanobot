@@ -45,3 +45,18 @@ def test_user_controls_are_logged_separately_from_status_changes(tmp_path: Path)
     status_events = [event for event in events if event.event == "status_changed"]
     assert [event.message for event in control_events] == ["resume", "stop"]
     assert len(status_events) == 2
+
+
+def test_duplicate_progress_summaries_do_not_append_duplicate_events(tmp_path: Path) -> None:
+    store = CodingTaskStore(tmp_path / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(tmp_path, store)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    task = manager.create_task(repo_path=str(repo), goal="Audit progress")
+
+    manager.update_progress(task.id, "same summary")
+    manager.update_progress(task.id, "same summary")
+
+    events = store.read_run_events(task.id)
+    progress_events = [event for event in events if event.event == "progress_updated"]
+    assert len(progress_events) == 1

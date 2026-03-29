@@ -165,6 +165,8 @@ class CodexWorkerManager:
     def update_progress(self, task_id: str, summary: str) -> CodingTask:
         """Refresh the last visible progress summary without changing status."""
         task = self.require_task(task_id)
+        if summary == task.last_progress_summary:
+            return task
         timestamp = now_ms()
         updated = replace(
             task,

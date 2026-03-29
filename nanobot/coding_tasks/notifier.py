@@ -29,7 +29,7 @@ class CodingTaskNotifier:
         self.send_callback = send_callback
         self.throttle_s = throttle_s
         self._last_sent_at: dict[str, float] = {}
-        self._last_sent_content: dict[str, str] = {}
+        self._last_sent_signature: dict[str, tuple[str, str]] = {}
 
     async def maybe_notify(self, task_id: str, report: TaskProgressReport) -> bool:
         task = self.manager.require_task(task_id)
@@ -43,16 +43,19 @@ class CodingTaskNotifier:
             return False
 
         now = time.monotonic()
-        last_content = self._last_sent_content.get(task_id)
+        signature = (task.status, content)
+        last_signature = self._last_sent_signature.get(task_id)
         last_at = self._last_sent_at.get(task_id, 0.0)
-        if last_content == content and now - last_at < self.throttle_s:
+        if last_signature == signature:
+            return False
+        if last_at and now - last_at < self.throttle_s:
             return False
 
         await self.send_callback(
             OutboundMessage(channel=channel, chat_id=chat_id, content=content, metadata={"render_as": "text"})
         )
         self._last_sent_at[task_id] = now
-        self._last_sent_content[task_id] = content
+        self._last_sent_signature[task_id] = signature
         return True
 
     def _build_content(self, task, report: TaskProgressReport) -> str:

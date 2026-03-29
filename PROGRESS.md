@@ -500,3 +500,19 @@
 - Remaining blockers / follow-up:
   - The original `nanobot:0.0` tmux shell currently cannot re-exec the repo venv cleanly; direct `.venv/bin/nanobot gateway` fails on `pyvenv.cfg`, and even the system-Python fallback behaves inconsistently inside that pane
   - A temporary non-tmux gateway process can be launched successfully with `/tmp/nanobot-gateway-restart.sh`, but live user confirmation of the new Telegram conflict reply is still pending
+
+## Session update - 2026-03-29 (coding-task push spam triage)
+- New issue reproduced from live logs:
+  - Telegram was receiving repeated coding-task pushes for task `1ea61eed` even though the visible summary was unchanged
+  - The active gateway showed a `starting` task being polled every 5 seconds, and the run log at `~/.nanobot/workspace/automation/coding/runs/1ea61eed.jsonl` accumulated identical `progress_updated` entries with the same summary text
+- Root cause:
+  - [nanobot/coding_tasks/manager.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/manager.py) appended `progress_updated` events even when the summary text had not changed
+  - [nanobot/coding_tasks/notifier.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/notifier.py) only suppressed duplicate content within the throttle window, so once the window elapsed it could resend the same task/status/content again
+- Fixes applied:
+  - `manager.update_progress()` now no-ops when the summary matches the already persisted `last_progress_summary`
+  - `CodingTaskNotifier` now tracks `(task.status, content)` signatures and suppresses unchanged notifications entirely, rather than re-sending them every throttle interval
+  - Added focused tests in [tests/coding_tasks/test_notifier.py](/Users/miau/Documents/nanobot/tests/coding_tasks/test_notifier.py) and [tests/coding_tasks/test_audit.py](/Users/miau/Documents/nanobot/tests/coding_tasks/test_audit.py)
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_notifier.py tests/coding_tasks/test_audit.py` -> passed (6 tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks/notifier.py nanobot/coding_tasks/manager.py tests/coding_tasks/test_notifier.py tests/coding_tasks/test_audit.py` -> passed
+  - Restarted the temporary gateway process outside tmux; after the restart, the latest run event for `1ea61eed` stayed fixed at `1774769749669` instead of continuing to grow every 5 seconds
