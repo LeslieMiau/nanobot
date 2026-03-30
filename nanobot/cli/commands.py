@@ -1239,5 +1239,52 @@ def _login_github_copilot() -> None:
         raise typer.Exit(1)
 
 
+@app.command()
+def stats(
+    period: str = typer.Option("month", help="Time period: today, week, month, all"),
+    by: str = typer.Option(None, help="Group by: model, session, channel, day"),
+    json_output: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Show LLM usage cost statistics."""
+    import json as _json
+
+    from nanobot.config.loader import load_config
+    from nanobot.observability.ledger import CostLedger
+
+    config = load_config()
+    workspace = Path(config.agents.defaults.workspace).expanduser()
+    ledger = CostLedger(workspace)
+    rows = ledger.query(period=period, group_by=by)
+
+    if json_output:
+        console.print(_json.dumps(rows, indent=2, ensure_ascii=False))
+        return
+
+    table = Table(title=f"nanobot cost stats ({period})")
+    table.add_column("Group", style="cyan")
+    table.add_column("Calls", justify="right")
+    table.add_column("Prompt Tokens", justify="right")
+    table.add_column("Completion Tokens", justify="right")
+    table.add_column("Cached Tokens", justify="right")
+    table.add_column("Cost (USD)", justify="right", style="green")
+
+    grand_cost = 0.0
+    for row in rows:
+        cost = row.get("total_cost", 0)
+        grand_cost += cost
+        table.add_row(
+            row.get("group", ""),
+            str(row.get("count", 0)),
+            f"{row.get('prompt_tokens', 0):,}",
+            f"{row.get('completion_tokens', 0):,}",
+            f"{row.get('cached_tokens', 0):,}",
+            f"${cost:.4f}",
+        )
+
+    console.print(table)
+    if len(rows) > 1:
+        console.print(f"\n[bold]Total: ${grand_cost:.4f}[/bold]")
+
+
 if __name__ == "__main__":
     app()

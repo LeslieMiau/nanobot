@@ -23,10 +23,13 @@ from nanobot.agent.skills import BUILTIN_SKILLS_DIR
 from nanobot.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from nanobot.agent.tools.message import MessageTool
 from nanobot.agent.tools.registry import ToolRegistry
+from nanobot.agent.tools.bookmark import BookmarkTool
 from nanobot.agent.tools.shell import ExecTool
 from nanobot.agent.tools.spawn import SpawnTool
 from nanobot.agent.tools.web import WebFetchTool, WebSearchTool
 from nanobot.bus.events import InboundMessage, OutboundMessage
+from nanobot.observability.ledger import CostLedger
+from nanobot.observability.model_costs import compute_cost
 from nanobot.utils.helpers import build_status_content
 from nanobot.bus.queue import MessageBus
 from nanobot.providers.base import LLMProvider
@@ -100,6 +103,9 @@ class AgentLoop:
             restrict_to_workspace=restrict_to_workspace,
         )
 
+        self._cost_ledger = CostLedger(workspace)
+        self._current_session_key = ""
+
         self._running = False
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
@@ -151,6 +157,7 @@ class AgentLoop:
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
+        self.tools.register(BookmarkTool(workspace=self.workspace))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
@@ -211,6 +218,7 @@ class AgentLoop:
             pass
         if ctx_est <= 0:
             ctx_est = self._last_usage.get("prompt_tokens", 0)
+        cost_summary = self._cost_ledger.summary()
         return OutboundMessage(
             channel=msg.channel,
             chat_id=msg.chat_id,
@@ -220,6 +228,7 @@ class AgentLoop:
                 context_window_tokens=self.context_window_tokens,
                 session_msg_count=len(session.get_history(max_messages=0)),
                 context_tokens_estimate=ctx_est,
+                cost_summary=cost_summary,
             ),
             metadata={"render_as": "text"},
         )
@@ -240,16 +249,39 @@ class AgentLoop:
 
             tool_defs = self.tools.get_definitions()
 
+            _call_start = time.time()
             response = await self.provider.chat_with_retry(
                 messages=messages,
                 tools=tool_defs,
                 model=self.model,
             )
+            _call_ms = int((time.time() - _call_start) * 1000)
             usage = response.usage or {}
             self._last_usage = {
                 "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
                 "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
             }
+
+            # --- cost tracking ---
+            _cached = 0
+            _details = usage.get("prompt_tokens_details")
+            if isinstance(_details, dict):
+                _cached = int(_details.get("cached_tokens", 0) or 0)
+            self._cost_ledger.log(
+                model=self.model,
+                provider=getattr(self.provider, "name", "unknown"),
+                prompt_tokens=self._last_usage["prompt_tokens"],
+                completion_tokens=self._last_usage["completion_tokens"],
+                cost_usd=compute_cost(
+                    self.model,
+                    self._last_usage["prompt_tokens"],
+                    self._last_usage["completion_tokens"],
+                    _cached,
+                ),
+                session_key=self._current_session_key,
+                cached_tokens=_cached,
+                duration_ms=_call_ms,
+            )
 
             if response.has_tool_calls:
                 if on_progress:
@@ -509,6 +541,7 @@ class AgentLoop:
                 current_message=msg.content, channel=channel, chat_id=chat_id,
                 current_role=current_role,
             )
+            self._current_session_key = key
             final_content, _, all_msgs = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
@@ -563,6 +596,7 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
+        self._current_session_key = key
         history = session.get_history(max_messages=0)
         initial_messages = self.context.build_messages(
             history=history,
