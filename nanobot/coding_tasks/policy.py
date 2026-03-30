@@ -24,3 +24,16 @@ class CodingTaskPolicy:
         """Return the latest task for one origin chat, terminal or not."""
         tasks = self.manager.tasks_for_origin(channel, chat_id)
         return tasks[0] if tasks else None
+
+    def tasks_for_origin(self, channel: str, chat_id: str) -> list[CodingTask]:
+        """Return all tasks for one origin chat, newest first."""
+        return self.manager.tasks_for_origin(channel, chat_id)
+
+    def task_for_origin_index(self, channel: str, chat_id: str, index: int) -> CodingTask | None:
+        """Return the 1-based indexed task for one origin chat, if any."""
+        if index < 1:
+            return None
+        tasks = self.tasks_for_origin(channel, chat_id)
+        if index > len(tasks):
+            return None
+        return tasks[index - 1]

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import shlex
 from dataclasses import dataclass
+from pathlib import Path
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.command.router import CommandContext, CommandRouter
@@ -37,6 +38,7 @@ _FIELD_PATTERNS = {
     "goal": re.compile(r"^(?:目标|goal|需求|任务)\s*[:：=]\s*(.+)$", re.IGNORECASE),
     "title": re.compile(r"^(?:标题|title|名称|name)\s*[:：=]\s*(.+)$", re.IGNORECASE),
 }
+_SLASH_CONTROL_ACTIONS = {"list", "status", "pause", "resume", "stop"}
 
 
 @dataclass(slots=True)
@@ -48,6 +50,15 @@ class ParsedCodingTaskRequest:
     title: str | None = None
 
 
+@dataclass(slots=True)
+class ParsedSlashCodingCommand:
+    """Structured slash subcommand for `/coding` control flows."""
+
+    action: str
+    index: int | None = None
+    error: str | None = None
+
+
 def is_explicit_coding_entry(text: str) -> bool:
     """Return True when a message explicitly enters coding-task mode."""
     body = text.strip()
@@ -57,6 +68,41 @@ def is_explicit_coding_entry(text: str) -> bool:
 def is_coding_status_request(text: str) -> bool:
     """Return True when a message explicitly asks for coding-task status."""
     return _SLASH_STATUS_PATTERN.match(text.strip()) is not None
+
+
+def parse_slash_coding_command(text: str) -> ParsedSlashCodingCommand | None:
+    """Parse `/coding <subcommand> [index]` commands used for task control."""
+    body = text.strip()
+    slash_match = _SLASH_START_PATTERN.match(body)
+    if slash_match is None:
+        return None
+    remainder = body[slash_match.end() :].strip()
+    if not remainder:
+        return None
+    try:
+        tokens = shlex.split(remainder)
+    except ValueError:
+        tokens = remainder.split()
+    if not tokens:
+        return None
+    action = tokens[0].lower()
+    if action not in _SLASH_CONTROL_ACTIONS:
+        return None
+    if action == "list":
+        if len(tokens) != 1:
+            return ParsedSlashCodingCommand(action=action, error="用法: /coding list")
+        return ParsedSlashCodingCommand(action=action)
+    if len(tokens) > 2:
+        return ParsedSlashCodingCommand(action=action, error=f"用法: /coding {action} [index]")
+    if len(tokens) == 2:
+        try:
+            index = int(tokens[1])
+        except ValueError:
+            return ParsedSlashCodingCommand(action=action, error="index 必须是从 1 开始的数字。")
+        if index < 1:
+            return ParsedSlashCodingCommand(action=action, error="index 必须是从 1 开始的数字。")
+        return ParsedSlashCodingCommand(action=action, index=index)
+    return ParsedSlashCodingCommand(action=action)
 
 
 def is_start_coding_request(text: str) -> bool:
@@ -212,7 +258,7 @@ def _make_start_coding_handler(
             return None
         if msg.metadata.get("is_group", True):
             return None
-        if is_coding_status_request(ctx.raw):
+        if parse_slash_coding_command(ctx.raw) is not None:
             return None
         if not is_explicit_coding_entry(ctx.raw):
             return None
@@ -368,14 +414,45 @@ def _make_control_handler(
             return None
 
         command = ctx.raw.strip()
-        is_status_request = command in _STATUS_COMMANDS or is_coding_status_request(command)
-        if not is_status_request and command not in _RESUME_COMMANDS | _RESUME_EXISTING_COMMANDS | _START_NEW_GOAL_COMMANDS | _CANCEL_COMMANDS | _STOP_COMMANDS:
+        slash_command = parse_slash_coding_command(command)
+        if slash_command and slash_command.error:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=slash_command.error,
+                metadata={"render_as": "text"},
+            )
+        is_status_request = command in _STATUS_COMMANDS or (slash_command is not None and slash_command.action == "status")
+        is_list_request = slash_command is not None and slash_command.action == "list"
+        is_pause_request = slash_command is not None and slash_command.action == "pause"
+        is_resume_request = command in _RESUME_COMMANDS or (slash_command is not None and slash_command.action == "resume")
+        is_stop_request = command in _STOP_COMMANDS or (slash_command is not None and slash_command.action == "stop")
+        if not (is_status_request or is_list_request or is_pause_request or is_resume_request or is_stop_request) and command not in _RESUME_EXISTING_COMMANDS | _START_NEW_GOAL_COMMANDS | _CANCEL_COMMANDS:
             return None
 
-        task = policy.select_control_task(msg.channel, msg.chat_id)
+        if is_list_request:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=_format_task_list(policy, msg.channel, msg.chat_id, manager),
+                metadata={"render_as": "text"},
+            )
+
+        indexed_task = None
+        if slash_command is not None and slash_command.index is not None:
+            indexed_task = policy.task_for_origin_index(msg.channel, msg.chat_id, slash_command.index)
+            if indexed_task is None:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=f"找不到第 {slash_command.index} 个编程任务。先发送 `/coding list` 查看列表。",
+                    metadata={"render_as": "text"},
+                )
+
+        task = indexed_task or policy.select_control_task(msg.channel, msg.chat_id)
         if task is None:
             latest_origin = policy.latest_origin_task(msg.channel, msg.chat_id)
-            if command in _RESUME_COMMANDS and latest_origin and latest_origin.status == "cancelled":
+            if is_resume_request and latest_origin and latest_origin.status == "cancelled":
                 return OutboundMessage(
                     channel=msg.channel,
                     chat_id=msg.chat_id,
@@ -407,7 +484,7 @@ def _make_control_handler(
             )
 
         if _is_harness_conflict_task(task):
-            if command in _RESUME_COMMANDS:
+            if is_resume_request:
                 conflict_note = (
                     "这个仓库里已有已完成的 harness，上下文切换需要你明确选择。\n"
                     "回复“继续旧任务”沿用旧 harness 的上下文继续工作，或回复“按新任务开始”按这次的新目标启动。"
@@ -460,7 +537,7 @@ def _make_control_handler(
                         f"状态: {updated.status}\n"
                         "请使用 CLI 手动运行该任务。"
                     ),
-                    metadata={"render_as": "text"},
+                metadata={"render_as": "text"},
                 )
 
         if command in _CANCEL_COMMANDS:
@@ -483,7 +560,72 @@ def _make_control_handler(
                 metadata={"render_as": "text"},
             )
 
-        if command in _STOP_COMMANDS:
+        if is_pause_request:
+            if task.status in {"completed", "cancelled"}:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="这个编程任务已经结束，不能再暂停。先发送 `/coding list` 查看其他任务。",
+                    metadata={"render_as": "text"},
+                )
+            if task.status == "waiting_user":
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content=_format_task_status(task, note="当前编程任务已经处于暂停状态"),
+                    metadata={"render_as": "text"},
+                )
+            if task.status == "failed":
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="当前编程任务已经失败，请发送 `/coding resume` 尝试恢复，或发送 `/coding stop` 结束任务。",
+                    metadata={"render_as": "text"},
+                )
+            if launcher:
+                launcher.interrupt_task(task.id)
+            manager.record_user_control(task.id, "pause")
+            updated = manager.mark_waiting_user(task.id, summary="Paused from Telegram /coding")
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    "已暂停编程任务\n"
+                    f"任务ID: {updated.id}\n"
+                    f"状态: {updated.status}\n"
+                    f"仓库: {updated.repo_path}"
+                ),
+                metadata={"render_as": "text"},
+            )
+
+        if slash_command is not None and slash_command.action == "stop":
+            if task.status in {"completed", "cancelled"}:
+                return OutboundMessage(
+                    channel=msg.channel,
+                    chat_id=msg.chat_id,
+                    content="这个编程任务已经结束，不需要再次停止。先发送 `/coding list` 查看其他任务。",
+                    metadata={"render_as": "text"},
+                )
+            if launcher:
+                try:
+                    launcher.interrupt_task(task.id)
+                except Exception:
+                    pass
+            manager.record_user_control(task.id, "stop")
+            updated = manager.cancel_task(task.id, summary="Stopped from Telegram /coding")
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    "已停止编程任务\n"
+                    f"任务ID: {updated.id}\n"
+                    f"状态: {updated.status}\n"
+                    f"仓库: {updated.repo_path}"
+                ),
+                metadata={"render_as": "text"},
+            )
+
+        if is_stop_request:
             if launcher:
                 launcher.interrupt_task(task.id)
             manager.record_user_control(task.id, "stop")
@@ -500,7 +642,7 @@ def _make_control_handler(
                 metadata={"render_as": "text"},
             )
 
-        if task.status in {"waiting_user", "failed"}:
+        if task.status in {"waiting_user", "failed"} and is_resume_request:
             manager.record_user_control(task.id, "resume")
             if launcher:
                 launched = launcher.launch_task(task.id)
@@ -522,6 +664,13 @@ def _make_control_handler(
                 ),
                 metadata={"render_as": "text"},
             )
+        if is_resume_request:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=_format_task_status(task, note="当前编程任务不需要继续操作"),
+                metadata={"render_as": "text"},
+            )
 
         return OutboundMessage(
             channel=msg.channel,
@@ -535,6 +684,23 @@ def _make_control_handler(
         )
 
     return _handle_control
+
+
+def _format_task_list(policy: CodingTaskPolicy, channel: str, chat_id: str, manager: CodexWorkerManager) -> str:
+    tasks = policy.tasks_for_origin(channel, chat_id)
+    if not tasks:
+        return "当前私聊里还没有编程任务。先发送“开始编程 ...”或 `/coding <repo> <goal>` 创建一个任务。"
+    recoverable_ids = {item.id for item in manager.recoverable_tasks()}
+    lines = ["当前编程任务列表"]
+    for index, task in enumerate(tasks, start=1):
+        repo_name = Path(task.repo_path).name or task.repo_path
+        goal = _truncate_line(task.goal, limit=28)
+        recoverable = "yes" if task.id in recoverable_ids else "no"
+        lines.append(
+            f"{index}. [{task.status}] {repo_name} | {goal} | recoverable={recoverable} | id={task.id}"
+        )
+    lines.append("可用命令: `/coding status 2`、`/coding pause 2`、`/coding resume 2`、`/coding stop 2`")
+    return "\n".join(lines)
 
 
 def _format_task_status(task, *, report_summary: str = "", note: str = "当前编程任务状态", recoverable: bool | None = None) -> str:
@@ -554,6 +720,13 @@ def _format_task_status(task, *, report_summary: str = "", note: str = "当前�
     if task.tmux_session:
         lines.append(f"tmux: {task.tmux_session}")
     return "\n".join(lines)
+
+
+def _truncate_line(text: str, *, limit: int) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3] + "..."
 
 
 def _is_harness_conflict_task(task) -> bool:

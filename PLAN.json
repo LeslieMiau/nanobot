@@ -8,7 +8,7 @@
       "Open PROGRESS.md and verify the reboot entry records the current baseline: `/coding status` already exists, `running` pushes are disabled, and completed harness creation already skips confirmation.",
       "Confirm the scope remains limited to Telegram `/coding` orchestration, task lifecycle, and status reporting rather than changing the Codex worker model or target-repo harness file format."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 2,
@@ -19,7 +19,7 @@
       "Send `/coding <repo> <goal>` and verify it still creates and launches a coding task.",
       "Verify malformed or unsupported slash subcommands return a clear coding-task usage error instead of creating a task."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,
@@ -30,7 +30,7 @@
       "Run `/coding status 2`, `/coding pause 2`, `/coding resume 2`, and `/coding stop 2` and verify each targets the second listed task.",
       "Verify non-numeric or out-of-range indexes return a clear error without mutating any task."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,
@@ -41,7 +41,7 @@
       "Resume a paused or failed task and verify the launcher relaunches it back into `starting`.",
       "Stop a task and verify it becomes terminal (`cancelled`) rather than merely recoverable."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,
@@ -52,7 +52,7 @@
       "Verify the auto-complete path does not require a Telegram confirmation message or an extra control command from the user.",
       "Verify unfinished harnesses do not trigger the completed transition."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,
@@ -63,7 +63,7 @@
       "Advance a task to `running` and verify poll-loop progress refreshes do not emit proactive Telegram messages.",
       "Verify `waiting_user`, `completed`, and `failed` continue to send their dedicated lifecycle notifications."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,
@@ -74,7 +74,7 @@
       "Verify the suite covers `/coding list`, indexed slash commands, slash stop terminal semantics, and automatic completion when the repo harness is finished.",
       "Confirm `.venv/bin/python -m compileall` still succeeds for the touched coding-task modules and tests."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 8,
@@ -85,6 +85,6 @@
       "Open PROGRESS.md and verify it records the baseline, the new slash-command decisions, and the auto-complete behavior for finished repo harnesses.",
       "Confirm PLAN.json is fully marked complete after implementation and verification pass."
     ],
-    "passes": false
+    "passes": true
   }
 ]

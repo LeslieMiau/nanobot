@@ -28,6 +28,10 @@ class PlanProgress:
     remaining: int
     total: int
 
+    @property
+    def is_complete(self) -> bool:
+        return self.total > 0 and self.remaining == 0
+
 
 @dataclass(slots=True)
 class TaskProgressReport:
@@ -158,6 +162,10 @@ class CodexProgressMonitor:
             recent_commit_summary=report.recent_commit_summary or None,
             latest_note=report.latest_note or None,
         )
+        if report.plan_progress.is_complete and task.status in {"starting", "running", "waiting_user"}:
+            completion_summary = report.latest_note or report.summary or "Repo harness completed"
+            self.manager.mark_completed(task_id, summary=completion_summary)
+            return report
         if waiting_reason := detect_waiting_reason(report.live_output):
             self.manager.mark_waiting_user(task_id, summary=waiting_reason)
         if report.summary:

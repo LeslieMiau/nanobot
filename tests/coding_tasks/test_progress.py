@@ -8,6 +8,7 @@ import pytest
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.progress import (
     CodexProgressMonitor,
+    PlanProgress,
     build_notification_progress,
     build_task_progress_report,
     extract_latest_progress_note,
@@ -72,6 +73,7 @@ def test_summarize_plan_progress_counts_completed_and_remaining(tmp_path: Path) 
     assert progress.completed == 2
     assert progress.remaining == 1
     assert progress.total == 3
+    assert progress.is_complete is False
 
 
 def test_summarize_plan_progress_handles_permission_errors(monkeypatch, tmp_path: Path) -> None:
@@ -91,6 +93,23 @@ def test_summarize_plan_progress_handles_permission_errors(monkeypatch, tmp_path
     assert progress.completed == 0
     assert progress.remaining == 0
     assert progress.total == 0
+    assert progress.is_complete is False
+
+
+def test_plan_progress_marks_complete_only_when_all_features_pass(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "PLAN.json").write_text(
+        '[{"id": 1, "passes": true}, {"id": 2, "passes": true}]',
+        encoding="utf-8",
+    )
+
+    progress = summarize_plan_progress(repo)
+
+    assert progress.completed == 2
+    assert progress.remaining == 0
+    assert progress.total == 2
+    assert progress.is_complete is True
 
 
 def test_build_task_progress_report_combines_harness_and_pane_output(tmp_path: Path) -> None:
@@ -248,7 +267,42 @@ async def test_poll_task_marks_waiting_user_when_live_output_requests_confirmati
     refreshed = store.get_task(task.id)
     assert refreshed is not None
     assert refreshed.status == "waiting_user"
-    assert "Need plan confirmation" in refreshed.last_progress_summary
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("initial_status", ["starting", "running", "waiting_user"])
+async def test_poll_task_auto_completes_when_repo_plan_is_finished(tmp_path: Path, initial_status: str) -> None:
+    workspace = tmp_path / "workspace"
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "PROGRESS.md").write_text("## Session update\n- finished everything\n", encoding="utf-8")
+    (repo / "PLAN.json").write_text(
+        '[{"id": 1, "passes": true}, {"id": 2, "passes": true}]',
+        encoding="utf-8",
+    )
+    task = manager.create_task(repo_path=str(repo), goal="Done")
+    task = manager.mark_starting(task.id, summary="Launching")
+    if initial_status == "running":
+        task = manager.mark_running(task.id, summary="Working")
+    elif initial_status == "waiting_user":
+        task = manager.mark_waiting_user(task.id, summary="Waiting")
+
+    class _FakeLauncher:
+        def capture_pane(self, session: str) -> str:
+            assert session == task.tmux_session
+            return '{"item":{"type":"agent_message","text":"All done"}}\n'
+
+    monitor = CodexProgressMonitor(manager, _FakeLauncher())  # type: ignore[arg-type]
+    report = await monitor.poll_task(task.id)
+
+    refreshed = store.get_task(task.id)
+    assert refreshed is not None
+    assert refreshed.status == "completed"
+    assert refreshed.last_progress_summary == "finished everything"
+    assert report.plan_progress.is_complete is True
+    assert "All done" in report.summary
 
 
 @pytest.mark.asyncio

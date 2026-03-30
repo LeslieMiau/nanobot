@@ -15,6 +15,22 @@
   - Treat slash `pause` as recoverable (`waiting_user`) and slash `stop` as terminal (`cancelled`) while preserving the older Chinese controls for backward compatibility.
   - Interpret “harness 的所有任务都完成了” as marking the current nanobot coding task `completed`, not mutating the target repo harness files directly.
 
+## Session update - 2026-03-30 (coding-task slash commands and auto-complete)
+- Completed features:
+  - Added explicit `/coding list`, `/coding status [index]`, `/coding pause [index]`, `/coding resume [index]`, and `/coding stop [index]` parsing without regressing the existing `/coding <repo> <goal>` start flow.
+  - Added current-private-chat task listing with 1-based indexes, newest-first ordering, and indexed task targeting for status and control commands.
+  - Added slash `pause` as a recoverable pause path and slash `stop` as a terminal cancel path, while preserving the older Chinese control words for compatibility.
+  - Added automatic task completion when the target repo harness `PLAN.json` reports all work complete, covering tasks in `starting`, `running`, and `waiting_user`.
+  - Updated Telegram help text and README to document the new slash subcommands, indexed selection, lifecycle-only push policy, and harness-completion auto-close behavior.
+- Verification:
+  - `.venv/bin/pytest tests/agent/test_coding_task_routing.py tests/coding_tasks/test_progress.py tests/coding_tasks/test_notifier.py` -> passed (51 tests)
+  - `.venv/bin/pytest tests/cli/test_commands.py -k "coding_task_status_shows_details_and_recent_events or coding_task_status_reads_report_without_persisting_metadata"` -> passed (2 selected tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks nanobot/channels/telegram.py tests/agent/test_coding_task_routing.py tests/coding_tasks/test_progress.py` -> passed
+  - `.venv/bin/python` local smoke -> passed: `/coding list` rendered the indexed task list, `/coding status 1` returned the detailed status payload, and after poll refresh the task auto-transitioned to `completed` when the repo harness was fully complete
+- Remaining blockers / follow-up:
+  - `bash ~/.codex/scripts/global-init.sh` still reports the known unrelated repo-wide pytest warning from `/tmp/nanobot-harness-pytest.log`
+  - The live gateway was not yet revalidated via `/health` in this implementation pass; if Telegram slash-command validation is needed immediately, restart and verify the active gateway separately
+
 ## Harness reboot - 2026-03-29 (coding-task behavior convergence)
 - Task pivot:
   - Superseded the prior Telegram long-message notifier harness with a new `/coding` convergence task focused on three decisions: completed harnesses should no longer block new work, `/coding status` should become a first-class status query, and Telegram should stop pushing running progress continuously.

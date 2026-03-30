@@ -117,7 +117,7 @@ The user-visible control flow is:
    The worker now starts inside a workspace-scoped private tmux socket and an isolated `/bin/sh` environment, so it does not inherit the user's interactive zsh or global Codex shell noise.
 3. Codex restores or initializes the target repo harness before editing.
 4. nanobot polls tmux output and harness files to build status summaries.
-5. Telegram controls such as `状态`, `/coding status`, `继续`, `停止`, and `取消` act on the same tracked coding task instead of creating duplicate work.
+5. Telegram controls such as `状态`, `/coding list`, `/coding status`, `/coding pause`, `/coding resume`, `/coding stop`, `继续`, `停止`, and `取消` act on the same tracked coding task instead of creating duplicate work.
 
 Telegram start commands now use explicit entry words plus natural slot extraction. They accept both explicit paths and lightweight repo aliases, for example:
 
@@ -126,7 +126,11 @@ Telegram start commands now use explicit entry words plus natural slot extractio
 - `开始编程 codex-remote 设置 icon 换一个`
 - `/coding codex-remote 的 设置 icon 换一个`
 - `/coding codex-remote 设置 icon 换一个`
+- `/coding list`
 - `/coding status`
+- `/coding pause`
+- `/coding resume`
+- `/coding stop`
 
 Repo resolution is alias-first:
 
@@ -161,6 +165,16 @@ Telegram push policy is now lifecycle-oriented:
 - `waiting_user` sends one confirmation-needed message
 - `completed` and `failed` still send their dedicated reports
 - `running` progress is no longer pushed continuously; use `状态` or `/coding status` for detailed live progress
+
+Slash task management is chat-scoped and index-aware:
+
+- `/coding list` shows the current private-chat coding tasks newest-first with 1-based indexes
+- `/coding status 2` inspects the second listed task
+- `/coding pause 2` pauses the second listed task into a recoverable state
+- `/coding resume 2` resumes the second listed task if it is paused or failed
+- `/coding stop 2` ends the second listed task as a terminal state
+
+When the target repo harness itself reaches full completion (`PLAN.json` all passed), nanobot now marks the current coding task `completed` automatically and sends the normal completion notification without asking for further confirmation.
 
 Internally, the coding-task orchestration now has a dedicated composition root:
 

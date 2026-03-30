@@ -378,6 +378,206 @@ async def test_private_telegram_slash_coding_status_routes_to_latest_origin_task
 
 
 @pytest.mark.asyncio
+async def test_private_telegram_slash_coding_list_shows_origin_tasks_newest_first(tmp_path: Path) -> None:
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
+    _manager, first = _create_origin_task(store, tmp_path, status="running", summary="first task")
+    _manager, second = _create_origin_task(store, tmp_path, status="failed", summary="second task")
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding list",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "当前编程任务列表" in response.content
+    assert f"id={second.id}" in response.content
+    assert f"id={first.id}" in response.content
+    assert response.content.index(second.id) < response.content.index(first.id)
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_slash_coding_status_can_target_indexed_task(tmp_path: Path) -> None:
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
+    _manager, first = _create_origin_task(store, tmp_path, status="running", summary="first task")
+    _manager, second = _create_origin_task(store, tmp_path, status="failed", summary="second task")
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding status 2",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert f"任务ID: {first.id}" in response.content
+    assert "状态: running" in response.content
+    assert second.id not in response.content
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_slash_coding_resume_can_target_indexed_failed_task(tmp_path: Path) -> None:
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
+    manager, active = _create_origin_task(store, tmp_path, status="running", summary="active task")
+    manager, failed = _create_origin_task(store, tmp_path, status="failed", summary="failed task")
+
+    class _FakeResumeLauncher:
+        def launch_task(self, task_id: str):
+            assert task_id == failed.id
+            launched = manager.mark_starting(task_id, summary="Launching Codex worker")
+
+            class _Result:
+                task = launched
+                session_reused = True
+
+            return _Result()
+
+        def capture_pane(self, _session: str) -> str:
+            return ""
+
+    from nanobot.coding_tasks.progress import CodexProgressMonitor
+    from nanobot.coding_tasks.router import register_coding_task_commands
+    loop.commands = loop.commands.__class__()
+    from nanobot.command import register_builtin_commands
+    register_builtin_commands(loop.commands)
+    register_coding_task_commands(
+        loop.commands,
+        manager,
+        launcher=_FakeResumeLauncher(),  # type: ignore[arg-type]
+        monitor=CodexProgressMonitor(manager, _FakeResumeLauncher()),  # type: ignore[arg-type]
+    )
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding resume 1",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert f"任务ID: {failed.id}" in response.content
+    assert "已继续编程任务" in response.content
+    updated = store.get_task(failed.id)
+    assert updated is not None
+    assert updated.status == "starting"
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_slash_coding_pause_marks_waiting_user(tmp_path: Path) -> None:
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
+    manager, task = _create_origin_task(store, tmp_path, status="running")
+
+    class _FakePauseLauncher:
+        def interrupt_task(self, task_id: str):
+            assert task_id == task.id
+            return manager.require_task(task_id)
+
+        def capture_pane(self, _session: str) -> str:
+            return "still running\n"
+
+    from nanobot.coding_tasks.progress import CodexProgressMonitor
+    from nanobot.coding_tasks.router import register_coding_task_commands
+    loop.commands = loop.commands.__class__()
+    from nanobot.command import register_builtin_commands
+    register_builtin_commands(loop.commands)
+    register_coding_task_commands(
+        loop.commands,
+        manager,
+        launcher=_FakePauseLauncher(),  # type: ignore[arg-type]
+        monitor=CodexProgressMonitor(manager, _FakePauseLauncher()),  # type: ignore[arg-type]
+    )
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding pause",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "已暂停编程任务" in response.content
+    updated = store.get_task(task.id)
+    assert updated is not None
+    assert updated.status == "waiting_user"
+    assert updated.last_user_control == "pause"
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_slash_coding_stop_cancels_selected_task(tmp_path: Path) -> None:
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
+    manager, task = _create_origin_task(store, tmp_path, status="running")
+
+    class _FakeStopLauncher:
+        def interrupt_task(self, task_id: str):
+            assert task_id == task.id
+            return manager.require_task(task_id)
+
+        def capture_pane(self, _session: str) -> str:
+            return "still running\n"
+
+    from nanobot.coding_tasks.progress import CodexProgressMonitor
+    from nanobot.coding_tasks.router import register_coding_task_commands
+    loop.commands = loop.commands.__class__()
+    from nanobot.command import register_builtin_commands
+    register_builtin_commands(loop.commands)
+    register_coding_task_commands(
+        loop.commands,
+        manager,
+        launcher=_FakeStopLauncher(),  # type: ignore[arg-type]
+        monitor=CodexProgressMonitor(manager, _FakeStopLauncher()),  # type: ignore[arg-type]
+    )
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding stop",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "已停止编程任务" in response.content
+    updated = store.get_task(task.id)
+    assert updated is not None
+    assert updated.status == "cancelled"
+    assert updated.last_user_control == "stop"
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_slash_coding_index_out_of_range_returns_clear_error(tmp_path: Path) -> None:
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
+    _create_origin_task(store, tmp_path, status="running", summary="only task")
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding status 2",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "找不到第 2 个编程任务" in response.content
+
+
+@pytest.mark.asyncio
 async def test_private_telegram_cancel_routes_to_origin_task(tmp_path: Path) -> None:
     loop, store, _manager, _launcher = _make_loop(tmp_path)
     _manager, task = _create_origin_task(store, tmp_path)

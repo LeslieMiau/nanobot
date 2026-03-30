@@ -18,7 +18,7 @@ from nanobot.utils.helpers import safe_filename
 
 _ALLOWED_TRANSITIONS = {
     "queued": {"starting", "waiting_user", "cancelled", "failed"},
-    "starting": {"running", "waiting_user", "failed", "cancelled"},
+    "starting": {"running", "waiting_user", "completed", "failed", "cancelled"},
     "running": {"waiting_user", "completed", "failed", "cancelled"},
     "waiting_user": {"starting", "running", "completed", "failed", "cancelled"},
     "failed": {"starting", "cancelled"},
@@ -84,11 +84,7 @@ class CodexWorkerManager:
 
     def latest_active_task(self) -> CodingTask | None:
         """Return the newest non-terminal task in this workspace, if any."""
-        tasks = sorted(
-            self.store.list_tasks(),
-            key=lambda task: (task.updated_at_ms, task.created_at_ms),
-            reverse=True,
-        )
+        tasks = self._newest_first(self.store.list_tasks())
         for task in tasks:
             if task.status not in {"completed", "cancelled"}:
                 return task
@@ -102,7 +98,7 @@ class CodexWorkerManager:
             if task.metadata.get("origin_channel") == channel
             and task.metadata.get("origin_chat_id") == chat_id
         ]
-        return sorted(tasks, key=lambda task: (task.updated_at_ms, task.created_at_ms), reverse=True)
+        return self._newest_first(tasks)
 
     def latest_active_task_for_origin(self, channel: str, chat_id: str) -> CodingTask | None:
         """Return the newest non-terminal task for an origin chat, if any."""
@@ -110,6 +106,15 @@ class CodexWorkerManager:
             if task.status not in {"completed", "cancelled"}:
                 return task
         return None
+
+    @staticmethod
+    def _newest_first(tasks: list[CodingTask]) -> list[CodingTask]:
+        indexed = list(enumerate(tasks))
+        indexed.sort(
+            key=lambda pair: (pair[1].updated_at_ms, pair[1].created_at_ms, pair[0]),
+            reverse=True,
+        )
+        return [task for _, task in indexed]
 
     def record_user_control(self, task_id: str, control: str) -> CodingTask:
         task = self.require_task(task_id)
