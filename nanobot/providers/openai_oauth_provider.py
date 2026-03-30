@@ -6,17 +6,17 @@ import asyncio
 from typing import Any
 
 from oauth_cli_kit import OAuthProviderConfig, get_token
-from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse
-from nanobot.providers.custom_provider import CustomProvider
 from nanobot.providers.openai_codex_provider import (
+    _build_headers,
     _convert_messages,
     _convert_tools,
     _prompt_cache_key,
+    _request_codex,
 )
 
-DEFAULT_OPENAI_API_BASE = "https://api.openai.com/v1"
+DEFAULT_OPENAI_OAUTH_URL = "https://chatgpt.com/backend-api/responses"
 
 OPENAI_OAUTH_PROVIDER = OAuthProviderConfig(
     client_id="app_EMoamEEZ73f0CkXaXp7hrann",
@@ -32,16 +32,15 @@ OPENAI_OAUTH_PROVIDER = OAuthProviderConfig(
 
 
 class OpenAIOAuthProvider(LLMProvider):
-    """Call OpenAI's Responses API using an OAuth access token."""
+    """Call OpenAI's Responses API via ChatGPT backend using an OAuth token."""
 
     def __init__(
         self,
         default_model: str = "openai-oauth/gpt-5.4",
         api_base: str | None = None,
     ):
-        super().__init__(api_key=None, api_base=api_base or DEFAULT_OPENAI_API_BASE)
+        super().__init__(api_key=None, api_base=api_base or DEFAULT_OPENAI_OAUTH_URL)
         self.default_model = default_model
-        self._client = AsyncOpenAI(api_key="oauth-placeholder", base_url=self.api_base)
 
     async def chat(
         self,
@@ -58,35 +57,39 @@ class OpenAIOAuthProvider(LLMProvider):
 
         try:
             token = await asyncio.to_thread(get_token, provider=OPENAI_OAUTH_PROVIDER)
-            client = self._client.with_options(api_key=token.access)
+            headers = _build_headers(token.account_id, token.access)
 
-            request: dict[str, Any] = {
+            body: dict[str, Any] = {
                 "model": effective_model,
-                "input": input_items,
-                "max_output_tokens": max(1, max_tokens),
-                "temperature": temperature,
                 "store": False,
+                "stream": True,
+                "instructions": system_prompt,
+                "input": input_items,
                 "text": {"verbosity": "medium"},
+                "include": ["reasoning.encrypted_content"],
                 "prompt_cache_key": _prompt_cache_key(messages),
+                "tool_choice": tool_choice or "auto",
+                "parallel_tool_calls": True,
             }
-            if system_prompt:
-                request["instructions"] = system_prompt
             if reasoning_effort:
-                request["reasoning"] = {"effort": reasoning_effort}
+                body["reasoning"] = {"effort": reasoning_effort}
             if tools:
-                request["tools"] = _convert_tools(tools)
-                request["tool_choice"] = tool_choice or "auto"
-                request["parallel_tool_calls"] = True
+                body["tools"] = _convert_tools(tools)
 
-            extra_headers: dict[str, str] | None = None
-            if token.account_id:
-                extra_headers = {"chatgpt-account-id": token.account_id}
+            url = self.api_base or DEFAULT_OPENAI_OAUTH_URL
 
-            response = await client.responses.create(
-                **request,
-                extra_headers=extra_headers,
+            try:
+                content, tool_calls, finish_reason = await _request_codex(url, headers, body, verify=True)
+            except Exception as e:
+                if "CERTIFICATE_VERIFY_FAILED" not in str(e):
+                    raise
+                content, tool_calls, finish_reason = await _request_codex(url, headers, body, verify=False)
+
+            return LLMResponse(
+                content=content,
+                tool_calls=tool_calls,
+                finish_reason=finish_reason,
             )
-            return CustomProvider._parse_responses_api(response.model_dump(mode="json"))
         except Exception as e:
             return LLMResponse(
                 content=f"Error calling OpenAI OAuth: {e}",

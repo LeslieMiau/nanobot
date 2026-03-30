@@ -258,8 +258,7 @@ def test_make_provider_uses_openai_oauth_provider():
         }
     )
 
-    with patch("nanobot.providers.openai_oauth_provider.AsyncOpenAI"):
-        provider = _make_provider(config)
+    provider = _make_provider(config)
 
     assert isinstance(provider, OpenAIOAuthProvider)
 
