@@ -25,6 +25,7 @@ _ALLOWED_TRANSITIONS = {
     "completed": set(),
     "cancelled": set(),
 }
+_ACTIVE_TASK_STATUSES = {"starting", "running", "waiting_user"}
 
 
 class CodexWorkerManager:
@@ -83,10 +84,10 @@ class CodexWorkerManager:
         return self.store.list_tasks_by_status("starting", "running", "waiting_user")
 
     def latest_active_task(self) -> CodingTask | None:
-        """Return the newest non-terminal task in this workspace, if any."""
+        """Return the newest actively running task in this workspace, if any."""
         tasks = self._newest_first(self.store.list_tasks())
         for task in tasks:
-            if task.status not in {"completed", "cancelled"}:
+            if task.status in _ACTIVE_TASK_STATUSES:
                 return task
         return None
 
@@ -101,9 +102,9 @@ class CodexWorkerManager:
         return self._newest_first(tasks)
 
     def latest_active_task_for_origin(self, channel: str, chat_id: str) -> CodingTask | None:
-        """Return the newest non-terminal task for an origin chat, if any."""
+        """Return the newest actively running task for an origin chat, if any."""
         for task in self.tasks_for_origin(channel, chat_id):
-            if task.status not in {"completed", "cancelled"}:
+            if task.status in _ACTIVE_TASK_STATUSES:
                 return task
         return None
 

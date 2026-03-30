@@ -59,3 +59,23 @@ def test_invalid_transition_is_rejected(tmp_path) -> None:
 
     with pytest.raises(ValueError, match="Cannot transition"):
         manager.mark_running(task.id, summary="Should fail")
+
+
+def test_latest_active_task_ignores_failed_and_cancelled(tmp_path) -> None:
+    store = CodingTaskStore(tmp_path / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(tmp_path, store)
+    first = manager.create_task(repo_path="/tmp/repo-a", goal="first")
+    second = manager.create_task(repo_path="/tmp/repo-b", goal="second")
+    third = manager.create_task(repo_path="/tmp/repo-c", goal="third")
+
+    manager.mark_starting(first.id, summary="Boot")
+    manager.mark_running(first.id, summary="Running")
+    manager.mark_starting(second.id, summary="Boot")
+    manager.mark_failed(second.id, summary="Failed")
+    manager.mark_starting(third.id, summary="Boot")
+    manager.cancel_task(third.id, summary="Cancelled")
+
+    active = manager.latest_active_task()
+
+    assert active is not None
+    assert active.id == first.id

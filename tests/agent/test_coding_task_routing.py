@@ -395,9 +395,30 @@ async def test_private_telegram_slash_coding_list_shows_origin_tasks_newest_firs
 
     assert response is not None
     assert "当前编程任务列表" in response.content
-    assert f"id={second.id}" in response.content
     assert f"id={first.id}" in response.content
-    assert response.content.index(second.id) < response.content.index(first.id)
+    assert second.id not in response.content
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_slash_coding_list_hides_cancelled_tasks(tmp_path: Path) -> None:
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
+    manager, visible = _create_origin_task(store, tmp_path, status="running", summary="visible task")
+    manager, hidden = _create_origin_task(store, tmp_path)
+    manager.cancel_task(hidden.id, summary="stopped")
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding list",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert visible.id in response.content
+    assert hidden.id not in response.content
 
 
 @pytest.mark.asyncio
@@ -411,7 +432,7 @@ async def test_private_telegram_slash_coding_status_can_target_indexed_task(tmp_
             channel="telegram",
             sender_id="u1",
             chat_id="chat-1",
-            content="/coding status 2",
+            content="/coding status 1",
             metadata={"is_group": False},
         )
     )
@@ -423,7 +444,7 @@ async def test_private_telegram_slash_coding_status_can_target_indexed_task(tmp_
 
 
 @pytest.mark.asyncio
-async def test_private_telegram_slash_coding_resume_can_target_indexed_failed_task(tmp_path: Path) -> None:
+async def test_private_telegram_slash_coding_resume_index_ignores_hidden_failed_task(tmp_path: Path) -> None:
     loop, store, _manager, _launcher = _make_loop(tmp_path)
     manager, active = _create_origin_task(store, tmp_path, status="running", summary="active task")
     manager, failed = _create_origin_task(store, tmp_path, status="failed", summary="failed task")
@@ -465,11 +486,11 @@ async def test_private_telegram_slash_coding_resume_can_target_indexed_failed_ta
     )
 
     assert response is not None
-    assert f"任务ID: {failed.id}" in response.content
-    assert "已继续编程任务" in response.content
+    assert f"任务ID: {active.id}" in response.content
+    assert "当前编程任务不需要继续操作" in response.content
     updated = store.get_task(failed.id)
     assert updated is not None
-    assert updated.status == "starting"
+    assert updated.status == "failed"
 
 
 @pytest.mark.asyncio
@@ -593,11 +614,11 @@ async def test_private_telegram_cancel_routes_to_origin_task(tmp_path: Path) -> 
     )
 
     assert response is not None
-    assert "已取消编程任务" in response.content
+    assert "当前私聊里没有可管理的编程任务" in response.content
     updated = store.get_task(task.id)
     assert updated is not None
-    assert updated.status == "cancelled"
-    assert updated.last_user_control == "cancel"
+    assert updated.status == "queued"
+    assert updated.last_user_control is None
 
 
 @pytest.mark.asyncio
@@ -626,12 +647,11 @@ async def test_private_telegram_continue_rejects_cancelled_task(tmp_path: Path) 
     )
 
     assert response is not None
-    assert f"任务ID: {task.id}" in response.content
-    assert "已经取消" in response.content
+    assert "当前私聊里没有可管理的编程任务" in response.content
 
 
 @pytest.mark.asyncio
-async def test_private_telegram_resume_routes_to_failed_origin_task(tmp_path: Path) -> None:
+async def test_private_telegram_resume_ignores_hidden_failed_origin_task(tmp_path: Path) -> None:
     loop, store, _manager, _launcher = _make_loop(tmp_path)
     _manager, task = _create_origin_task(store, tmp_path, status="failed")
 
@@ -646,11 +666,55 @@ async def test_private_telegram_resume_routes_to_failed_origin_task(tmp_path: Pa
     )
 
     assert response is not None
-    assert "已继续编程任务" in response.content
+    assert "当前私聊里没有可管理的编程任务" in response.content
     updated = store.get_task(task.id)
     assert updated is not None
-    assert updated.status == "starting"
-    assert updated.last_user_control == "resume"
+    assert updated.status == "failed"
+    assert updated.last_user_control is None
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_status_reports_no_manageable_tasks_when_only_hidden_terminal_tasks_exist(tmp_path: Path) -> None:
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
+    manager, task = _create_origin_task(store, tmp_path, status="failed")
+    assert store.get_task(task.id) is not None
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding status",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "当前私聊里没有可管理的编程任务" in response.content
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_start_coding_ignores_failed_task_for_workspace_blocking(tmp_path: Path) -> None:
+    loop, store, manager, launcher = _make_loop(tmp_path, attach_launcher=True)
+    _create_origin_task(store, tmp_path, status="failed", summary="old failure")
+    repo_path = tmp_path / "new-repo"
+    repo_path.mkdir()
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-2",
+            content=f"/coding {repo_path} 修复新的问题",
+            metadata={"is_group": False, "message_id": 99},
+        )
+    )
+
+    assert response is not None
+    assert "已创建并启动编程任务" in response.content
+    tasks = store.list_tasks()
+    created = next(task for task in tasks if task.repo_path == str(repo_path))
+    assert launcher.launched_ids[-1] == created.id
 
 
 @pytest.mark.asyncio
@@ -794,8 +858,7 @@ async def test_private_telegram_resume_reuses_live_tmux_worker_session(tmp_path:
     )
 
     assert response is not None
-    assert "已继续编程任务" in response.content
-    assert "复用 tmux: yes" in response.content
+    assert "当前私聊里没有可管理的编程任务" in response.content
 
 
 @pytest.mark.asyncio

@@ -64,3 +64,42 @@ def test_policy_preserves_origin_chat_task_selection(tmp_path) -> None:
     assert policy.latest_origin_task("telegram", "chat-a").id == newer.id
     assert policy.select_control_task("telegram", "chat-a") is not None
     assert policy.select_control_task("telegram", "chat-a").id == newer.id
+
+
+def test_policy_hides_failed_and_cancelled_tasks_from_visible_origin_list(tmp_path) -> None:
+    store = CodingTaskStore(tmp_path / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(tmp_path, store)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    completed = manager.create_task(
+        repo_path=str(repo),
+        goal="Completed",
+        metadata={"origin_channel": "telegram", "origin_chat_id": "chat-a"},
+    )
+    manager.mark_starting(completed.id, summary="Boot")
+    manager.mark_completed(completed.id, summary="Done")
+
+    failed = manager.create_task(
+        repo_path=str(repo),
+        goal="Failed",
+        metadata={"origin_channel": "telegram", "origin_chat_id": "chat-a"},
+    )
+    manager.mark_starting(failed.id, summary="Boot")
+    manager.mark_failed(failed.id, summary="Oops")
+
+    cancelled = manager.create_task(
+        repo_path=str(repo),
+        goal="Cancelled",
+        metadata={"origin_channel": "telegram", "origin_chat_id": "chat-a"},
+    )
+    manager.mark_starting(cancelled.id, summary="Boot")
+    manager.cancel_task(cancelled.id, summary="Stop")
+
+    policy = CodingTaskPolicy(manager)
+
+    tasks = policy.tasks_for_origin("telegram", "chat-a")
+
+    assert [task.id for task in tasks] == [completed.id]
+    assert policy.task_for_origin_index("telegram", "chat-a", 1).id == completed.id
+    assert policy.task_for_origin_index("telegram", "chat-a", 2) is None

@@ -13,6 +13,19 @@
   - Treat only `starting`, `running`, and `waiting_user` as active for workspace blocking and default Telegram control targeting.
   - Keep completed tasks visible in `/coding list`; hide only `failed` and `cancelled`.
 
+## Session update - 2026-03-31 (coding-task hidden terminal tasks)
+- Completed features:
+  - Changed coding-task active-slot semantics so workspace blocking and per-origin default control selection now ignore `failed`, `cancelled`, and `completed`, leaving only `starting`, `running`, and `waiting_user` as active states.
+  - Changed Telegram `/coding list` and indexed slash-command selection to operate on a visible task set that hides `failed` and `cancelled` tasks while leaving their persisted task records, run logs, and artifacts intact.
+  - Updated Telegram empty-state and no-manageable-task messages to explain that failed and cancelled tasks are hidden from `/coding` management rather than deleted.
+  - Updated README to document that hidden terminal tasks no longer occupy the active `/coding` slot and are omitted from the Telegram list.
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_manager.py tests/coding_tasks/test_policy.py tests/agent/test_coding_task_routing.py` -> passed (38 tests)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks tests/coding_tasks/test_manager.py tests/coding_tasks/test_policy.py tests/agent/test_coding_task_routing.py` -> passed
+- Remaining blockers / follow-up:
+  - Hidden failed tasks are no longer resumable from Telegram because they no longer appear in the visible task set; recovery still requires CLI-by-id if the operator wants to inspect or manipulate them directly.
+  - This harness intentionally did not add a separate “show hidden task history” Telegram command; if that is needed later, it should be added as a distinct read-only task-history surface.
+
 ## Harness reboot - 2026-03-30 (coding-task slash commands and auto-complete)
 - Task pivot:
   - Superseded the prior `/coding` behavior convergence harness with a new follow-up task focused on slash-command parity (`list/pause/resume/stop`), index-based task selection, and automatically completing coding tasks when the target repo harness itself is fully complete.

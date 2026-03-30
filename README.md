@@ -169,12 +169,15 @@ Telegram push policy is now lifecycle-oriented:
 Slash task management is chat-scoped and index-aware:
 
 - `/coding list` shows the current private-chat coding tasks newest-first with 1-based indexes
+- failed and cancelled tasks are hidden from Telegram task management, but their persisted history stays on disk for CLI or forensic inspection
 - `/coding status 2` inspects the second listed task
 - `/coding pause 2` pauses the second listed task into a recoverable state
 - `/coding resume 2` resumes the second listed task if it is paused or failed
 - `/coding stop 2` ends the second listed task as a terminal state
 
 When the target repo harness itself reaches full completion (`PLAN.json` all passed), nanobot now marks the current coding task `completed` automatically and sends the normal completion notification without asking for further confirmation.
+
+Workspace blocking and default Telegram controls now only treat `starting`, `running`, and `waiting_user` tasks as active. Hidden `failed` or `cancelled` tasks no longer occupy the active coding-task slot for new `/coding` starts.
 
 Internally, the coding-task orchestration now has a dedicated composition root:
 

@@ -451,22 +451,14 @@ def _make_control_handler(
 
         task = indexed_task or policy.select_control_task(msg.channel, msg.chat_id)
         if task is None:
-            latest_origin = policy.latest_origin_task(msg.channel, msg.chat_id)
-            if is_resume_request and latest_origin and latest_origin.status == "cancelled":
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content=(
-                        "最近的编程任务已经取消，不能直接继续。\n"
-                        f"任务ID: {latest_origin.id}\n"
-                        "请重新发送“开始编程 ...”显式创建新任务。"
-                    ),
-                    metadata={"render_as": "text"},
-                )
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content="当前私聊里还没有可控制的编程任务。先发送“开始编程 ...”创建一个任务。",
+                content=(
+                    "当前私聊里没有可管理的编程任务。\n"
+                    "失败或已取消的任务不会显示在 Telegram `/coding` 列表里。\n"
+                    "先发送“开始编程 ...”或 `/coding <repo> <goal>` 创建一个新任务。"
+                ),
                 metadata={"render_as": "text"},
             )
 
@@ -689,7 +681,10 @@ def _make_control_handler(
 def _format_task_list(policy: CodingTaskPolicy, channel: str, chat_id: str, manager: CodexWorkerManager) -> str:
     tasks = policy.tasks_for_origin(channel, chat_id)
     if not tasks:
-        return "当前私聊里还没有编程任务。先发送“开始编程 ...”或 `/coding <repo> <goal>` 创建一个任务。"
+        return (
+            "当前私聊里没有可管理的编程任务。\n"
+            "失败或已取消的任务已隐藏；先发送“开始编程 ...”或 `/coding <repo> <goal>` 创建一个新任务。"
+        )
     recoverable_ids = {item.id for item in manager.recoverable_tasks()}
     lines = ["当前编程任务列表"]
     for index, task in enumerate(tasks, start=1):
