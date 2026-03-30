@@ -1,3 +1,20 @@
+## Harness reboot - 2026-03-30 (coding-task slash commands and auto-complete)
+- Task pivot:
+  - Superseded the prior `/coding` behavior convergence harness with a new follow-up task focused on slash-command parity (`list/pause/resume/stop`), index-based task selection, and automatically completing coding tasks when the target repo harness itself is fully complete.
+- Existing work detected before re-planning:
+  - `/coding status` already exists and reuses the detailed task-status view from the Chinese `状态` command.
+  - Telegram proactive pushes already ignore `running` progress and only send lifecycle notifications for `starting`, `waiting_user`, `completed`, and `failed`.
+  - Repos with a completed harness already skip the creation-time confirmation flow, but tasks are not yet auto-completed later when the target repo harness reaches 100%.
+  - Slash subcommands for `list`, `pause`, `resume`, and `stop` do not exist yet; current control remains mostly Chinese text commands.
+- Baseline validation before edits:
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0 with the known repo-wide pytest warning still present in `/tmp/nanobot-harness-pytest.log`
+  - `curl -sS http://127.0.0.1:8787/health` -> failed even though the prior Telegram gateway pane had been reconnected in earlier work; this session keeps validation focused on code paths first
+- Key decisions:
+  - Use explicit `/coding <subcommand>` parsing instead of overloading the start-command path for every new control flow.
+  - Scope `/coding list` and all index-based selection to the current Telegram private chat, with 1-based indexes sorted newest-first.
+  - Treat slash `pause` as recoverable (`waiting_user`) and slash `stop` as terminal (`cancelled`) while preserving the older Chinese controls for backward compatibility.
+  - Interpret “harness 的所有任务都完成了” as marking the current nanobot coding task `completed`, not mutating the target repo harness files directly.
+
 ## Harness reboot - 2026-03-29 (coding-task behavior convergence)
 - Task pivot:
   - Superseded the prior Telegram long-message notifier harness with a new `/coding` convergence task focused on three decisions: completed harnesses should no longer block new work, `/coding status` should become a first-class status query, and Telegram should stop pushing running progress continuously.

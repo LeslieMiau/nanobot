@@ -2,78 +2,89 @@
   {
     "id": 1,
     "category": "setup",
-    "description": "The `/coding` behavior convergence work is tracked as a new harness task so future sessions can resume from the completed-harness, `/coding status`, and notification-policy decisions instead of rediscovering them live.",
+    "description": "The `/coding` slash-command expansion and auto-complete work is tracked as its own harness task so future sessions can resume from the new command grammar, index selection, and harness-completion semantics without rediscovering them live.",
     "steps": [
-      "Open PLAN.json and verify it only tracks the `/coding` behavior convergence harness.",
-      "Open PROGRESS.md and verify the reboot entry records the three target changes: completed-harness direct launch, `/coding status`, and push-notification suppression.",
-      "Confirm the scope remains limited to nanobot orchestration and Telegram behavior, without changing the target repo harness format or Codex worker execution model."
+      "Open PLAN.json and verify it only tracks the `/coding` slash-command and auto-complete harness.",
+      "Open PROGRESS.md and verify the reboot entry records the current baseline: `/coding status` already exists, `running` pushes are disabled, and completed harness creation already skips confirmation.",
+      "Confirm the scope remains limited to Telegram `/coding` orchestration, task lifecycle, and status reporting rather than changing the Codex worker model or target-repo harness file format."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 2,
     "category": "functional",
-    "description": "Completed repo harnesses no longer block new Telegram coding tasks; nanobot treats them as historical context and launches the new task immediately.",
+    "description": "Telegram `/coding` recognizes explicit slash subcommands for list, status, pause, resume, and stop without regressing the existing `/coding <repo> <goal>` start flow.",
     "steps": [
-      "Create a repo with PLAN.json, PROGRESS.md, and init.sh whose PLAN.json is fully complete, then send a Telegram-style `/coding ...` request.",
-      "Verify the task goes directly to `starting` instead of `waiting_user` and that no `repo_completed_harness` conflict metadata is written.",
-      "Confirm an active unfinished harness still follows the explicit confirmation path before launch."
+      "Send `/coding list`, `/coding status`, `/coding pause`, `/coding resume`, and `/coding stop` and verify each routes to the correct control path instead of the start-command parser.",
+      "Send `/coding <repo> <goal>` and verify it still creates and launches a coding task.",
+      "Verify malformed or unsupported slash subcommands return a clear coding-task usage error instead of creating a task."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 3,
     "category": "functional",
-    "description": "Telegram supports `/coding status` as an explicit coding-task status command while preserving the existing Chinese `状态` control path.",
+    "description": "Telegram `/coding list` shows the current private-chat task list with 1-based indexes, and indexed slash commands resolve against that list newest-first.",
     "steps": [
-      "Send `/coding status` for a private-chat coding task and verify it returns the same detailed status content as `状态`.",
-      "Verify `/coding status` does not create a new coding task or get parsed as repo `status`.",
-      "Verify `/coding ...` with a real repo name still creates and launches a task as before."
+      "Create multiple coding tasks for the same Telegram private chat and verify `/coding list` shows them newest-first with index, task id, status, repo, goal summary, and recoverability.",
+      "Run `/coding status 2`, `/coding pause 2`, `/coding resume 2`, and `/coding stop 2` and verify each targets the second listed task.",
+      "Verify non-numeric or out-of-range indexes return a clear error without mutating any task."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 4,
     "category": "functional",
-    "description": "Telegram proactive coding-task notifications are limited to start, completion, failure, and required user-confirmation events; running progress no longer pushes continuously.",
+    "description": "Pause and resume use recoverable lifecycle semantics while slash stop ends the selected task as a terminal state.",
     "steps": [
-      "Trigger a starting task and verify one start notification is emitted to Telegram.",
-      "Advance a task to `running` and verify notifier sends no new progress push from poll-loop updates alone.",
-      "Verify `waiting_user`, `completed`, and `failed` continue to emit their dedicated notifications."
+      "Pause a running task and verify the worker is interrupted and the task becomes `waiting_user` so it can be resumed later.",
+      "Resume a paused or failed task and verify the launcher relaunches it back into `starting`.",
+      "Stop a task and verify it becomes terminal (`cancelled`) rather than merely recoverable."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 5,
     "category": "functional",
-    "description": "Detailed coding-task diagnostics remain available through explicit status views even after proactive running notifications are disabled.",
+    "description": "When the target repo harness reports all work complete, nanobot automatically marks the coding task as completed without requiring any user confirmation.",
     "steps": [
-      "Run `nanobot coding-task status <id>` and verify the CLI still shows repo, goal, recent progress, live report, and tmux metadata.",
-      "Send Telegram `状态` and `/coding status` for the same task and verify both return the detailed diagnostic view.",
-      "Confirm the notification policy change only affects background push behavior, not explicit status inspection."
+      "Prepare a repo whose `PLAN.json` has all `passes=true`, refresh a task in `starting`, `running`, or `waiting_user`, and verify nanobot transitions it to `completed` automatically.",
+      "Verify the auto-complete path does not require a Telegram confirmation message or an extra control command from the user.",
+      "Verify unfinished harnesses do not trigger the completed transition."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 6,
-    "category": "testing",
-    "description": "Focused tests cover completed-harness routing, `/coding status`, and the reduced notification policy without regressing existing active-harness controls.",
+    "category": "functional",
+    "description": "Telegram proactive pushes stay lifecycle-only: starting, waiting_user, completed, and failed still notify, while running progress remains query-only behind status commands.",
     "steps": [
-      "Run focused pytest for coding-task routing, notifier behavior, and CLI status coverage.",
-      "Verify tests cover the completed-harness direct-launch path, `/coding status` lookup, and suppression of running-task pushes.",
-      "Confirm `python -m compileall` still succeeds for the touched coding-task modules and tests."
+      "Trigger a starting task and verify Telegram sends one start notification.",
+      "Advance a task to `running` and verify poll-loop progress refreshes do not emit proactive Telegram messages.",
+      "Verify `waiting_user`, `completed`, and `failed` continue to send their dedicated lifecycle notifications."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 7,
-    "category": "docs",
-    "description": "README and PROGRESS.md document the new `/coding` defaults, including completed-harness direct launch, `/coding status`, and the reduced Telegram push policy.",
+    "category": "testing",
+    "description": "Focused tests cover slash-command parsing, list/index selection, lifecycle transitions, auto-complete behavior, and status reporting without regressing the current coding-task routing.",
     "steps": [
-      "Open README.md and verify it documents `/coding status`, the direct-launch behavior for completed harnesses, and the new push-notification policy.",
-      "Open PROGRESS.md and verify it records the baseline, implementation decisions, and verification evidence for this harness task.",
-      "Confirm PLAN.json is fully marked complete after the implementation and verification pass."
+      "Run focused pytest for routing, policy or selection behavior, progress monitoring, notifier behavior, and CLI status coverage.",
+      "Verify the suite covers `/coding list`, indexed slash commands, slash stop terminal semantics, and automatic completion when the repo harness is finished.",
+      "Confirm `.venv/bin/python -m compileall` still succeeds for the touched coding-task modules and tests."
     ],
-    "passes": true
+    "passes": false
+  },
+  {
+    "id": 8,
+    "category": "docs",
+    "description": "README and PROGRESS.md document the new `/coding` subcommands, index-based targeting, and automatic completion semantics for finished harnesses.",
+    "steps": [
+      "Open README.md and verify it documents `/coding list`, indexed status or control commands, and the lifecycle-only Telegram push policy.",
+      "Open PROGRESS.md and verify it records the baseline, the new slash-command decisions, and the auto-complete behavior for finished repo harnesses.",
+      "Confirm PLAN.json is fully marked complete after implementation and verification pass."
+    ],
+    "passes": false
   }
 ]
