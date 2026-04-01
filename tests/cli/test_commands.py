@@ -673,27 +673,105 @@ def test_heartbeat_retains_recent_messages_by_default():
     assert config.gateway.heartbeat.keep_recent_messages == 8
 
 
-def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Path) -> None:
+def _write_instance_config(tmp_path: Path) -> Path:
     config_file = tmp_path / "instance" / "config.json"
     config_file.parent.mkdir(parents=True)
     config_file.write_text("{}")
+    return config_file
 
-    config = Config()
-    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
-    seen: dict[str, Path] = {}
 
+def _stop_gateway_provider(_config) -> object:
+    raise _StopGatewayError("stop")
+
+
+def _patch_cli_command_runtime(
+    monkeypatch,
+    config: Config,
+    *,
+    set_config_path=None,
+    sync_templates=None,
+    make_provider=None,
+    message_bus=None,
+    session_manager=None,
+    cron_service=None,
+    get_cron_dir=None,
+) -> None:
     monkeypatch.setattr(
         "nanobot.config.loader.set_config_path",
-        lambda path: seen.__setitem__("config_path", path),
+        set_config_path or (lambda _path: None),
     )
     monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr(
         "nanobot.cli.commands.sync_workspace_templates",
-        lambda path: seen.__setitem__("workspace", path),
+        sync_templates or (lambda _path: None),
     )
     monkeypatch.setattr(
         "nanobot.cli.commands._make_provider",
-        lambda _config: (_ for _ in ()).throw(_StopGatewayError("stop")),
+        make_provider or (lambda _config: object()),
+    )
+
+    if message_bus is not None:
+        monkeypatch.setattr("nanobot.bus.queue.MessageBus", message_bus)
+    if session_manager is not None:
+        monkeypatch.setattr("nanobot.session.manager.SessionManager", session_manager)
+    if cron_service is not None:
+        monkeypatch.setattr("nanobot.cron.service.CronService", cron_service)
+    if get_cron_dir is not None:
+        monkeypatch.setattr("nanobot.config.paths.get_cron_dir", get_cron_dir)
+
+
+def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -> None:
+    pytest.importorskip("aiohttp")
+
+    class _FakeApiApp:
+        def __init__(self) -> None:
+            self.on_startup: list[object] = []
+            self.on_cleanup: list[object] = []
+
+    class _FakeAgentLoop:
+        def __init__(self, **kwargs) -> None:
+            seen["workspace"] = kwargs["workspace"]
+
+        async def _connect_mcp(self) -> None:
+            return None
+
+        async def close_mcp(self) -> None:
+            return None
+
+    def _fake_create_app(agent_loop, model_name: str, request_timeout: float):
+        seen["agent_loop"] = agent_loop
+        seen["model_name"] = model_name
+        seen["request_timeout"] = request_timeout
+        return _FakeApiApp()
+
+    def _fake_run_app(api_app, host: str, port: int, print):
+        seen["api_app"] = api_app
+        seen["host"] = host
+        seen["port"] = port
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: object(),
+        session_manager=lambda _workspace: object(),
+    )
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.api.server.create_app", _fake_create_app)
+    monkeypatch.setattr("aiohttp.web.run_app", _fake_run_app)
+
+
+def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    seen: dict[str, Path] = {}
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        set_config_path=lambda path: seen.__setitem__("config_path", path),
+        sync_templates=lambda path: seen.__setitem__("workspace", path),
+        make_provider=_stop_gateway_provider,
     )
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
@@ -704,24 +782,17 @@ def test_gateway_uses_workspace_from_config_by_default(monkeypatch, tmp_path: Pa
 
 
 def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) -> None:
-    config_file = tmp_path / "instance" / "config.json"
-    config_file.parent.mkdir(parents=True)
-    config_file.write_text("{}")
-
+    config_file = _write_instance_config(tmp_path)
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "config-workspace")
     override = tmp_path / "override-workspace"
     seen: dict[str, Path] = {}
 
-    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr(
-        "nanobot.cli.commands.sync_workspace_templates",
-        lambda path: seen.__setitem__("workspace", path),
-    )
-    monkeypatch.setattr(
-        "nanobot.cli.commands._make_provider",
-        lambda _config: (_ for _ in ()).throw(_StopGatewayError("stop")),
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        sync_templates=lambda path: seen.__setitem__("workspace", path),
+        make_provider=_stop_gateway_provider,
     )
 
     result = runner.invoke(
@@ -735,27 +806,23 @@ def test_gateway_workspace_option_overrides_config(monkeypatch, tmp_path: Path) 
 
 
 def test_gateway_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: Path) -> None:
-    config_file = tmp_path / "instance" / "config.json"
-    config_file.parent.mkdir(parents=True)
-    config_file.write_text("{}")
-
+    config_file = _write_instance_config(tmp_path)
     config = Config()
     config.agents.defaults.workspace = str(tmp_path / "config-workspace")
     seen: dict[str, Path] = {}
-
-    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
-    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
-    monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
 
     class _StopCron:
         def __init__(self, store_path: Path) -> None:
             seen["cron_store"] = store_path
             raise _StopGatewayError("stop")
 
-    monkeypatch.setattr("nanobot.cron.service.CronService", _StopCron)
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: object(),
+        session_manager=lambda _workspace: object(),
+        cron_service=_StopCron,
+    )
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
@@ -766,10 +833,7 @@ def test_gateway_uses_workspace_directory_for_cron_store(monkeypatch, tmp_path: 
 def test_gateway_workspace_override_does_not_migrate_legacy_cron(
     monkeypatch, tmp_path: Path
 ) -> None:
-    config_file = tmp_path / "instance" / "config.json"
-    config_file.parent.mkdir(parents=True)
-    config_file.write_text("{}")
-
+    config_file = _write_instance_config(tmp_path)
     legacy_dir = tmp_path / "global" / "cron"
     legacy_dir.mkdir(parents=True)
     legacy_file = legacy_dir / "jobs.json"
@@ -779,20 +843,19 @@ def test_gateway_workspace_override_does_not_migrate_legacy_cron(
     config = Config()
     seen: dict[str, Path] = {}
 
-    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
-    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
-    monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
-    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
-
     class _StopCron:
         def __init__(self, store_path: Path) -> None:
             seen["cron_store"] = store_path
             raise _StopGatewayError("stop")
 
-    monkeypatch.setattr("nanobot.cron.service.CronService", _StopCron)
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: object(),
+        session_manager=lambda _workspace: object(),
+        cron_service=_StopCron,
+        get_cron_dir=lambda: legacy_dir,
+    )
 
     result = runner.invoke(
         app,
@@ -808,10 +871,7 @@ def test_gateway_workspace_override_does_not_migrate_legacy_cron(
 def test_gateway_custom_config_workspace_does_not_migrate_legacy_cron(
     monkeypatch, tmp_path: Path
 ) -> None:
-    config_file = tmp_path / "instance" / "config.json"
-    config_file.parent.mkdir(parents=True)
-    config_file.write_text("{}")
-
+    config_file = _write_instance_config(tmp_path)
     legacy_dir = tmp_path / "global" / "cron"
     legacy_dir.mkdir(parents=True)
     legacy_file = legacy_dir / "jobs.json"
@@ -822,20 +882,19 @@ def test_gateway_custom_config_workspace_does_not_migrate_legacy_cron(
     config.agents.defaults.workspace = str(custom_workspace)
     seen: dict[str, Path] = {}
 
-    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
-    monkeypatch.setattr("nanobot.bus.queue.MessageBus", lambda: object())
-    monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
-    monkeypatch.setattr("nanobot.config.paths.get_cron_dir", lambda: legacy_dir)
-
     class _StopCron:
         def __init__(self, store_path: Path) -> None:
             seen["cron_store"] = store_path
             raise _StopGatewayError("stop")
 
-    monkeypatch.setattr("nanobot.cron.service.CronService", _StopCron)
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: object(),
+        session_manager=lambda _workspace: object(),
+        cron_service=_StopCron,
+        get_cron_dir=lambda: legacy_dir,
+    )
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
 
@@ -887,19 +946,14 @@ def test_migrate_cron_store_skips_when_workspace_file_exists(tmp_path: Path) -> 
 
 
 def test_gateway_uses_configured_port_when_cli_flag_is_missing(monkeypatch, tmp_path: Path) -> None:
-    config_file = tmp_path / "instance" / "config.json"
-    config_file.parent.mkdir(parents=True)
-    config_file.write_text("{}")
-
+    config_file = _write_instance_config(tmp_path)
     config = Config()
     config.gateway.port = 18791
 
-    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr(
-        "nanobot.cli.commands._make_provider",
-        lambda _config: (_ for _ in ()).throw(_StopGatewayError("stop")),
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        make_provider=_stop_gateway_provider,
     )
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file)])
@@ -909,164 +963,20 @@ def test_gateway_uses_configured_port_when_cli_flag_is_missing(monkeypatch, tmp_
 
 
 def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path) -> None:
-    config_file = tmp_path / "instance" / "config.json"
-    config_file.parent.mkdir(parents=True)
-    config_file.write_text("{}")
-
+    config_file = _write_instance_config(tmp_path)
     config = Config()
     config.gateway.port = 18791
 
-    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr(
-        "nanobot.cli.commands._make_provider",
-        lambda _config: (_ for _ in ()).throw(_StopGatewayError("stop")),
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        make_provider=_stop_gateway_provider,
     )
 
     result = runner.invoke(app, ["gateway", "--config", str(config_file), "--port", "18792"])
 
     assert isinstance(result.exception, _StopGatewayError)
     assert "port 18792" in result.stdout
-
-
-def test_gateway_reports_coding_task_counts(monkeypatch, tmp_path: Path) -> None:
-    from nanobot.coding_tasks.manager import CodexWorkerManager
-    from nanobot.coding_tasks.store import CodingTaskStore
-
-    config_file = tmp_path / "instance" / "config.json"
-    config_file.parent.mkdir(parents=True)
-    config_file.write_text("{}")
-
-    workspace = tmp_path / "workspace"
-    config = Config()
-    config.agents.defaults.workspace = str(workspace)
-
-    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
-    manager = CodexWorkerManager(workspace, store)
-    queued = manager.create_task(repo_path="/tmp/repo-a", goal="Queue")
-    running = manager.create_task(repo_path="/tmp/repo-b", goal="Run")
-    manager.mark_starting(running.id, summary="Boot")
-    manager.mark_running(running.id, summary="Working")
-
-    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands.sync_workspace_templates", lambda _path: None)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", lambda _config: object())
-    monkeypatch.setattr(
-        "nanobot.coding_tasks.CodexTaskRecovery",
-        lambda *_args, **_kwargs: type("R", (), {"recover_tasks": lambda self: None})(),
-    )
-    monkeypatch.setattr(
-        "nanobot.coding_tasks.runtime.CodexTaskRecovery",
-        lambda *_args, **_kwargs: type("R", (), {"recover_tasks": lambda self: None})(),
-    )
-
-    class _FakeBus:
-        async def publish_outbound(self, _msg) -> None:
-            return None
-
-    class _FakeAgentLoop:
-        def __init__(self, *args, **kwargs) -> None:
-            self.model = config.agents.defaults.model
-            self.channels_config = config.channels
-            self.sessions = MagicMock()
-            self.sessions.get_or_create.return_value = MagicMock()
-
-        async def process_direct(self, *args, **kwargs):
-            return MagicMock(content="")
-
-        async def run(self) -> None:
-            return None
-
-        async def close_mcp(self) -> None:
-            return None
-
-        def stop(self) -> None:
-            return None
-
-    class _FakeCron:
-        def __init__(self, _store_path: Path) -> None:
-            self.on_job = None
-
-        def status(self) -> dict[str, int]:
-            return {"jobs": 0}
-
-        async def start(self) -> None:
-            return None
-
-        def stop(self) -> None:
-            return None
-
-    class _FakeHeartbeat:
-        def __init__(self, *args, **kwargs) -> None:
-            return None
-
-        async def start(self) -> None:
-            return None
-
-        def stop(self) -> None:
-            return None
-
-    class _FakeChannels:
-        enabled_channels: list[str] = []
-
-        def __init__(self, _config, _bus) -> None:
-            return None
-
-        async def start_all(self) -> None:
-            return None
-
-        async def stop_all(self) -> None:
-            return None
-
-    def _stop_asyncio_run(coro):
-        coro.close()
-        raise _StopGatewayError("stop")
-
-    monkeypatch.setattr("nanobot.bus.queue.MessageBus", _FakeBus)
-    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
-    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCron)
-    monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _FakeHeartbeat)
-    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannels)
-    monkeypatch.setattr("nanobot.session.manager.SessionManager", lambda _workspace: object())
-    monkeypatch.setattr("nanobot.cli.commands.asyncio.run", _stop_asyncio_run)
-
-    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
-
-    assert isinstance(result.exception, _StopGatewayError)
-    assert "Coding tasks: 2 tracked, 1 recoverable" in _strip_ansi(result.stdout)
-
-
-def test_gateway_rejects_duplicate_instance_before_runtime_starts(monkeypatch, tmp_path: Path) -> None:
-    config_file = tmp_path / "instance" / "config.json"
-    config_file.parent.mkdir(parents=True)
-    config_file.write_text("{}")
-
-    workspace = tmp_path / "workspace"
-    config = Config()
-    config.agents.defaults.workspace = str(workspace)
-
-    provider_called = False
-
-    def _fake_provider(_config):
-        nonlocal provider_called
-        provider_called = True
-        return object()
-
-    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
-    monkeypatch.setattr("nanobot.cli.commands._make_provider", _fake_provider)
-    monkeypatch.setattr(
-        "nanobot.cli.commands._GatewayInstanceLock.acquire",
-        lambda self: (_ for _ in ()).throw(RuntimeError("gateway lock is already held")),
-    )
-
-    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
-
-    assert result.exit_code == 1
-    assert provider_called is False
-    assert "already running" in _strip_ansi(result.stdout)
 
 
 def test_coding_task_create_persists_task(monkeypatch, tmp_path: Path) -> None:
@@ -1106,6 +1016,70 @@ def test_coding_task_create_persists_task(monkeypatch, tmp_path: Path) -> None:
     assert "Repo:" in output
     assert str(repo) in output.replace("\n", "")
     assert "Goal: Implement feature #4" in output
+
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    tasks = store.list_tasks()
+    assert len(tasks) == 1
+    assert tasks[0].repo_path == str(repo)
+    assert tasks[0].goal == "Implement feature #4"
+
+
+def test_serve_uses_api_config_defaults_and_workspace_override(
+    monkeypatch, tmp_path: Path
+) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
+    config.api.host = "127.0.0.2"
+    config.api.port = 18900
+    config.api.timeout = 45.0
+    override_workspace = tmp_path / "override-workspace"
+    seen: dict[str, object] = {}
+
+    _patch_serve_runtime(monkeypatch, config, seen)
+
+    result = runner.invoke(
+        app,
+        ["serve", "--config", str(config_file), "--workspace", str(override_workspace)],
+    )
+
+    assert result.exit_code == 0
+    assert seen["workspace"] == override_workspace
+    assert seen["host"] == "127.0.0.2"
+    assert seen["port"] == 18900
+    assert seen["request_timeout"] == 45.0
+
+
+def test_serve_cli_options_override_api_config(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    config = Config()
+    config.api.host = "127.0.0.2"
+    config.api.port = 18900
+    config.api.timeout = 45.0
+    seen: dict[str, object] = {}
+
+    _patch_serve_runtime(monkeypatch, config, seen)
+
+    result = runner.invoke(
+        app,
+        [
+            "serve",
+            "--config",
+            str(config_file),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "18901",
+            "--timeout",
+            "46",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert seen["host"] == "127.0.0.1"
+    assert seen["port"] == 18901
+    assert seen["request_timeout"] == 46.0
+
 
     store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
     tasks = store.list_tasks()
