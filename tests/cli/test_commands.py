@@ -684,6 +684,22 @@ def _stop_gateway_provider(_config) -> object:
     raise _StopGatewayError("stop")
 
 
+def _normalize_message_bus_stub(bus: object) -> object:
+    async def _noop(*_args, **_kwargs):
+        return None
+
+    if all(
+        hasattr(bus, attr)
+        for attr in ("publish_outbound", "publish_inbound", "consume_outbound")
+    ):
+        return bus
+    return SimpleNamespace(
+        publish_outbound=getattr(bus, "publish_outbound", _noop),
+        publish_inbound=getattr(bus, "publish_inbound", _noop),
+        consume_outbound=getattr(bus, "consume_outbound", AsyncMock()),
+    )
+
+
 def _patch_cli_command_runtime(
     monkeypatch,
     config: Config,
@@ -711,7 +727,10 @@ def _patch_cli_command_runtime(
     )
 
     if message_bus is not None:
-        monkeypatch.setattr("nanobot.bus.queue.MessageBus", message_bus)
+        monkeypatch.setattr(
+            "nanobot.bus.queue.MessageBus",
+            lambda: _normalize_message_bus_stub(message_bus()),
+        )
     if session_manager is not None:
         monkeypatch.setattr("nanobot.session.manager.SessionManager", session_manager)
     if cron_service is not None:
@@ -948,6 +967,7 @@ def test_migrate_cron_store_skips_when_workspace_file_exists(tmp_path: Path) -> 
 def test_gateway_uses_configured_port_when_cli_flag_is_missing(monkeypatch, tmp_path: Path) -> None:
     config_file = _write_instance_config(tmp_path)
     config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
     config.gateway.port = 18791
 
     _patch_cli_command_runtime(
@@ -965,6 +985,7 @@ def test_gateway_uses_configured_port_when_cli_flag_is_missing(monkeypatch, tmp_
 def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path) -> None:
     config_file = _write_instance_config(tmp_path)
     config = Config()
+    config.agents.defaults.workspace = str(tmp_path / "config-workspace")
     config.gateway.port = 18791
 
     _patch_cli_command_runtime(
@@ -1079,13 +1100,6 @@ def test_serve_cli_options_override_api_config(monkeypatch, tmp_path: Path) -> N
     assert seen["host"] == "127.0.0.1"
     assert seen["port"] == 18901
     assert seen["request_timeout"] == 46.0
-
-
-    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
-    tasks = store.list_tasks()
-    assert len(tasks) == 1
-    assert tasks[0].repo_path == str(repo)
-    assert tasks[0].goal == "Implement feature #4"
 
 
 def test_coding_task_create_rejects_missing_repo(monkeypatch, tmp_path: Path) -> None:
@@ -1424,6 +1438,7 @@ def test_coding_task_run_launches_tmux_worker(monkeypatch, tmp_path: Path) -> No
                 task=launched,
                 session_reused=False,
                 command="codex exec ...",
+                launch_script_path=str(workspace / "automation" / "coding" / "artifacts" / f"{task.id}.launch.sh"),
                 prompt_path=str(workspace / "automation" / "coding" / "artifacts" / f"{task.id}.prompt.txt"),
                 log_path=str(workspace / "automation" / "coding" / "artifacts" / f"{task.id}.codex.log"),
                 session_hint="sess-123",

@@ -752,3 +752,23 @@
   - Keep the public task status enum unchanged; reuse `waiting_user` with metadata discriminator `worker_exit_review` for “worker exited, result needs review”
   - Make exit-review tasks visible and resumable, but do not let them keep blocking new coding-task starts as if a worker were still alive
   - Keep the unrelated Matrix optional dependency failure out of scope for this harness; validation will target coding-task, Telegram routing, CLI, and workspace-scoped tmux/runtime flows only
+
+## Session update - 2026-04-02 (coding-task lifecycle stabilization)
+- Completed features:
+  - Updated [nanobot/coding_tasks/progress.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/progress.py), [nanobot/coding_tasks/recovery.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/recovery.py), and [nanobot/coding_tasks/types.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/types.py) so `starting` tasks promote to `running` only on meaningful worker activity, live tmux sessions are never auto-completed just because a repo `PLAN.json` is green, and missing-session triage now converges to `completed`, exit-review `waiting_user`, or `failed` based on harness evidence
+  - Updated [nanobot/coding_tasks/manager.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/manager.py), [nanobot/coding_tasks/policy.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/policy.py), and [nanobot/coding_tasks/worker.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/worker.py) so worker-exit review waits stay visible and resumable, but no longer block new coding-task starts like an actively running worker
+  - Expanded [nanobot/coding_tasks/reporting.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/reporting.py) and [nanobot/coding_tasks/router.py](/Users/miau/Documents/nanobot/nanobot/coding_tasks/router.py) so `/coding status` and CLI status share the same richer completed, failed, and exit-review reports with repo, goal, branch, recent commit, latest note or last meaningful progress, and next actions
+  - Brought focused regression suites back in sync by updating [tests/coding_tasks/test_progress.py](/Users/miau/Documents/nanobot/tests/coding_tasks/test_progress.py), [tests/coding_tasks/test_recovery.py](/Users/miau/Documents/nanobot/tests/coding_tasks/test_recovery.py), [tests/coding_tasks/test_reporting.py](/Users/miau/Documents/nanobot/tests/coding_tasks/test_reporting.py), [tests/coding_tasks/test_policy.py](/Users/miau/Documents/nanobot/tests/coding_tasks/test_policy.py), and [tests/cli/test_commands.py](/Users/miau/Documents/nanobot/tests/cli/test_commands.py) for the new lifecycle, non-blocking exit review, current message-bus expectations, and the full `CodexLaunchResult` fixture shape
+- Verification:
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0 and still reports the known out-of-scope top-level pytest collection stop in `tests/channels/test_matrix_channel.py` because optional dependency `nio` is not installed
+  - `.venv/bin/pytest tests/coding_tasks -q` -> passed (`81 passed in 1.98s`)
+  - `.venv/bin/pytest tests/agent/test_coding_task_routing.py tests/channels/test_telegram_channel.py tests/cli/test_commands.py -q` -> passed (`126 passed in 1.15s`)
+  - `.venv/bin/python -m compileall nanobot/coding_tasks tests/coding_tasks tests/agent/test_coding_task_routing.py tests/channels/test_telegram_channel.py tests/cli/test_commands.py` -> passed
+  - Real tmux/runtime proof with workspace-scoped temp config under `/tmp/nbproof-eghe9c7p` -> passed:
+    - a live worker emitting meaningful output advanced from `starting` to `running`
+    - a missing-session task with only strong completion evidence converged to exit-review `waiting_user`
+    - a missing-session task with a fully completed in-repo harness converged to `completed`
+    - `nanobot coding-task status <task_id> --config /tmp/nbproof-eghe9c7p/config.json` matched the persisted `tasks.json` and run-log states for all three cases
+- Follow-up / scope notes:
+  - No public command or top-level task-status enum was added; `waiting_user` now carries `worker_exit_review` metadata internally for the reviewable worker-exit branch
+  - Telegram private-chat wording remains covered by the focused routing and channel tests in this session; a real Telegram bot token was not required for the runtime proof

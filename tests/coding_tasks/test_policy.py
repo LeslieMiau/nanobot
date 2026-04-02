@@ -103,3 +103,28 @@ def test_policy_hides_failed_and_cancelled_tasks_from_visible_origin_list(tmp_pa
     assert [task.id for task in tasks] == [completed.id]
     assert policy.task_for_origin_index("telegram", "chat-a", 1).id == completed.id
     assert policy.task_for_origin_index("telegram", "chat-a", 2) is None
+
+
+def test_policy_does_not_block_new_tasks_on_worker_exit_review_wait(tmp_path) -> None:
+    store = CodingTaskStore(tmp_path / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(tmp_path, store)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    review = manager.create_task(
+        repo_path=str(repo),
+        goal="Review result",
+        metadata={"origin_channel": "telegram", "origin_chat_id": "chat-a"},
+    )
+    manager.mark_starting(review.id, summary="Boot")
+    manager.mark_waiting_user(review.id, summary="Review result")
+    manager.update_metadata(
+        review.id,
+        updates={"waiting_reason_kind": "worker_exit_review"},
+    )
+
+    policy = CodingTaskPolicy(manager)
+
+    assert policy.blocking_active_task() is None
+    assert policy.select_control_task("telegram", "chat-a") is not None
+    assert policy.select_control_task("telegram", "chat-a").id == review.id

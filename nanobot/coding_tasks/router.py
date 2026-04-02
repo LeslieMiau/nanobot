@@ -14,6 +14,8 @@ from nanobot.coding_tasks.policy import CodingTaskPolicy
 from nanobot.coding_tasks.progress import CodexProgressMonitor
 from nanobot.coding_tasks.repo_resolver import RepoRefResolver
 from nanobot.coding_tasks.reporting import (
+    build_completion_report,
+    build_failure_report,
     build_coding_help_report,
     build_waiting_user_report,
     repo_display_name,
@@ -450,14 +452,22 @@ def _make_control_handler(
 
         if is_status_request:
             report = monitor.build_task_report(task.id) if monitor else None
-            return OutboundMessage(
-                channel=msg.channel,
-                chat_id=msg.chat_id,
-                content=_format_task_status(
+            if task.status == "completed":
+                content = build_completion_report(task)
+            elif task.status == "failed":
+                content = build_failure_report(task)
+            elif task.status == "waiting_user":
+                content = build_waiting_user_report(task)
+            else:
+                content = _format_task_status(
                     task,
                     report_summary=report.summary if report else "",
                     recoverable=task.id in {item.id for item in manager.recoverable_tasks()},
-                ),
+                )
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=content,
             )
 
         if _is_harness_conflict_task(task):
@@ -641,6 +651,12 @@ def _format_task_status(task, *, report_summary: str = "", note: str = "当前�
         f"**状态**: {task.status}",
         f"**目标**: {task.goal}",
     ]
+    if task.branch_name:
+        lines.append(f"**分支**: {task.branch_name}")
+    if recent_commit := task.metadata.get("recent_commit_summary"):
+        lines.append(f"**最近提交**: {recent_commit}")
+    if latest_note := task.metadata.get("latest_note"):
+        lines.append(f"**最近记录**: {latest_note}")
     progress = _truncate_line(task.last_progress_summary or report_summary, limit=160)
     if progress:
         lines.append(f"**最近进展**: {progress}")

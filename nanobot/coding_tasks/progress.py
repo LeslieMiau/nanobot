@@ -9,6 +9,10 @@ from pathlib import Path
 
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.reporting import detect_waiting_reason, inspect_repo_snapshot
+from nanobot.coding_tasks.types import (
+    WAITING_REASON_KIND_WORKER_EXIT_REVIEW,
+    WAITING_REASON_KIND_WORKER_INPUT,
+)
 from nanobot.coding_tasks.worker import CodexWorkerLauncher
 
 _PROMPT_LINES = {"❯", "$", "%", "#", "sh-3.2$", "zsh%"}
@@ -17,6 +21,28 @@ _ERROR_HINTS = (
     "unsupported value",
     "operation not permitted",
     "must be readable",
+)
+_STRONG_COMPLETION_PHRASES = (
+    "主实现",
+    "已经落到代码",
+    "主要实现和验证都已经到位",
+    "验证证据已经拿到了",
+    "wrapped everything up",
+    "all done",
+    "tests passed",
+    "验证通过",
+    "已跑通",
+    "ready to hand off",
+    "ready for review",
+)
+_STRONG_VERIFICATION_PHRASES = (
+    "验证",
+    "passed",
+    "通过",
+    "sanity",
+    "smoke",
+    "ready",
+    "收口",
 )
 
 
@@ -172,16 +198,21 @@ class CodexProgressMonitor:
             recent_commit_summary=report.recent_commit_summary or None,
             latest_note=report.latest_note or None,
         )
-        if report.plan_progress.is_complete and task.status in {"starting", "running", "waiting_user"}:
-            completion_summary = report.latest_note or report.summary or "Repo harness completed"
-            self.manager.mark_completed(task_id, summary=completion_summary)
-            return report
         if session_missing and task.status in {"starting", "running", "waiting_user"}:
-            failure_summary = self._build_missing_session_summary(task, report)
-            self.manager.mark_failed(task_id, summary=failure_summary)
+            self._triage_missing_session(task, report)
             return report
-        if waiting_reason := detect_waiting_reason(report.live_output):
+        waiting_reason = detect_waiting_reason(report.live_output)
+        if waiting_reason:
             self.manager.mark_waiting_user(task_id, summary=waiting_reason)
+            self.manager.update_metadata(
+                task_id,
+                updates={"waiting_reason_kind": WAITING_REASON_KIND_WORKER_INPUT},
+                remove_keys=("exit_review_progress",),
+            )
+            return report
+        if task.status == "starting" and self._has_effective_worker_activity(report):
+            self._clear_waiting_metadata(task_id)
+            self.manager.mark_running(task_id, summary=report.summary or report.live_output or task.last_progress_summary)
         if report.summary:
             self.manager.update_progress(task_id, report.summary)
         return report
@@ -208,8 +239,96 @@ class CodexProgressMonitor:
             return ""
         return "\n".join(lines[-limit:])
 
-    def _build_missing_session_summary(self, task, report: TaskProgressReport) -> str:
+    def _triage_missing_session(self, task, report: TaskProgressReport) -> None:
+        recent = self._last_meaningful_progress(task, report)
+        if recent:
+            self.manager.update_metadata(
+                task.id,
+                updates={"last_meaningful_progress": recent},
+            )
+        if report.plan_progress.is_complete:
+            self._clear_waiting_metadata(task.id)
+            completion_summary = report.latest_note or recent or report.summary or "Repo harness completed"
+            self.manager.mark_completed(task.id, summary=completion_summary)
+            return
+        if self._has_strong_completion_evidence(report, recent):
+            review_summary = self._build_exit_review_summary(report, recent)
+            self.manager.mark_waiting_user(task.id, summary=review_summary)
+            self.manager.update_metadata(
+                task.id,
+                updates={
+                    "waiting_reason_kind": WAITING_REASON_KIND_WORKER_EXIT_REVIEW,
+                    "exit_review_progress": recent,
+                },
+            )
+            return
+        self._clear_waiting_metadata(task.id)
+        failure_summary = self._build_missing_session_failure_summary(report, recent)
+        self.manager.mark_failed(task.id, summary=failure_summary)
+
+    def _clear_waiting_metadata(self, task_id: str) -> None:
+        self.manager.update_metadata(
+            task_id,
+            remove_keys=("waiting_reason_kind", "exit_review_progress"),
+        )
+
+    def _has_effective_worker_activity(self, report: TaskProgressReport) -> bool:
+        if not report.live_output:
+            return False
+        if detect_waiting_reason(report.live_output):
+            return False
+        if CodexWorkerLauncher.summarize_startup_diagnostic(report.live_output):
+            return False
+        return True
+
+    def _last_meaningful_progress(self, task, report: TaskProgressReport) -> str:
         recent = build_notification_progress(report, last_progress_summary=task.last_progress_summary)
+        if recent:
+            return recent
+        if report.latest_note:
+            return _trim_summary(report.latest_note, limit=128)
+        if report.live_output:
+            return _trim_summary(report.live_output, limit=128)
+        return ""
+
+    def _has_strong_completion_evidence(self, report: TaskProgressReport, recent: str) -> bool:
+        candidates = [
+            report.latest_note,
+            recent,
+            report.live_output,
+        ]
+        normalized = [" ".join(text.split()).lower() for text in candidates if text]
+        if not normalized:
+            return False
+        plan_nearly_done = False
+        if report.plan_progress.total > 0:
+            ratio = report.plan_progress.completed / report.plan_progress.total
+            plan_nearly_done = report.plan_progress.remaining <= 1 or ratio >= 0.75
+        has_completion_signal = any(
+            text.startswith(("完成", "已完成"))
+            or any(phrase in text for phrase in _STRONG_COMPLETION_PHRASES)
+            for text in normalized
+        )
+        has_verification_signal = any(
+            any(phrase in text for phrase in _STRONG_VERIFICATION_PHRASES)
+            for text in normalized
+        )
+        return has_completion_signal and (plan_nearly_done or has_verification_signal)
+
+    def _build_exit_review_summary(self, report: TaskProgressReport, recent: str) -> str:
+        if recent:
+            return (
+                "Worker session exited after substantial progress; review the current result before deciding "
+                f"whether to resume. Last signal: {recent}"
+            )
+        if report.latest_note:
+            return (
+                "Worker session exited after substantial progress; review the current result before deciding "
+                f"whether to resume. Latest repo note: {report.latest_note}"
+            )
+        return "Worker session exited after substantial progress; review the current result before deciding whether to resume."
+
+    def _build_missing_session_failure_summary(self, report: TaskProgressReport, recent: str) -> str:
         if recent:
             return f"Worker session disappeared after launch; last known progress: {recent}"
         if report.latest_note:

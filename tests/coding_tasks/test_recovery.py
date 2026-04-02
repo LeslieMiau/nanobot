@@ -50,6 +50,7 @@ def test_recovery_marks_task_failed_when_tmux_session_is_missing(tmp_path: Path)
     manager = CodexWorkerManager(workspace, store)
     repo = tmp_path / "repo"
     _prepare_repo(repo)
+    (repo / "PLAN.json").write_text('[{"id": 1, "passes": false}]', encoding="utf-8")
     task = manager.create_task(repo_path=str(repo), goal="Recover me")
     task = manager.mark_starting(task.id, summary="Launching")
 
@@ -69,4 +70,4 @@ def test_recovery_marks_task_failed_when_tmux_session_is_missing(tmp_path: Path)
     reloaded = store.get_task(task.id)
     assert reloaded is not None
     assert reloaded.status == "failed"
-    assert "tmux session missing after restart" in reloaded.last_progress_summary
+    assert "Worker session disappeared after launch" in reloaded.last_progress_summary

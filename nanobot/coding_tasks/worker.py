@@ -98,6 +98,10 @@ class CodexWorkerLauncher:
 
     def launch_task(self, task_id: str) -> CodexLaunchResult:
         """Launch a coding task in tmux or reuse the existing session."""
+        self.manager.update_metadata(
+            task_id,
+            remove_keys=("waiting_reason_kind", "exit_review_progress"),
+        )
         task = self.manager.require_task(task_id)
         harness = detect_repo_harness(task.repo_path)
         harness_resolution = task.metadata.get("harness_conflict_resolution", "resume_existing")

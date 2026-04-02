@@ -35,6 +35,9 @@ HARNESS_RESOLUTION_VALUES = (
     "start_new_goal",
 )
 
+WAITING_REASON_KIND_WORKER_INPUT = "worker_input"
+WAITING_REASON_KIND_WORKER_EXIT_REVIEW = "worker_exit_review"
+
 
 @dataclass(slots=True)
 class CodingTask:

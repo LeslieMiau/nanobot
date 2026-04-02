@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.types import CodingTask
+from nanobot.coding_tasks.types import WAITING_REASON_KIND_WORKER_EXIT_REVIEW
 
 _HIDDEN_TASK_STATUSES = {"failed", "cancelled"}
 
@@ -16,7 +17,10 @@ class CodingTaskPolicy:
 
     def blocking_active_task(self) -> CodingTask | None:
         """Return the workspace-wide task that blocks creating another task."""
-        return self.manager.latest_active_task()
+        for task in self.manager.active_tasks():
+            if not self._is_nonblocking_review_wait(task):
+                return task
+        return None
 
     def select_control_task(self, channel: str, chat_id: str) -> CodingTask | None:
         """Return the newest active visible task for one origin chat."""
@@ -43,3 +47,10 @@ class CodingTaskPolicy:
         if index > len(tasks):
             return None
         return tasks[index - 1]
+
+    @staticmethod
+    def _is_nonblocking_review_wait(task: CodingTask) -> bool:
+        return (
+            task.status == "waiting_user"
+            and task.metadata.get("waiting_reason_kind") == WAITING_REASON_KIND_WORKER_EXIT_REVIEW
+        )

@@ -35,16 +35,12 @@ class CodexTaskRecovery:
         result = RecoveryResult()
         for task in self.manager.recoverable_tasks():
             if not task.tmux_session or not self.launcher.has_session(task.tmux_session):
-                self.manager.mark_failed(
-                    task.id,
-                    summary=(
-                        "tmux session missing after restart; run "
-                        f"`nanobot coding-task run {task.id}` to relaunch the worker."
-                    ),
-                )
-                result.failed_ids.append(task.id)
+                self.monitor.refresh_task(task.id, session_missing=True)
+                reloaded = self.manager.require_task(task.id)
+                if reloaded.status == "failed":
+                    result.failed_ids.append(task.id)
                 continue
 
-            report = self.monitor.refresh_task(task.id)
+            self.monitor.refresh_task(task.id)
             result.recovered_ids.append(task.id)
         return result

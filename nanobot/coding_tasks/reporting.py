@@ -6,7 +6,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from nanobot.coding_tasks.types import CodingTask
+from nanobot.coding_tasks.types import CodingTask, WAITING_REASON_KIND_WORKER_EXIT_REVIEW
 
 _WAITING_PATTERNS = (
     "waiting for user",
@@ -85,24 +85,21 @@ def build_coding_help_report(note: str | None = None) -> str:
 
 def build_completion_report(task: CodingTask) -> str:
     """Build a completion summary for CLI or Telegram delivery."""
-    lines = [
-        "**编程任务已完成**",
-        f"**仓库**: `{repo_display_name(task)}`",
-        f"**目标**: {task.goal}",
-        f"**结果**: {task.last_progress_summary or 'Completed'}",
-    ]
+    lines = _base_task_report("**编程任务已完成**", task)
+    if latest_note := _latest_note(task):
+        lines.append(f"**最近记录**: {latest_note}")
+    lines.append(f"**结果**: {task.last_progress_summary or 'Completed'}")
+    lines.append("**下一步**: 如需继续新目标，直接重新发起 `/coding <repo> <goal>`。")
     return "\n".join(lines)
 
 
 def build_failure_report(task: CodingTask) -> str:
     """Build a failure summary with resume guidance."""
-    lines = [
-        "**编程任务失败**",
-        f"**仓库**: `{repo_display_name(task)}`",
-        f"**目标**: {task.goal}",
-        f"**原因**: {task.last_progress_summary or task.metadata.get('latest_note') or '-'}",
-        "**下一步**: 发送 `继续` 或重新发起 `/coding <repo> <goal>`。",
-    ]
+    lines = _base_task_report("**编程任务失败**", task)
+    lines.append(f"**原因**: {task.last_progress_summary or _latest_note(task) or '-'}")
+    if recent := _latest_note(task):
+        lines.append(f"**最近成功步骤**: {recent}")
+    lines.append("**恢复建议**: 发送 `继续` 或 `/coding resume` 重试；如需放弃可发送 `/coding stop`。")
     return "\n".join(lines)
 
 
@@ -129,14 +126,47 @@ def build_waiting_user_report(task: CodingTask) -> str:
         lines.append("**下一步**: 回复 `继续旧任务`、`按新任务开始` 或 `取消`。")
         return "\n".join(lines)
 
+    if task.metadata.get("waiting_reason_kind") == WAITING_REASON_KIND_WORKER_EXIT_REVIEW:
+        lines = _base_task_report("**编程任务等待你确认结果**", task)
+        if latest_note := _latest_note(task):
+            lines.append(f"**最近记录**: {latest_note}")
+        if recent := _last_meaningful_progress(task):
+            lines.append(f"**最后进展**: {recent}")
+        lines.append(f"**等待原因**: {task.last_progress_summary or '-'}")
+        lines.append(
+            "**下一步**: 发送 `状态` 或 `/coding status` 查看详情；如需继续，发送 `继续` 或 `/coding resume`。这个待确认状态不会阻塞新任务。"
+        )
+        return "\n".join(lines)
+
+    lines = _base_task_report("**编程任务等待你的确认**", task)
+    lines.append(f"**等待原因**: {task.last_progress_summary or '-'}")
+    lines.append("**下一步**: 回复 `继续` 或 `取消`。")
+    return "\n".join(lines)
+
+
+def _base_task_report(title: str, task: CodingTask) -> list[str]:
     lines = [
-        "**编程任务等待你的确认**",
+        title,
         f"**仓库**: `{repo_display_name(task)}`",
         f"**目标**: {task.goal}",
-        f"**等待原因**: {task.last_progress_summary or '-'}",
-        "**下一步**: 回复 `继续` 或 `取消`。",
     ]
-    return "\n".join(lines)
+    if task.branch_name:
+        lines.append(f"**分支**: {task.branch_name}")
+    if recent_commit := _recent_commit(task):
+        lines.append(f"**最近提交**: {recent_commit}")
+    return lines
+
+
+def _recent_commit(task: CodingTask) -> str:
+    return str(task.metadata.get("recent_commit_summary") or "").strip()
+
+
+def _latest_note(task: CodingTask) -> str:
+    return str(task.metadata.get("latest_note") or "").strip()
+
+
+def _last_meaningful_progress(task: CodingTask) -> str:
+    return str(task.metadata.get("exit_review_progress") or task.metadata.get("last_meaningful_progress") or "").strip()
 
 
 def _run_git(repo_path: Path, args: list[str]) -> str:

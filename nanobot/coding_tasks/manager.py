@@ -83,13 +83,15 @@ class CodexWorkerManager:
     def recoverable_tasks(self) -> list[CodingTask]:
         return self.store.list_tasks_by_status("starting", "running", "waiting_user")
 
+    def active_tasks(self) -> list[CodingTask]:
+        """Return workspace-wide active tasks newest first."""
+        tasks = self._newest_first(self.store.list_tasks())
+        return [task for task in tasks if task.status in _ACTIVE_TASK_STATUSES]
+
     def latest_active_task(self) -> CodingTask | None:
         """Return the newest actively running task in this workspace, if any."""
-        tasks = self._newest_first(self.store.list_tasks())
-        for task in tasks:
-            if task.status in _ACTIVE_TASK_STATUSES:
-                return task
-        return None
+        tasks = self.active_tasks()
+        return tasks[0] if tasks else None
 
     def tasks_for_origin(self, channel: str, chat_id: str) -> list[CodingTask]:
         """Return tasks created from the given origin channel/chat, newest first."""
@@ -149,6 +151,8 @@ class CodexWorkerManager:
             metadata.pop(key, None)
         if updates:
             metadata.update(updates)
+        if metadata == task.metadata:
+            return task
         updated = replace(
             task,
             metadata=metadata,
@@ -206,6 +210,11 @@ class CodexWorkerManager:
             metadata["recent_commit_summary"] = recent_commit_summary
         if latest_note:
             metadata["latest_note"] = latest_note
+        if (
+            (branch_name or task.branch_name) == task.branch_name
+            and metadata == task.metadata
+        ):
+            return task
         updated = replace(
             task,
             branch_name=branch_name or task.branch_name,

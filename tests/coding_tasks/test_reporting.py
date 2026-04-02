@@ -94,13 +94,33 @@ def test_completion_and_failure_reports_include_actionable_context() -> None:
             },
         )
     )
+    exit_review_waiting = build_waiting_user_report(
+        CodingTask(
+            id="task-6",
+            title="demo",
+            repo_path="/tmp/repo",
+            goal="replace settings icon",
+            status="waiting_user",
+            branch_name="feature/demo",
+            last_progress_summary="Worker session exited after substantial progress; review the current result before deciding whether to resume.",
+            metadata={
+                "waiting_reason_kind": "worker_exit_review",
+                "recent_commit_summary": "abc123 init repo",
+                "latest_note": "Completed review flow UI",
+                "exit_review_progress": "验证证据已经拿到了",
+            },
+        )
+    )
 
-    assert "分支: feature/demo" in completion
-    assert "最近提交: abc123 init repo" in completion
-    assert "最近成功步骤: Refactor complete" in failure
-    assert "恢复建议" in failure
-    assert "等待原因: Need plan confirmation" in waiting
-    assert "旧任务摘要: continue old task" in conflict_waiting
+    assert "**分支**: feature/demo" in completion
+    assert "**最近提交**: abc123 init repo" in completion
+    assert "**最近成功步骤**: Refactor complete" in failure
+    assert "**恢复建议**" in failure
+    assert "**等待原因**: Need plan confirmation" in waiting
+    assert "**旧任务摘要**: continue old task" in conflict_waiting
     assert "按新任务开始" in conflict_waiting
     assert "已有已完成的 harness" in completed_conflict_waiting
-    assert "历史摘要: completed prior mobile shell cleanup" in completed_conflict_waiting
+    assert "**历史摘要**: completed prior mobile shell cleanup" in completed_conflict_waiting
+    assert "等待你确认结果" in exit_review_waiting
+    assert "**最后进展**: 验证证据已经拿到了" in exit_review_waiting
+    assert "不会阻塞新任务" in exit_review_waiting

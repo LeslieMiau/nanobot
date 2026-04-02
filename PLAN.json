@@ -8,7 +8,7 @@
       "Open PROGRESS.md and verify the reboot entry records the real stuck-task evidence from task ids `681ee161` and `1be6a750`, including the fact that progress kept updating while status stayed `starting`.",
       "Confirm the baseline explicitly keeps the unrelated Matrix optional dependency failure (`nio` missing during top-level pytest collection) out of scope for this task."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 2,
@@ -19,7 +19,7 @@
       "Verify shell prompts, startup-only diagnostics, and waiting-for-user text do not count as effective running activity.",
       "Verify the persisted task keeps an updated `last_progress_summary` and timestamp as the worker continues emitting useful activity."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,
@@ -30,7 +30,7 @@
       "When the tmux worker disappears with only strong completion evidence but no explicit harness completion, verify the task transitions to `waiting_user` with an exit-review explanation instead of `failed`.",
       "When the tmux worker disappears without strong completion evidence, verify the task transitions to `failed` with the last useful progress or recovery hint."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,
@@ -41,7 +41,7 @@
       "Verify the same exit-review task still appears in visible task lists and remains selectable for `/coding status` and `/coding resume`.",
       "Verify active harness-conflict waits still keep their previous blocking behavior."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,
@@ -52,7 +52,7 @@
       "Verify Telegram `/coding status` for an exit-review task shows the latest meaningful progress plus clear next actions for resume versus passive review.",
       "Verify notifier output for `completed`, `failed`, and exit-review `waiting_user` states reuses the same improved report content."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,
@@ -63,7 +63,7 @@
       "Recover a missing-session task with explicit harness completion and verify it finishes as `completed`.",
       "Recover a missing-session task with only strong completion evidence and verify it enters the exit-review wait state rather than `failed`."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,
@@ -74,7 +74,7 @@
       "Verify policy tests cover exit-review waits remaining visible but not workspace-blocking.",
       "Confirm `.venv/bin/python -m compileall` still succeeds for the touched coding-task modules and tests."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 8,
@@ -85,7 +85,7 @@
       "Verify gateway/CLI tests cover the current `publish_outbound` expectation, the full `CodexLaunchResult` shape, and the fixed serve-command assertions.",
       "Confirm the focused gateway and CLI verification still leaves the unrelated Matrix optional dependency gap explicitly out of scope."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 9,
@@ -96,6 +96,6 @@
       "Verify a real missing-session task with only strong completion evidence transitions to the exit-review wait state, and a real missing-session task with a fully completed harness transitions to `completed`.",
       "Verify the resulting `tasks.json`, run log, and `nanobot coding-task status` output agree on the final lifecycle state."
     ],
-    "passes": false
+    "passes": true
   }
 ]

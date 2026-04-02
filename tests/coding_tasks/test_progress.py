@@ -240,9 +240,10 @@ async def test_poll_task_updates_progress_summary_and_timestamp(tmp_path: Path) 
 
     refreshed = store.get_task(task.id)
     assert refreshed is not None
-    assert refreshed.last_progress_summary == report.summary
+    assert refreshed.status == "waiting_user"
+    assert refreshed.last_progress_summary == "Waiting for user confirmation"
     assert refreshed.last_progress_at_ms is not None
-    assert "Waiting for user confirmation" in refreshed.last_progress_summary
+    assert "Waiting for user confirmation" in report.summary
 
 
 @pytest.mark.asyncio
@@ -271,7 +272,7 @@ async def test_poll_task_marks_waiting_user_when_live_output_requests_confirmati
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("initial_status", ["starting", "running", "waiting_user"])
-async def test_poll_task_auto_completes_when_repo_plan_is_finished(tmp_path: Path, initial_status: str) -> None:
+async def test_poll_task_keeps_live_worker_active_even_when_repo_plan_is_finished(tmp_path: Path, initial_status: str) -> None:
     workspace = tmp_path / "workspace"
     store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
     manager = CodexWorkerManager(workspace, store)
@@ -299,10 +300,34 @@ async def test_poll_task_auto_completes_when_repo_plan_is_finished(tmp_path: Pat
 
     refreshed = store.get_task(task.id)
     assert refreshed is not None
-    assert refreshed.status == "completed"
-    assert refreshed.last_progress_summary == "finished everything"
+    expected_status = "running" if initial_status == "starting" else initial_status
+    assert refreshed.status == expected_status
     assert report.plan_progress.is_complete is True
     assert "All done" in report.summary
+
+
+@pytest.mark.asyncio
+async def test_poll_task_promotes_starting_task_to_running_on_effective_activity(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    repo = tmp_path / "repo"
+    _prepare_repo(repo)
+    task = manager.create_task(repo_path=str(repo), goal="Run when active")
+    task = manager.mark_starting(task.id, summary="Launching")
+
+    class _FakeLauncher:
+        def capture_pane(self, session: str) -> str:
+            assert session == task.tmux_session
+            return '{"item":{"type":"command_execution","command":"pytest tests/coding_tasks/test_progress.py"}}\n'
+
+    monitor = CodexProgressMonitor(manager, _FakeLauncher())  # type: ignore[arg-type]
+    await monitor.poll_task(task.id)
+
+    refreshed = store.get_task(task.id)
+    assert refreshed is not None
+    assert refreshed.status == "running"
+    assert "pytest tests/coding_tasks/test_progress.py" in refreshed.last_progress_summary
 
 
 @pytest.mark.asyncio
@@ -373,6 +398,48 @@ async def test_poll_task_marks_completed_when_missing_session_repo_harness_is_fi
     assert refreshed.status == "completed"
     assert refreshed.last_progress_summary == "wrapped everything up"
     assert report.plan_progress.is_complete is True
+
+
+@pytest.mark.asyncio
+async def test_poll_task_marks_waiting_user_when_missing_session_has_strong_completion_evidence(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "PROGRESS.md").write_text(
+        "## Session update\n- 完成聊天消息整理的主实现\n",
+        encoding="utf-8",
+    )
+    (repo / "PLAN.json").write_text(
+        '[{"id": 1, "passes": true}, {"id": 2, "passes": true}, {"id": 3, "passes": false}]',
+        encoding="utf-8",
+    )
+    task = manager.create_task(repo_path=str(repo), goal="Need review")
+    task = manager.mark_starting(task.id, summary="Launching")
+    artifact_dir = workspace / "automation" / "coding" / "artifacts"
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / f"{task.id}.codex.log").write_text(
+        '{"item":{"type":"agent_message","text":"验证证据已经拿到了，主要实现和测试都已经收口。"}}\n',
+        encoding="utf-8",
+    )
+
+    class _MissingLauncher:
+        def has_session(self, session: str) -> bool:
+            assert session == task.tmux_session
+            return False
+
+        def capture_pane(self, session: str) -> str:
+            raise AssertionError("capture_pane should not run when the tmux session is gone")
+
+    monitor = CodexProgressMonitor(manager, _MissingLauncher())  # type: ignore[arg-type]
+    await monitor.poll_task(task.id)
+
+    refreshed = store.get_task(task.id)
+    assert refreshed is not None
+    assert refreshed.status == "waiting_user"
+    assert refreshed.metadata.get("waiting_reason_kind") == "worker_exit_review"
+    assert "substantial progress" in refreshed.last_progress_summary
 
 
 @pytest.mark.asyncio
