@@ -2,89 +2,100 @@
   {
     "id": 1,
     "category": "setup",
-    "description": "The `/coding` help, markdown presentation, and stale-task recovery work is tracked as its own harness task so future sessions can resume from the new Telegram UX and worker-liveness behavior without rediscovering the current gaps.",
+    "description": "The coding-task lifecycle stabilization work is tracked as a new harness task so future sessions can resume from the real Telegram/tmux failure evidence instead of the already-completed `/coding help` follow-up.",
     "steps": [
-      "Open PLAN.json and verify it only tracks the `/coding` help, markdown presentation, and stale-task recovery harness.",
-      "Open PROGRESS.md and verify the reboot entry records the current baseline: `/coding help` does not exist, Telegram coding replies still force plain-text rendering, and stale tasks like `681ee161` can remain stuck in `starting` after their tmux session disappears.",
-      "Confirm the scope remains limited to Telegram `/coding` orchestration, presentation templates, and worker-liveness recovery rather than changing target-repo harness files or the Codex worker execution model."
+      "Open PLAN.json and verify it now tracks the coding-task lifecycle stabilization task instead of the prior completed `/coding help` harness.",
+      "Open PROGRESS.md and verify the reboot entry records the real stuck-task evidence from task ids `681ee161` and `1be6a750`, including the fact that progress kept updating while status stayed `starting`.",
+      "Confirm the baseline explicitly keeps the unrelated Matrix optional dependency failure (`nio` missing during top-level pytest collection) out of scope for this task."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 2,
     "category": "functional",
-    "description": "Telegram `/coding` supports `help` and uses one shared usage/help template for `/coding help`, bare `/coding`, unknown subcommands, and malformed control commands.",
+    "description": "A coding task promoted by live tmux or log activity no longer stays stuck in `starting`; effective worker activity advances it into `running` and keeps the latest progress summary fresh.",
     "steps": [
-      "Send `/coding help` and verify it returns the complete command list for start, help, list, status, pause, resume, and stop.",
-      "Send bare `/coding` and an unknown subcommand such as `/coding nope` and verify both return the same help or usage surface instead of entering the start-command path.",
-      "Verify malformed indexed commands still return the unified usage guidance instead of a mismatched one-off error."
+      "Create a task in `starting` with real non-shell pane output such as command execution or agent commentary and verify refresh changes it to `running`.",
+      "Verify shell prompts, startup-only diagnostics, and waiting-for-user text do not count as effective running activity.",
+      "Verify the persisted task keeps an updated `last_progress_summary` and timestamp as the worker continues emitting useful activity."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 3,
     "category": "functional",
-    "description": "Telegram `/coding` replies use markdown-friendly templates through the existing Telegram HTML rendering path instead of forcing plain-text layout for task start, status, list, waiting-user, completed, and failed messages.",
+    "description": "Worker-exit triage distinguishes between hard failure, explicit harness completion, and exit-review wait states instead of always failing missing tmux sessions.",
     "steps": [
-      "Trigger `/coding list`, `/coding status`, `/coding help`, a start response, a waiting-user response, and a lifecycle notification and verify each renders as concise markdown-friendly content in Telegram.",
-      "Verify the channel still uses the existing Markdown-to-HTML conversion path and does not introduce a new parse-mode branch.",
-      "Confirm the output avoids unsupported heavy structures such as large tables or long fenced code blocks."
+      "When the tmux worker disappears and the target repo harness is fully complete, verify the task transitions to `completed`.",
+      "When the tmux worker disappears with only strong completion evidence but no explicit harness completion, verify the task transitions to `waiting_user` with an exit-review explanation instead of `failed`.",
+      "When the tmux worker disappears without strong completion evidence, verify the task transitions to `failed` with the last useful progress or recovery hint."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 4,
     "category": "functional",
-    "description": "Telegram `/coding` responses are trimmed to user-facing essentials, removing low-value diagnostics while keeping concise status, repo name, goal, and next-step context.",
+    "description": "Exit-review wait states are visible for inspection and resume, but they no longer block new coding-task starts as if a worker were still actively running.",
     "steps": [
-      "Verify start, waiting-user, completed, failed, list, and status responses no longer include absolute repo paths, tmux session ids, harness-state debug fields, or tmux reuse markers.",
-      "Verify `/coding status` still shows a concise diagnosis: current status, repo name, goal, and the latest meaningful progress or blocking reason.",
-      "Verify CLI `coding-task status <task_id>` still retains the detailed diagnostics path even after Telegram responses are simplified."
+      "Create a `waiting_user` task tagged as worker-exit review and verify workspace blocking ignores it for new task creation.",
+      "Verify the same exit-review task still appears in visible task lists and remains selectable for `/coding status` and `/coding resume`.",
+      "Verify active harness-conflict waits still keep their previous blocking behavior."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 5,
     "category": "functional",
-    "description": "The steady-state coding-task poll loop detects missing tmux sessions for tasks in `starting`, `running`, or `waiting_user` and closes them out as `completed` or `failed` instead of leaving stale tasks stuck forever.",
+    "description": "Completion, failure, and exit-review reports expose repo, goal, branch, recent commit, latest note or last meaningful progress, and explicit next actions across Telegram and CLI status surfaces.",
     "steps": [
-      "Create a `starting` or `running` task whose tmux session is missing and verify the next refresh marks it `failed` with a recovery hint instead of leaving it in-place.",
-      "Create a task with a missing tmux session whose target repo harness is already fully complete and verify the task transitions to `completed` instead of `failed`.",
-      "Verify the resulting lifecycle transition still emits the correct completed or failed notification through the notifier."
+      "Verify `nanobot coding-task status <task_id>` prints richer completed, failed, and exit-review summaries without losing existing task metadata fields.",
+      "Verify Telegram `/coding status` for an exit-review task shows the latest meaningful progress plus clear next actions for resume versus passive review.",
+      "Verify notifier output for `completed`, `failed`, and exit-review `waiting_user` states reuses the same improved report content."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 6,
     "category": "functional",
-    "description": "Task `681ee161`-style stale coding tasks no longer remain indefinitely in `starting` after the worker session disappears; recovery either completes them from harness evidence or marks them failed with an explicit explanation.",
+    "description": "Startup recovery and steady-state polling use the same lifecycle rules, so restart recovery no longer mis-completes live tasks or mis-fails reviewable tasks.",
     "steps": [
-      "Use the same stale-task shape as `681ee161`—task state `starting`, missing tmux session, existing run log and repo harness—and verify refresh changes it to `failed` or `completed` deterministically.",
-      "Verify the stale-task summary explains that the worker session disappeared and what the operator should do next if manual recovery is needed.",
-      "Confirm the task no longer appears as indefinitely active after the fix is applied."
+      "Recover a task whose tmux session still exists and verify it stays observable as active instead of flipping to `completed` just because the repo plan is already green.",
+      "Recover a missing-session task with explicit harness completion and verify it finishes as `completed`.",
+      "Recover a missing-session task with only strong completion evidence and verify it enters the exit-review wait state rather than `failed`."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 7,
     "category": "testing",
-    "description": "Focused tests cover `/coding help`, markdown-friendly formatting, simplified Telegram responses, and stale-task closure on missing tmux sessions without regressing the current `/coding` command set.",
+    "description": "Focused coding-task tests cover running promotion, exit-review triage, reporting, recovery, and non-blocking review waits without reopening old `/coding` UX scope.",
     "steps": [
-      "Run focused pytest for coding-task routing, notifier, progress/recovery, and Telegram help rendering relevant to the new `/coding` surfaces.",
-      "Verify the tests cover stale `starting` tasks with missing sessions, unified help/usage handling, and markdown-friendly response content.",
-      "Confirm `.venv/bin/python -m compileall` still succeeds for the touched coding-task and Telegram modules plus their updated tests."
+      "Run `.venv/bin/pytest tests/coding_tasks -q` and verify the updated suite covers `starting -> running`, live-session non-completion, missing-session `completed/failed/waiting_user`, and richer report content.",
+      "Verify policy tests cover exit-review waits remaining visible but not workspace-blocking.",
+      "Confirm `.venv/bin/python -m compileall` still succeeds for the touched coding-task modules and tests."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 8,
-    "category": "docs",
-    "description": "README and PROGRESS.md document `/coding help`, the markdown-first Telegram presentation, and the new stale-task recovery behavior for missing worker sessions.",
+    "category": "testing",
+    "description": "CLI and gateway-focused regressions are aligned with the current implementation so lifecycle stabilization can be validated end-to-end from the active runtime path.",
     "steps": [
-      "Open README.md and verify it documents `/coding help`, the trimmed Telegram `/coding` response style, and the operator-visible stale-task behavior.",
-      "Open PROGRESS.md and verify it records the baseline, the markdown/presentation decisions, and the stale-task recovery fix.",
-      "Confirm PLAN.json is fully marked complete after implementation and verification."
+      "Run `.venv/bin/pytest tests/agent/test_coding_task_routing.py tests/channels/test_telegram_channel.py tests/cli/test_commands.py -q` and verify the suite passes after updating outdated gateway and launch-result test doubles.",
+      "Verify gateway/CLI tests cover the current `publish_outbound` expectation, the full `CodexLaunchResult` shape, and the fixed serve-command assertions.",
+      "Confirm the focused gateway and CLI verification still leaves the unrelated Matrix optional dependency gap explicitly out of scope."
     ],
-    "passes": true
+    "passes": false
+  },
+  {
+    "id": 9,
+    "category": "integration",
+    "description": "Local tmux/runtime verification proves the stabilized lifecycle with a workspace-scoped coding-task runtime and real tmux sessions, even without a live Telegram bot token.",
+    "steps": [
+      "Launch a workspace-scoped task through the real tmux-backed worker path and verify it advances from `starting` to `running` when the fake worker emits meaningful activity.",
+      "Verify a real missing-session task with only strong completion evidence transitions to the exit-review wait state, and a real missing-session task with a fully completed harness transitions to `completed`.",
+      "Verify the resulting `tasks.json`, run log, and `nanobot coding-task status` output agree on the final lifecycle state."
+    ],
+    "passes": false
   }
 ]

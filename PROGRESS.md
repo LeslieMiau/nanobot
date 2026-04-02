@@ -735,3 +735,20 @@
   - `.venv/bin/pytest tests/channels/test_telegram_channel.py -k "forward_command_does_not_inject_reply_context or on_help_includes_restart_command or bot_commands_include_coding_entry"` -> passed (3 selected tests)
   - `.venv/bin/python -m compileall nanobot/channels/telegram.py tests/channels/test_telegram_channel.py` -> passed
   - Restarted the live gateway process and confirmed `Telegram bot commands registered`
+
+## Harness reboot - 2026-04-02 (coding-task lifecycle stabilization)
+- Task pivot:
+  - Superseded the prior completed `/coding help` harness with a new lifecycle-stabilization task focused on Telegram/tmux coding-task state convergence, worker-exit triage, and related CLI/gateway regressions
+- Existing work detected before re-planning:
+  - Real coding tasks `681ee161` and `1be6a750` under `~/.nanobot/workspace/automation/coding/tasks.json` both kept appending meaningful `progress_updated` events while their persisted task status stayed `starting`
+  - When those tmux sessions disappeared, the steady-state monitor marked both tasks `failed` even though their repo notes and run logs showed substantial implementation and verification progress
+  - Focused tests already exposed related drift: `tests/coding_tasks/test_recovery.py` expected live recoverable tasks to stay active, `tests/coding_tasks/test_reporting.py` still expected richer branch/commit/follow-up fields, and several `tests/cli/test_commands.py` cases had stale gateway/message-bus launch doubles
+- Baseline validation before edits:
+  - `git status --short` -> only untracked `.codex/` before this reboot
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0, but top-level pytest still stops on `tests/channels/test_matrix_channel.py` because optional dependency `nio` is not installed
+  - `.venv/bin/pytest tests/coding_tasks -q` -> failed in recovery and reporting assertions before edits
+  - `.venv/bin/pytest tests/agent/test_coding_task_routing.py tests/channels/test_telegram_channel.py tests/cli/test_commands.py -q` -> failed in gateway/serve/coding-task CLI assertions before edits
+- Key decisions:
+  - Keep the public task status enum unchanged; reuse `waiting_user` with metadata discriminator `worker_exit_review` for “worker exited, result needs review”
+  - Make exit-review tasks visible and resumable, but do not let them keep blocking new coding-task starts as if a worker were still alive
+  - Keep the unrelated Matrix optional dependency failure out of scope for this harness; validation will target coding-task, Telegram routing, CLI, and workspace-scoped tmux/runtime flows only
