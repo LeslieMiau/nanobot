@@ -1,0 +1,18 @@
+## Harness initialized - 2026-04-02 (AI digest daily Telegram layout refresh)
+- Project type: Python CLI / gateway application with external workspace-driven digest workflows (`pyproject.toml`, `nanobot gateway`, pytest)
+- Features planned: 10
+- init.sh generated: skipped (already exists)
+- .gitignore updated: already contained harness entries
+- Existing work detected:
+  - The prior coding-task lifecycle harness is no longer active at the repo root; `PLAN.json` and `PROGRESS.md` were absent before this initialization.
+  - The AI digest source narrowing work is already complete in the live workspace config: `Sam Altman`, `OpenAI News RSS`, and the extra watchlist layer have already been removed from the active daily source policy.
+  - The current daily digest still behaves too much like a conclusion card: recent contract text hard-caps each quadrant to one item, labels the final action block as `Today action`, and keeps the daily Telegram output framed as a strict conclusion-first summary rather than a clearly titled `AI 日报`.
+- Baseline validation before edits:
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0 with the known repo-wide pytest warning still present in `/tmp/nanobot-harness-pytest.log`
+  - `/tmp/nanobot-harness-pytest.log` still shows the unrelated optional Matrix dependency gap (`tests/channels/test_matrix_channel.py` cannot import `nio`)
+  - `.venv/bin/pytest tests/coding_tasks -q` -> passed (81 tests)
+  - `.venv/bin/pytest tests/agent/test_coding_task_routing.py tests/channels/test_telegram_channel.py tests/cli/test_commands.py -q` -> passed (126 tests)
+- Key decisions:
+  - Scope this harness only to the AI digest **daily** Telegram presentation; weekly digest wording, source whitelist policy, archive files, cache behavior, and Telegram renderer internals stay out of scope.
+  - Adapt the daily output to the existing Telegram Markdown-to-HTML renderer rather than changing renderer code.
+  - Use a dynamic soft cap for quadrant items and for `今日结论` expansion so the daily report stays concise without hiding clearly co-equal high-signal items.
