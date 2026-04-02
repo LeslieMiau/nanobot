@@ -8,7 +8,7 @@
       "Open PROGRESS.md and verify it records that source narrowing is already complete and that this task only changes the daily Telegram digest presentation.",
       "Confirm the baseline explicitly keeps weekly digest formatting, archive-cache behavior, Telegram renderer internals, and source-whitelist policy out of scope."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 2,
@@ -19,7 +19,7 @@
       "Verify the title uses Telegram-safe markdown that renders cleanly through the existing Markdown-to-HTML conversion path.",
       "Confirm the old conclusion-card style without a report title is no longer the default daily output."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,
@@ -30,7 +30,7 @@
       "Verify there is no extra opening paragraph, emoji banner, or explanatory preface before the report body begins.",
       "Confirm the reporting window still uses absolute timestamps with timezone."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,
@@ -41,7 +41,7 @@
       "Verify each section renders with bold headings, short bullets, and inline source links instead of long prose or plain text walls.",
       "Confirm process-only sections such as `本轮未纳入` and `今日可忽略` do not appear in the Telegram daily digest."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,
@@ -52,7 +52,7 @@
       "Generate or replay a day with multiple same-level top conclusions and verify `今日结论` can expand to two short bullets but not beyond that.",
       "Confirm `今日结论` never regresses to three-or-more bullets or a long editorial intro."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,
@@ -63,7 +63,7 @@
       "Replay a digest day with two clearly co-equal items in the same quadrant and verify that quadrant expands to two items.",
       "Verify no quadrant exceeds three items and that empty quadrants say `今天无高信号项` rather than padding with noise."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,
@@ -74,7 +74,7 @@
       "Verify the action line feels like a report takeaway or next read, not a multi-step task checklist.",
       "Confirm the old English `Today action` label no longer appears in the daily Telegram output."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 8,
@@ -85,7 +85,7 @@
       "Verify the digest does not rely on `#` heading syntax, tables, nested lists, or long quote blocks that collapse poorly in the current renderer.",
       "Confirm inline links and short bullets render correctly through the existing Telegram HTML send path."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 9,
@@ -96,7 +96,7 @@
       "Verify both sources describe the same dynamic soft-cap rule for quadrant items and the same default-versus-expanded `今日结论` behavior.",
       "Confirm neither the skill nor the daily cron prompt still says the Telegram daily digest is a strict conclusion card or that each quadrant is hard-capped at one item."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 10,
@@ -107,6 +107,6 @@
       "Verify the replay keeps important same-quadrant items when they are truly co-equal instead of forcing them out under a hard one-item cap.",
       "Confirm the full archive markdown and cache-first reread behavior remain unchanged after the daily Telegram format refresh."
     ],
-    "passes": false
+    "passes": true
   }
 ]

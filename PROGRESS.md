@@ -16,3 +16,20 @@
   - Scope this harness only to the AI digest **daily** Telegram presentation; weekly digest wording, source whitelist policy, archive files, cache behavior, and Telegram renderer internals stay out of scope.
   - Adapt the daily output to the existing Telegram Markdown-to-HTML renderer rather than changing renderer code.
   - Use a dynamic soft cap for quadrant items and for `今日结论` expansion so the daily report stays concise without hiding clearly co-equal high-signal items.
+
+## Session update - 2026-04-02 (AI digest daily Telegram layout refresh)
+- Completed features:
+  - Added a real daily-report Telegram contract to the live ai-news-digest skill so the daily push now starts with `AI 日报｜日期`, keeps the reporting window under the title, and treats the body as a four-quadrant daily report instead of a strict conclusion card.
+  - Replaced the hard one-item-per-quadrant rule with a dynamic soft cap: default one item, allow two for clearly co-equal same-quadrant signals, and allow at most three on rare breakout days.
+  - Tightened `今日结论` to one sentence by default while still allowing at most two short bullets when there are genuinely multiple top-level takeaways.
+  - Renamed the closing action block to `今日动作`, kept it to one short line, and aligned the daily cron prompt with the same title, section order, density, and renderer-aware markdown guidance.
+  - Kept weekly digest wording, source-whitelist policy, archive files, cache-first reread behavior, and Telegram renderer code out of scope as planned.
+- Verification:
+  - `jq empty /Users/miau/.nanobot/cron/jobs.json` -> passed
+  - `rg -n "Sam Altman|openai.com/news/rss.xml|OpenAI News RSS|watchlist|Daily active reading|Event-triggered watchlist" -S /Users/miau/.nanobot/workspace/skills/ai-news-digest/SKILL.md /Users/miau/.nanobot/workspace/skills/ai-news-digest/references/sources.md /Users/miau/.nanobot/cron/jobs.json` -> passed earlier in-session after source narrowing; no active-file regressions were reintroduced
+  - `rg -n "AI 日报｜|今日动作|single sentence by default|最多 2 条短 bullets|dynamic soft cap|default 1 item|expand to 2|at most 3" -S /Users/miau/.nanobot/workspace/skills/ai-news-digest/SKILL.md /Users/miau/.nanobot/cron/jobs.json` -> passed
+  - `.venv/bin/python` sample render through `nanobot.channels.telegram._markdown_to_telegram_html(...)` -> passed; bold report title, bold section headers, numbered one-line items, and inline links render cleanly under the current Telegram HTML path
+  - `.venv/bin/python` archive replay count check across `ai-digest-2026-03-30.md` and `ai-digest-2026-04-01.md` -> passed; confirmed that a normal day has one item per quadrant while `2026-03-30` legitimately has two `值得深挖` items, matching the new dynamic-cap rule
+- Important notes:
+  - The functional changes live in `~/.nanobot/workspace/skills/ai-news-digest/SKILL.md` and `~/.nanobot/cron/jobs.json`, which are runtime workspace files outside the nanobot repo worktree.
+  - The known repo-wide Matrix optional dependency gap (`nio` missing during `global-init` pytest collection) remains unrelated to this completed daily digest task.
