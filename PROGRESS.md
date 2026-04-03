@@ -31,3 +31,17 @@
   - 在现有 `nanobot` tmux pane 中原地重启 gateway。
   - 用清空 `HTTP_PROXY/HTTPS_PROXY` 的启动命令验证显式代理生效。
   - 观察 tmux 输出与实际 Telegram 发消息链路，完成 feature #52。
+
+## Checkpoint — 2026-04-03 08:37 Asia/Shanghai
+- 已完成 feature #52 的现网收尾验证：
+  - 复用现有 `nanobot:2.0` pane 原地停机并重启 gateway；重启后活跃进程为 `PID 94631`，父进程为该 pane 的 `zsh (PID 66322)`。
+  - `ps eww -p 94631` 显示新进程环境仅保留最小必要变量与 `NO_PROXY`，已确认不存在 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`。
+  - tmux 输出确认这次 `env -i ... ./.venv/bin/nanobot gateway` 重启后重新连接 Telegram：`Telegram bot @kimmydoomyBot connected`，并继续注册命令。
+  - 停机前的同一 pane 已直接观察到真实 Telegram 普通消息链路：`08:34:50` 收到来自 `6460709699` 的“活了吗”，`08:34:54` 回复“活着。”。
+  - 另外在清空 `HTTP_PROXY/HTTPS_PROXY` 的独立 Python 进程中，用 `TelegramChannel` + `~/.nanobot/config.json` 再次真实发送 Telegram 提示消息成功；运行时状态显示 `effective_proxy=explicit:http://127.0.0.1:1082`、`last_outbound_at=2026-04-03T08:36:58+08:00`、发送错误计数为 0。
+- 现网验证说明：
+  - 本次终端窗口内没有直接抓到用户侧 `/status` live 回包，但 `/status` 展示路径已有 focused tests 覆盖，且当前运行中的 gateway 已在“无环境代理变量”前提下重新接入 Telegram。
+  - `bash ~/.codex/scripts/global-init.sh` 触发的全量 pytest 仍只因可选 Matrix 依赖 `nio` 缺失而失败，Telegram 修复相关 focused tests 仍为 `91 passed`。
+
+## Harness complete — 2026-04-03 08:37 Asia/Shanghai
+- 52/52 features 已完成，进入 harness 清理流程。

@@ -517,6 +517,6 @@
       "确认机器上仅有一个 nanobot gateway 进程并在现有 nanobot tmux pane 原地重启",
       "在清空 HTTP_PROXY/HTTPS_PROXY 的 shell 中启动后，Telegram /status 与普通消息都能正常回复"
     ],
-    "passes": false
+    "passes": true
   }
 ]
