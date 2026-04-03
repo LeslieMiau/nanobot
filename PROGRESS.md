@@ -13,3 +13,21 @@
   - Telegram 修复采用“显式固定代理 + 自动重连 + 状态可见”，不扩大到全局 web/provider 代理策略。
   - 本轮会复用现有 `nanobot` tmux session 做 E2E 重启验证，不新建 detached gateway。
   - `.codex/config.toml` 当前为未跟踪文件，视为用户环境文件，不参与本轮修改。
+
+## Checkpoint — 2026-04-03 08:27 Asia/Shanghai
+- 已完成代码实现：
+  - `nanobot/channels/telegram.py` 新增 `use_env_proxy`、显式代理解析、运行时状态、polling error callback、watchdog 恢复与幂等 stop/restart 生命周期。
+  - `nanobot/channels/base.py` 增加 `get_runtime_status()` 与 `_handle_message()` 成功返回值。
+  - `nanobot/channels/manager.py` 汇总每个通道的 runtime 状态。
+  - `nanobot/agent/loop.py` 新增可选 `channel_status_provider`。
+  - `nanobot/command/builtin.py` 与 `nanobot/utils/helpers.py` 让 `/status` 渲染 Telegram 健康摘要。
+  - `nanobot/cli/commands.py` 为 gateway 注入 live channel status provider，并扩展 `nanobot channels status` 输出。
+- 已完成验证：
+  - `./.venv/bin/pytest tests/channels/test_telegram_channel.py tests/cli/test_restart_command.py tests/channels/test_channel_plugins.py` 通过，91 passed。
+  - `./.venv/bin/python -m py_compile ...` 通过。
+  - `./.venv/bin/nanobot channels status` 已显示 Telegram `proxy=explicit:http://127.0.0.1:1082` 与健康摘要。
+  - `~/.nanobot/config.json` 已切换为 `telegram.proxy=http://127.0.0.1:1082`、`useEnvProxy=false`。
+- 待做：
+  - 在现有 `nanobot` tmux pane 中原地重启 gateway。
+  - 用清空 `HTTP_PROXY/HTTPS_PROXY` 的启动命令验证显式代理生效。
+  - 观察 tmux 输出与实际 Telegram 发消息链路，完成 feature #52。

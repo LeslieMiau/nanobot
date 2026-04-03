@@ -202,6 +202,7 @@ class AgentLoop:
         coding_task_runtime: CodingTaskRuntime | None = None,
         coding_task_manager: CodexWorkerManager | None = None,
         hooks: list[AgentHook] | None = None,
+        channel_status_provider: Callable[[], dict[str, Any]] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebSearchConfig
 
@@ -224,6 +225,7 @@ class AgentLoop:
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
+        self.channel_status_provider = channel_status_provider
         self.session_usage = SessionUsage()
 
         self.context = ContextBuilder(workspace, timezone=timezone)

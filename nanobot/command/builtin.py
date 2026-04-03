@@ -46,12 +46,18 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
     loop = ctx.loop
     session = ctx.session or loop.sessions.get_or_create(ctx.key)
     ctx_est = 0
+    channel_status = None
     try:
         ctx_est, _ = loop.memory_consolidator.estimate_session_prompt_tokens(session)
     except Exception:
         pass
     if ctx_est <= 0:
         ctx_est = loop._last_usage.get("prompt_tokens", 0)
+    if loop.channel_status_provider is not None:
+        try:
+            channel_status = loop.channel_status_provider()
+        except Exception:
+            channel_status = None
     su = loop.session_usage
     return OutboundMessage(
         channel=ctx.msg.channel,
@@ -66,6 +72,7 @@ async def cmd_status(ctx: CommandContext) -> OutboundMessage:
             cumulative_completion_tokens=su.total_completion_tokens,
             cumulative_requests=su.total_requests,
             estimated_cost_usd=su.estimated_cost_usd(),
+            channel_status=channel_status,
         ),
         metadata={"render_as": "text"},
     )

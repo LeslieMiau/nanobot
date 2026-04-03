@@ -249,6 +249,7 @@ def build_status_content(
     cumulative_completion_tokens: int = 0,
     cumulative_requests: int = 0,
     estimated_cost_usd: float = 0.0,
+    channel_status: dict[str, Any] | None = None,
 ) -> str:
     """Build a human-readable runtime status snapshot."""
     uptime_s = int(time.time() - start_time)
@@ -271,7 +272,7 @@ def build_status_content(
     lines = [
         f"\U0001f408 nanobot v{version}",
         f"\U0001f9e0 Model: {model}",
-        f"\U0001f4ca Last: {last_in} in / {last_out} out",
+        f"\U0001f4ca Tokens: {last_in} in / {last_out} out",
         f"\U0001f4da Context: {ctx_used_str}/{ctx_total_str} ({ctx_pct}%)",
         f"\U0001f4ac Session: {session_msg_count} messages",
         f"\u23f1 Uptime: {uptime}",
@@ -280,7 +281,56 @@ def build_status_content(
     if cumulative_requests > 0:
         lines.append(f"\U0001f4b0 Total: {cum_str} tokens / {cumulative_requests} requests (~${estimated_cost_usd:.3f})")
 
+    lines.extend(build_channel_status_lines(channel_status))
+
     return "\n".join(lines)
+
+
+def _short_status_time(value: Any) -> str:
+    if not value:
+        return "n/a"
+    if not isinstance(value, str):
+        return str(value)
+    try:
+        dt = datetime.fromisoformat(value)
+        return dt.strftime("%m-%d %H:%M:%S")
+    except ValueError:
+        return value
+
+
+def build_channel_status_lines(channel_status: dict[str, Any] | None) -> list[str]:
+    """Build compact per-channel runtime status lines for human-readable output."""
+    if not channel_status:
+        return []
+
+    lines: list[str] = []
+    telegram = channel_status.get("telegram")
+    if not telegram:
+        return lines
+
+    runtime = telegram.get("runtime") or {}
+    if not runtime:
+        return lines
+
+    state = "running" if runtime.get("running") else "stopped"
+    proxy = runtime.get("effective_proxy") or "unknown"
+    reconnects = runtime.get("reconnect_count", 0)
+    poll_errors = runtime.get("consecutive_poll_errors", 0)
+    send_errors = runtime.get("consecutive_send_errors", 0)
+    last_error = runtime.get("last_error_summary") or "none"
+
+    lines.extend(
+        [
+            f"\U0001f4e1 Telegram: {state} / proxy={proxy}",
+            (
+                f"\U0001f550 TG I/O: in={_short_status_time(runtime.get('last_inbound_at'))} "
+                f"/ out={_short_status_time(runtime.get('last_outbound_at'))} "
+                f"/ reconnects={reconnects}"
+            ),
+            f"\u26a0\ufe0f TG Errors: poll={poll_errors} / send={send_errors} / last={last_error}",
+        ]
+    )
+    return lines
 
 
 def sync_workspace_templates(workspace: Path, silent: bool = False) -> list[str]:

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from typer.testing import CliRunner
 
 from nanobot.bus.events import InboundMessage, OutboundMessage
 from nanobot.providers.base import LLMResponse
@@ -177,6 +179,39 @@ class TestRestartCommand:
         assert "Context: 1k/64k (1%)" in response.content
 
     @pytest.mark.asyncio
+    async def test_status_includes_channel_health_when_provider_available(self):
+        loop, _bus = _make_loop()
+        session = MagicMock()
+        session.get_history.return_value = [{"role": "user"}]
+        loop.sessions.get_or_create.return_value = session
+        loop.channel_status_provider = lambda: {
+            "telegram": {
+                "enabled": True,
+                "running": True,
+                "runtime": {
+                    "effective_proxy": "explicit:http://127.0.0.1:1082",
+                    "reconnect_count": 2,
+                    "last_inbound_at": "2026-04-03T08:10:00+08:00",
+                    "last_outbound_at": "2026-04-03T08:10:03+08:00",
+                    "last_poll_error_at": None,
+                    "last_send_error_at": None,
+                    "consecutive_poll_errors": 0,
+                    "consecutive_send_errors": 0,
+                    "last_error_summary": None,
+                    "running": True,
+                },
+            }
+        }
+
+        response = await loop._process_message(
+            InboundMessage(channel="telegram", sender_id="u1", chat_id="c1", content="/status")
+        )
+
+        assert response is not None
+        assert "Telegram: running" in response.content
+        assert "proxy=explicit:http://127.0.0.1:1082" in response.content
+
+    @pytest.mark.asyncio
     async def test_process_direct_preserves_render_metadata(self):
         loop, _bus = _make_loop()
         session = MagicMock()
@@ -188,3 +223,60 @@ class TestRestartCommand:
 
         assert response is not None
         assert response.metadata == {"render_as": "text"}
+
+
+def test_channels_status_shows_runtime_details(monkeypatch):
+    from nanobot.cli.commands import app
+    from nanobot.config.schema import Config
+
+    runner = CliRunner()
+    config = Config.model_validate(
+        {
+            "channels": {
+                "telegram": {
+                    "enabled": True,
+                    "token": "123:abc",
+                    "allowFrom": ["*"],
+                    "proxy": "http://127.0.0.1:1082",
+                    "useEnvProxy": False,
+                }
+            }
+        }
+    )
+
+    class _FakeManager:
+        def __init__(self, _config, _bus) -> None:
+            pass
+
+        def get_status(self):
+            return {
+                "telegram": {
+                    "enabled": True,
+                    "running": True,
+                    "runtime": {
+                        "effective_proxy": "explicit:http://127.0.0.1:1082",
+                        "reconnect_count": 1,
+                        "last_inbound_at": "2026-04-03T08:10:00+08:00",
+                        "last_outbound_at": "2026-04-03T08:10:02+08:00",
+                        "last_poll_error_at": None,
+                        "last_send_error_at": None,
+                        "consecutive_poll_errors": 0,
+                        "consecutive_send_errors": 0,
+                        "last_error_summary": None,
+                        "running": True,
+                    },
+                }
+            }
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: config)
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_all",
+        lambda: {"telegram": SimpleNamespace(display_name="Telegram")},
+    )
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeManager)
+
+    result = runner.invoke(app, ["channels", "status"])
+
+    assert result.exit_code == 0
+    assert "Telegram" in result.stdout
+    assert "explicit:http://127.0.0.1:1082" in result.stdout

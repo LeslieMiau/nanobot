@@ -7,7 +7,7 @@
       "确认仓库根目录存在 PLAN.json 与 PROGRESS.md",
       "确认 PLAN.json 仅含本轮 Telegram 稳定性修复相关 feature"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 2,
@@ -17,7 +17,7 @@
       "运行 bash ~/.codex/scripts/global-init.sh 并记录结果",
       "确认 Matrix 可选依赖缺失被记录为环境阻塞而非 Telegram 回归"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,
@@ -27,7 +27,7 @@
       "确认 tmux 或日志中能看到 Telegram polling 的网络错误",
       "确认基线记录包含代理环境与直连失败事实"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,
@@ -37,7 +37,7 @@
       "加载配置时 telegram 配置对象包含 useEnvProxy 字段",
       "未显式配置时 useEnvProxy 默认值为 true"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,
@@ -47,7 +47,7 @@
       "调用 TelegramChannel.default_config() 时返回 useEnvProxy",
       "默认配置对现有实例保持兼容"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,
@@ -57,7 +57,7 @@
       "旧配置文件仍能正常加载 Telegram 通道",
       "新旧键名都能解析为相同的运行时行为"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,
@@ -67,7 +67,7 @@
       "配置 telegram.proxy 时请求客户端始终使用该地址",
       "显式 telegram.proxy 优先级高于环境变量"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 8,
@@ -77,7 +77,7 @@
       "显式 telegram.proxy 场景下 HTTPXRequest 获得 trust_env=false",
       "同场景下切换 shell 代理变量不影响 Telegram 有效代理地址"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 9,
@@ -87,7 +87,7 @@
       "useEnvProxy=false 且未配置 telegram.proxy 时 HTTPXRequest 获得 trust_env=false",
       "该场景下 Telegram 有效代理状态显示为 direct"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 10,
@@ -97,7 +97,7 @@
       "useEnvProxy=true 且未配置 telegram.proxy 时 HTTPXRequest 不关闭 trust_env",
       "该场景下 Telegram 有效代理状态显示为 env"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 11,
@@ -107,7 +107,7 @@
       "启动 Telegram 通道后能读到 effective_proxy",
       "effective_proxy 能区分 explicit、env 与 direct 三种来源"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 12,
@@ -117,7 +117,7 @@
       "Telegram 通道初始化后存在统一的运行时状态容器",
       "状态容器包含本轮计划要求的全部固定字段"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 13,
@@ -127,7 +127,7 @@
       "Telegram 收到并成功入队消息后刷新 last_inbound_at",
       "未收到新消息时 last_inbound_at 不会被无关路径覆盖"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 14,
@@ -137,7 +137,7 @@
       "Telegram 成功发送普通消息后刷新 last_outbound_at",
       "Telegram 成功发送流式最终输出后也会刷新 last_outbound_at"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 15,
@@ -147,7 +147,7 @@
       "Polling error callback 触发时刷新 last_poll_error_at",
       "非 polling 错误不会错误地写入 last_poll_error_at"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 16,
@@ -157,7 +157,7 @@
       "发送普通消息失败时刷新 last_send_error_at",
       "发送流式消息失败时同样刷新 last_send_error_at"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 17,
@@ -167,7 +167,7 @@
       "连续 polling 错误会递增 consecutive_poll_errors",
       "健康探测成功后 consecutive_poll_errors 会清零"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 18,
@@ -177,7 +177,7 @@
       "连续发送错误会递增 consecutive_send_errors",
       "后续一次成功发送会清零 consecutive_send_errors"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 19,
@@ -187,7 +187,7 @@
       "最近一次 Telegram poll 或 send 错误会更新 last_error_summary",
       "last_error_summary 可用于 /status 或 channel status 展示"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 20,
@@ -197,7 +197,7 @@
       "每次 watchdog 触发的 Telegram 重建都会增加 reconnect_count",
       "普通成功轮询不会误增 reconnect_count"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 21,
@@ -207,7 +207,7 @@
       "Telegram 运行时状态中的 running 与通道生命周期一致",
       "停止通道后运行时状态中的 running 会变为 false"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 22,
@@ -217,7 +217,7 @@
       "外部调用 get_runtime_status() 可获得稳定字典结构",
       "未启动 Telegram 时 get_runtime_status() 仍返回可展示状态"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 23,
@@ -227,7 +227,7 @@
       "Telegram 通道可单独构建 Application 和 HTTPXRequest",
       "构建逻辑只在一个入口维护代理与请求参数"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 24,
@@ -237,7 +237,7 @@
       "Telegram 启动 Application 与 polling 的代码路径集中到独立函数",
       "重复重建时不会复制 handler 或命令注册逻辑"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 25,
@@ -247,7 +247,7 @@
       "Telegram 停止 updater、application 与后台任务都走统一出口",
       "正常停止和异常恢复都复用同一清理逻辑"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 26,
@@ -257,7 +257,7 @@
       "重复 stop 不会抛出 This Updater is not running",
       "watchdog 重建前后的 stop 路径都能安全复用"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 27,
@@ -267,7 +267,7 @@
       "重复 shutdown 不会导致 Telegram 通道卡死或抛异常",
       "失败后的清理仍能完整释放 _app 引用"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 28,
@@ -277,7 +277,7 @@
       "Telegram polling error 会进入本仓库自定义 callback",
       "callback 本身不要求 async 也不会阻塞 PTB polling"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 29,
@@ -287,7 +287,7 @@
       "polling error callback 会刷新时间、摘要与连续错误计数",
       "发生异常时日志仍保留 Telegram polling 出错上下文"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 30,
@@ -297,7 +297,7 @@
       "send 和 send_delta 失败路径都会刷新发送错误状态",
       "同类错误摘要格式在两个路径上保持一致"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 31,
@@ -307,7 +307,7 @@
       "一次成功 send 会清零 consecutive_send_errors",
       "一次成功 send_delta 最终完成也会清零 consecutive_send_errors"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 32,
@@ -317,7 +317,7 @@
       "Telegram 入站消息通过 ACL 与 routing 后刷新 last_inbound_at",
       "被忽略的群消息不会伪造入站活跃时间"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 33,
@@ -327,7 +327,7 @@
       "流式首包发送成功后能更新 outbound 活跃时间",
       "流式结束成功编辑后仍保持最新 outbound 活跃时间"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 34,
@@ -337,7 +337,7 @@
       "Telegram 通道启动后 watchdog 会随通道生命周期启动",
       "通道停止后 watchdog 会被取消并清理引用"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 35,
@@ -347,7 +347,7 @@
       "连续 polling 错误达到阈值后 watchdog 会进入探测流程",
       "未达到阈值时 watchdog 不会误触发重建"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 36,
@@ -357,7 +357,7 @@
       "连续发送错误达到阈值后 watchdog 会进入探测流程",
       "偶发单次发送失败不会立即触发重建"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 37,
@@ -367,7 +367,7 @@
       "阈值触发后 watchdog 会先执行 get_me 探测",
       "探测成功时会清理错误 streak 而不是直接重建"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 38,
@@ -377,7 +377,7 @@
       "连续恢复失败时 backoff 依次采用 5s、15s、30s",
       "恢复成功后 backoff 会回到初始节奏"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 39,
@@ -387,7 +387,7 @@
       "watchdog 触发恢复后 Telegram 通道会重新构建请求客户端与 updater",
       "重建后 Telegram 仍能继续接收与发送消息"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 40,
@@ -397,7 +397,7 @@
       "恢复后旧 watchdog 或旧 app 不会残留重复任务",
       "恢复后运行时状态仍只对应一个活跃 Telegram 通道实例"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 41,
@@ -407,7 +407,7 @@
       "ChannelManager.get_status() 能返回 Telegram 运行时状态摘要",
       "没有运行时状态接口的通道仍保持兼容返回"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 42,
@@ -417,7 +417,7 @@
       "ChannelManager 启停通道的现有逻辑不回归",
       "新增运行时信息不会破坏现有 channel 插件测试"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 43,
@@ -427,7 +427,7 @@
       "gateway 创建的 AgentLoop 能接收 channel_status_provider",
       "未提供 provider 的 CLI AgentLoop 仍可正常创建和运行"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 44,
@@ -437,7 +437,7 @@
       "Telegram /status 响应包含模型和上下文信息外的 Telegram 健康摘要",
       "没有 channel_status_provider 时 /status 输出保持原有兼容格式"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 45,
@@ -447,7 +447,7 @@
       "状态文本格式稳定且紧凑，包含代理来源与最近错误摘要",
       "缺失字段时状态文本仍能优雅降级"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 46,
@@ -457,7 +457,7 @@
       "nanobot channels status 会显示 Telegram enabled 状态之外的代理与健康摘要",
       "其他通道仍至少显示原有 enabled 信息"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 47,
@@ -467,7 +467,7 @@
       "显式 proxy、继承环境代理、强制直连三种模式均有测试覆盖",
       "focused tests 能断言 trust_env 与 proxy 传参符合预期"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 48,
@@ -477,7 +477,7 @@
       "测试可验证 inbound、outbound、poll error、send error 状态更新",
       "测试可验证成功路径会清理相应错误 streak"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 49,
@@ -487,7 +487,7 @@
       "测试可验证错误阈值达到后 watchdog 会触发探测与重建",
       "测试可验证探测成功时只清理 streak 而不重建"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 50,
@@ -497,7 +497,7 @@
       "重复调用 stop 不会抛出异常",
       "watchdog 存在时重复 stop 仍能完整清理"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 51,
@@ -507,7 +507,7 @@
       "测试可验证 /status 包含 Telegram 健康摘要",
       "测试可验证 channels status 输出包含代理来源或连接状态"
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 52,

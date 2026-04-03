@@ -37,7 +37,7 @@ from nanobot import __logo__, __version__
 from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
-from nanobot.utils.helpers import sync_workspace_templates
+from nanobot.utils.helpers import build_channel_status_lines, sync_workspace_templates
 
 app = typer.Typer(
     name="nanobot",
@@ -664,6 +664,7 @@ def gateway(
         bus = MessageBus()
         provider = _make_provider(config)
         session_manager = SessionManager(config.workspace_path)
+        channels = ChannelManager(config, bus)
         coding_task_runtime = _load_coding_task_runtime(config, send_callback=bus.publish_outbound)
         coding_task_store = coding_task_runtime.store
         codex_workers = coding_task_runtime.manager
@@ -700,6 +701,7 @@ def gateway(
             timezone=config.agents.defaults.timezone,
             coding_task_runtime=coding_task_runtime,
             coding_task_manager=codex_workers,
+            channel_status_provider=channels.get_status,
         )
 
         # Set cron callback (needs agent)
@@ -749,9 +751,6 @@ def gateway(
                     ))
             return response
         cron.on_job = on_cron_job
-
-        # Create channel manager
-        channels = ChannelManager(config, bus)
 
         def _pick_heartbeat_target() -> tuple[str, str]:
             """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -1302,14 +1301,20 @@ app.add_typer(channels_app, name="channels")
 @channels_app.command("status")
 def channels_status():
     """Show channel status."""
+    from nanobot.bus.queue import MessageBus
+    from nanobot.channels.manager import ChannelManager
     from nanobot.channels.registry import discover_all
     from nanobot.config.loader import load_config
 
     config = load_config()
+    manager = ChannelManager(config, MessageBus())
+    status_map = manager.get_status()
 
     table = Table(title="Channel Status")
     table.add_column("Channel", style="cyan")
     table.add_column("Enabled", style="green")
+    table.add_column("Running", style="yellow")
+    table.add_column("Details", style="white")
 
     for name, cls in sorted(discover_all().items()):
         section = getattr(config.channels, name, None)
@@ -1319,9 +1324,13 @@ def channels_status():
             enabled = section.get("enabled", False)
         else:
             enabled = getattr(section, "enabled", False)
+        item = status_map.get(name, {})
+        runtime_lines = build_channel_status_lines({name: item}) if item else []
         table.add_row(
             cls.display_name,
             "[green]\u2713[/green]" if enabled else "[dim]\u2717[/dim]",
+            "[green]\u2713[/green]" if item.get("running") else "[dim]\u2717[/dim]",
+            "\n".join(runtime_lines) if runtime_lines else "",
         )
 
     console.print(table)

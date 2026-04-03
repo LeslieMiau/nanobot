@@ -128,7 +128,7 @@ class BaseChannel(ABC):
         media: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
         session_key: str | None = None,
-    ) -> None:
+    ) -> bool:
         """
         Handle an incoming message from the chat platform.
 
@@ -148,7 +148,7 @@ class BaseChannel(ABC):
                 "Add them to allowFrom list in config to grant access.",
                 sender_id, self.name,
             )
-            return
+            return False
 
         meta = metadata or {}
         if self.supports_streaming:
@@ -165,6 +165,7 @@ class BaseChannel(ABC):
         )
 
         await self.bus.publish_inbound(msg)
+        return True
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -175,3 +176,7 @@ class BaseChannel(ABC):
     def is_running(self) -> bool:
         """Check if the channel is running."""
         return self._running
+
+    def get_runtime_status(self) -> dict[str, Any]:
+        """Return best-effort channel runtime details for status displays."""
+        return {}

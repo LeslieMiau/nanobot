@@ -626,6 +626,11 @@ class _StartableChannel(BaseChannel):
         pass
 
 
+class _RuntimeChannel(_StartableChannel):
+    def get_runtime_status(self) -> dict[str, object]:
+        return {"effective_proxy": "explicit:http://127.0.0.1:1082", "running": self.is_running}
+
+
 @pytest.mark.asyncio
 async def test_validate_allow_from_raises_on_empty_list():
     """_validate_allow_from should raise SystemExit when allow_from is empty list."""
@@ -699,6 +704,24 @@ async def test_get_status_returns_running_state():
 
     assert status["startable"]["enabled"] is True
     assert status["startable"]["running"] is False  # Not started yet
+
+
+@pytest.mark.asyncio
+async def test_get_status_includes_runtime_details_when_available():
+    fake_config = SimpleNamespace(
+        channels=ChannelsConfig(),
+        providers=SimpleNamespace(groq=SimpleNamespace(api_key="")),
+    )
+
+    mgr = ChannelManager.__new__(ChannelManager)
+    mgr.config = fake_config
+    mgr.bus = MessageBus()
+    mgr.channels = {"telegram": _RuntimeChannel(fake_config, mgr.bus)}
+    mgr._dispatch_task = None
+
+    status = mgr.get_status()
+
+    assert status["telegram"]["runtime"]["effective_proxy"] == "explicit:http://127.0.0.1:1082"
 
 
 @pytest.mark.asyncio
@@ -877,4 +900,3 @@ async def test_start_all_creates_dispatch_task():
 
     # Dispatch task should have been created
     assert mgr._dispatch_task is not None
-

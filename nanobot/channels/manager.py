@@ -250,13 +250,17 @@ class ChannelManager:
 
     def get_status(self) -> dict[str, Any]:
         """Get status of all channels."""
-        return {
-            name: {
+        status: dict[str, Any] = {}
+        for name, channel in self.channels.items():
+            item = {
                 "enabled": True,
-                "running": channel.is_running
+                "running": channel.is_running,
             }
-            for name, channel in self.channels.items()
-        }
+            runtime = channel.get_runtime_status()
+            if runtime:
+                item["runtime"] = runtime
+            status[name] = item
+        return status
 
     @property
     def enabled_channels(self) -> list[str]:

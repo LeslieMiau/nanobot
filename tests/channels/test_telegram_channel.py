@@ -32,9 +32,14 @@ class _FakeHTTPXRequest:
 class _FakeUpdater:
     def __init__(self, on_start_polling) -> None:
         self._on_start_polling = on_start_polling
+        self.running = False
 
     async def start_polling(self, **kwargs) -> None:
+        self.running = True
         self._on_start_polling()
+
+    async def stop(self) -> None:
+        self.running = False
 
 
 class _FakeBot:
@@ -82,6 +87,8 @@ class _FakeApp:
         self.updater = _FakeUpdater(on_start_polling)
         self.handlers = []
         self.error_handlers = []
+        self.running = False
+        self._initialized = False
 
     def add_error_handler(self, handler) -> None:
         self.error_handlers.append(handler)
@@ -90,10 +97,16 @@ class _FakeApp:
         self.handlers.append(handler)
 
     async def initialize(self) -> None:
-        pass
+        self._initialized = True
 
     async def start(self) -> None:
-        pass
+        self.running = True
+
+    async def stop(self) -> None:
+        self.running = False
+
+    async def shutdown(self) -> None:
+        self._initialized = False
 
 
 class _FakeBuilder:
@@ -180,11 +193,14 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     api_req, poll_req = _FakeHTTPXRequest.instances
     assert api_req.kwargs["proxy"] == config.proxy
     assert poll_req.kwargs["proxy"] == config.proxy
+    assert api_req.kwargs["httpx_kwargs"] == {"trust_env": False}
+    assert poll_req.kwargs["httpx_kwargs"] == {"trust_env": False}
     assert api_req.kwargs["connection_pool_size"] == 32
     assert poll_req.kwargs["connection_pool_size"] == 4
     assert builder.request_value is api_req
     assert builder.get_updates_request_value is poll_req
     assert any(cmd.command == "status" for cmd in app.bot.commands)
+    assert channel.get_runtime_status()["effective_proxy"] == f"explicit:{config.proxy}"
 
 
 @pytest.mark.asyncio
@@ -215,6 +231,58 @@ async def test_start_respects_custom_pool_config(monkeypatch) -> None:
     assert api_req.kwargs["connection_pool_size"] == 32
     assert api_req.kwargs["pool_timeout"] == 10.0
     assert poll_req.kwargs["pool_timeout"] == 10.0
+
+
+@pytest.mark.asyncio
+async def test_start_uses_env_proxy_when_enabled(monkeypatch) -> None:
+    _FakeHTTPXRequest.clear()
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], use_env_proxy=True)
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+    app = _FakeApp(lambda: setattr(channel, "_running", False))
+    builder = _FakeBuilder(app)
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1082")
+    monkeypatch.setattr("nanobot.channels.telegram.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.Application",
+        SimpleNamespace(builder=lambda: builder),
+    )
+
+    await channel.start()
+
+    api_req, poll_req = _FakeHTTPXRequest.instances
+    assert api_req.kwargs["proxy"] is None
+    assert poll_req.kwargs["proxy"] is None
+    assert api_req.kwargs["httpx_kwargs"] == {"trust_env": True}
+    assert poll_req.kwargs["httpx_kwargs"] == {"trust_env": True}
+    assert channel.get_runtime_status()["effective_proxy"] == "env:http://127.0.0.1:1082"
+
+
+@pytest.mark.asyncio
+async def test_start_forces_direct_when_env_proxy_disabled(monkeypatch) -> None:
+    _FakeHTTPXRequest.clear()
+    config = TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], use_env_proxy=False)
+    bus = MessageBus()
+    channel = TelegramChannel(config, bus)
+    app = _FakeApp(lambda: setattr(channel, "_running", False))
+    builder = _FakeBuilder(app)
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1082")
+    monkeypatch.setattr("nanobot.channels.telegram.HTTPXRequest", _FakeHTTPXRequest)
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.Application",
+        SimpleNamespace(builder=lambda: builder),
+    )
+
+    await channel.start()
+
+    api_req, poll_req = _FakeHTTPXRequest.instances
+    assert api_req.kwargs["proxy"] is None
+    assert poll_req.kwargs["proxy"] is None
+    assert api_req.kwargs["httpx_kwargs"] == {"trust_env": False}
+    assert poll_req.kwargs["httpx_kwargs"] == {"trust_env": False}
+    assert channel.get_runtime_status()["effective_proxy"] == "direct"
 
 
 @pytest.mark.asyncio
@@ -324,6 +392,134 @@ async def test_on_error_keeps_non_network_exceptions_as_error(monkeypatch) -> No
     await channel._on_error(object(), SimpleNamespace(error=RuntimeError("boom")))
 
     assert recorded == [("error", "Telegram error: boom")]
+
+
+def test_on_polling_error_updates_runtime_status() -> None:
+    from telegram.error import NetworkError
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+
+    channel._on_polling_error(NetworkError("proxy disconnected"))
+
+    runtime = channel.get_runtime_status()
+    assert runtime["consecutive_poll_errors"] == 1
+    assert runtime["last_poll_error_at"] is not None
+    assert "proxy disconnected" in runtime["last_error_summary"]
+
+
+@pytest.mark.asyncio
+async def test_send_updates_runtime_status_on_success() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    await channel.send(OutboundMessage(channel="telegram", chat_id="123", content="hello"))
+
+    runtime = channel.get_runtime_status()
+    assert runtime["last_outbound_at"] is not None
+    assert runtime["consecutive_send_errors"] == 0
+
+
+@pytest.mark.asyncio
+async def test_send_updates_runtime_status_on_failure() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.bot.send_message = AsyncMock(side_effect=RuntimeError("boom"))
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await channel.send(OutboundMessage(channel="telegram", chat_id="123", content="hello"))
+
+    runtime = channel.get_runtime_status()
+    assert runtime["consecutive_send_errors"] == 1
+    assert runtime["last_send_error_at"] is not None
+    assert "boom" in runtime["last_error_summary"]
+
+
+@pytest.mark.asyncio
+async def test_on_message_records_last_inbound_at() -> None:
+    bus = MessageBus()
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        bus,
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._start_typing = lambda _chat_id: None
+
+    await channel._on_message(_make_telegram_update(chat_type="private", text="hello"), None)
+
+    msg = await bus.consume_inbound()
+    assert msg.content == "hello"
+    assert channel.get_runtime_status()["last_inbound_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_watchdog_probe_success_clears_poll_streak(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._running = True
+    channel._runtime_status["consecutive_poll_errors"] = 3
+    probe = AsyncMock(return_value=True)
+    restart = AsyncMock()
+
+    monkeypatch.setattr(channel, "_probe_connectivity", probe)
+    monkeypatch.setattr(channel, "_restart_application", restart)
+
+    await channel._recover_if_needed("poll")
+
+    assert channel.get_runtime_status()["consecutive_poll_errors"] == 0
+    restart.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_watchdog_probe_failure_triggers_restart(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._running = True
+    channel._runtime_status["consecutive_send_errors"] = 3
+    probe = AsyncMock(return_value=False)
+    restart = AsyncMock()
+
+    async def _no_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(channel, "_probe_connectivity", probe)
+    monkeypatch.setattr(channel, "_restart_application", restart)
+    monkeypatch.setattr("nanobot.channels.telegram.asyncio.sleep", _no_sleep)
+
+    await channel._recover_if_needed("send")
+
+    restart.assert_awaited_once_with("send-watchdog")
+
+
+@pytest.mark.asyncio
+async def test_stop_is_idempotent() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    channel._app.running = True
+    channel._app._initialized = True
+    channel._app.updater.running = True
+    channel._watchdog_task = asyncio.create_task(asyncio.sleep(10))
+
+    await channel.stop()
+    await channel.stop()
+
+    assert channel._app is None
+    assert channel.get_runtime_status()["running"] is False
 
 
 @pytest.mark.asyncio
