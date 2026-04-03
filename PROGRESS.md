@@ -1,16 +1,15 @@
 ## Harness initialized — 2026-04-03
-- Project type: Python CLI / gateway
-- Features planned: 17
-- init.sh generated: skipped (already exists)
-- .gitignore updated: skipped (already contains harness entries)
-- Existing work detected:
-  - 已完成 daily digest 的 source 收窄与 Telegram 版式收缩
-  - 当前最新日报 `~/.nanobot/workspace/inbox/ai-digest-2026-04-03.md` 明显把 builder 圈重要性误判成离用户生产力近
-  - 当前 daily cron job id 为 `44aa7473`
-- Baseline verification:
-  - `bash ~/.codex/scripts/global-init.sh` 通过 CLI health，但仍有已知 Matrix 依赖告警，详见 `/tmp/nanobot-harness-pytest.log`
-  - `.venv/bin/pytest tests/coding_tasks -q` 通过（81 passed）
-- Key decisions:
-  - 本轮只改 daily AI digest，不改 weekly
-  - 左下角保留为静默过滤逻辑，不在 Telegram 推送显式展示
-  - 除更新未来规则外，还要重生 2026-04-03 归档并补发 Telegram 修正版
+- 项目类型：Python CLI / gateway bot
+- Features planned：52
+- init.sh generated：skipped（already exists）
+- .gitignore updated：skipped（already contains PLAN.json / PROGRESS.md）
+- Existing work detected：Telegram 通道已有独立 send/poll 请求池、发送超时重试、基础测试与 `/status`/`/restart` 命令；当前问题集中在代理来源隐式继承、polling 健康状态不可见、异常后缺少自愈重建。
+- Baseline validation：
+  - `bash ~/.codex/scripts/global-init.sh` 已运行，CLI health 正常。
+  - baseline pytest 失败于可选 Matrix 依赖缺失：`tests/channels/test_matrix_channel.py` 导入 `nio` 失败；记录为环境问题，不作为本轮 Telegram 回归。
+  - 当前机器直连 `api.telegram.org` 失败；现跑 `nanobot gateway` 继承了 `HTTP_PROXY/HTTPS_PROXY=http://127.0.0.1:1082`。
+  - 现有 tmux 输出已观察到 Telegram polling 的 `httpx.ConnectError` 与 `httpx.RemoteProtocolError`。
+- Key decisions：
+  - Telegram 修复采用“显式固定代理 + 自动重连 + 状态可见”，不扩大到全局 web/provider 代理策略。
+  - 本轮会复用现有 `nanobot` tmux session 做 E2E 重启验证，不新建 detached gateway。
+  - `.codex/config.toml` 当前为未跟踪文件，视为用户环境文件，不参与本轮修改。

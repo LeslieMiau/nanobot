@@ -2,187 +2,520 @@
   {
     "id": 1,
     "category": "setup",
-    "description": "为本轮 AI 日报四象限纠偏任务初始化 harness 状态文件",
+    "description": "建立 Telegram 稳定性修复任务的 harness 外部状态文件",
     "steps": [
       "确认仓库根目录存在 PLAN.json 与 PROGRESS.md",
-      "确认 init.sh 复用现有脚本且 .gitignore 已包含 harness 临时文件",
-      "确认初始化后有独立 checkpoint commit 可供后续 session 恢复"
+      "确认 PLAN.json 仅含本轮 Telegram 稳定性修复相关 feature"
     ],
     "passes": false
   },
   {
     "id": 2,
-    "category": "functional",
-    "description": "收紧四象限横轴定义，明确近是离用户当前生产力近而不是离 AI 行业近",
+    "category": "setup",
+    "description": "记录本轮基线启动检查与已知环境问题",
     "steps": [
-      "SKILL.md 明确写出 近 = 能映射到未来 1-2 周重复任务",
-      "SKILL.md 明确写出 不能因 builder 圈重要就判近",
-      "静态检索确认相关措辞在 daily 规则中只保留一套口径"
+      "运行 bash ~/.codex/scripts/global-init.sh 并记录结果",
+      "确认 Matrix 可选依赖缺失被记录为环境阻塞而非 Telegram 回归"
     ],
     "passes": false
   },
   {
     "id": 3,
-    "category": "functional",
-    "description": "为近加长设置强门槛，禁止仅因 pricing 或平台姿态就升级为右上角",
+    "category": "setup",
+    "description": "记录当前 Telegram 失联现象的直接证据",
     "steps": [
-      "SKILL.md 明确写出 近+长 至少满足具体使用场景与长期复利条件",
-      "SKILL.md 明确写出 pricing tier team procurement 标题级新闻默认不得进近+长",
-      "静态检索确认近+长规则与 hard exclusion 没有冲突"
+      "确认 tmux 或日志中能看到 Telegram polling 的网络错误",
+      "确认基线记录包含代理环境与直连失败事实"
     ],
     "passes": false
   },
   {
     "id": 4,
     "category": "functional",
-    "description": "把近加短定义为默认承接区，并要求评估三个移动信号",
+    "description": "为 Telegram 配置新增 useEnvProxy 开关",
     "steps": [
-      "SKILL.md 明确要求谁在用/背后投入/形态收敛三信号",
-      "SKILL.md 明确 Telegram 只保留一句迁移判断而不展开长分析",
-      "静态检索确认 daily 模板能容纳迁移结论"
+      "加载配置时 telegram 配置对象包含 useEnvProxy 字段",
+      "未显式配置时 useEnvProxy 默认值为 true"
     ],
     "passes": false
   },
   {
     "id": 5,
     "category": "functional",
-    "description": "把远加长限制为地图感来源，不能主导当天主结论或动作",
+    "description": "让 Telegram 默认配置输出包含 useEnvProxy",
     "steps": [
-      "SKILL.md 明确写出远+长不能主导今天该把时间投在哪",
-      "SKILL.md 明确写出无右上角时需直说无值得深挖项",
-      "静态检索确认今日动作的触发条件与此一致"
+      "调用 TelegramChannel.default_config() 时返回 useEnvProxy",
+      "默认配置对现有实例保持兼容"
     ],
     "passes": false
   },
   {
     "id": 6,
     "category": "functional",
-    "description": "把远加短改成静默过滤逻辑而不是推送内容",
+    "description": "保持 telegram 配置的 camelCase 与 snake_case 兼容加载",
     "steps": [
-      "SKILL.md 明确列出融资跑分概念炒作价格标题新闻默认进入左下角",
-      "SKILL.md 明确写出 Telegram 不显示左下角 section",
-      "静态检索确认 daily 输出 contract 中不再要求显示今日可忽略"
+      "旧配置文件仍能正常加载 Telegram 通道",
+      "新旧键名都能解析为相同的运行时行为"
     ],
     "passes": false
   },
   {
     "id": 7,
-    "category": "integration",
-    "description": "重写 daily 归档模板为 quadrant-v2 结构并写入规则版本",
+    "category": "functional",
+    "description": "实现 Telegram 显式代理优先级",
     "steps": [
-      "SKILL.md 的归档模板包含 规则版本：quadrant-v2",
-      "归档模板包含 今天该把时间投在哪 与三可见象限 section",
-      "归档模板中每条 item 都要求 标题/象限理由/建议动作/原文链接"
+      "配置 telegram.proxy 时请求客户端始终使用该地址",
+      "显式 telegram.proxy 优先级高于环境变量"
     ],
     "passes": false
   },
   {
     "id": 8,
-    "category": "integration",
-    "description": "重写 daily Telegram 模板为宝玉原文导向的三可见象限版式",
+    "category": "functional",
+    "description": "显式 telegram.proxy 时禁用环境代理继承",
     "steps": [
-      "SKILL.md 的 Telegram 模板以 AI 日报 标题和统计窗口开头",
-      "Telegram 模板使用 今天该把时间投在哪 / 右上角 / 右下角 / 左上角 / 今日动作",
-      "模板中每条 item 都压成 这是什么 / 象限理由 / 建议动作加原文链接"
+      "显式 telegram.proxy 场景下 HTTPXRequest 获得 trust_env=false",
+      "同场景下切换 shell 代理变量不影响 Telegram 有效代理地址"
     ],
     "passes": false
   },
   {
     "id": 9,
-    "category": "integration",
-    "description": "把 daily 结论与动作改成严格由象限结果倒推",
+    "category": "functional",
+    "description": "实现 useEnvProxy=false 且无 telegram.proxy 时的直连模式",
     "steps": [
-      "SKILL.md 明确写出没有近+长时必须直说今天没有值得深挖的右上角项",
-      "SKILL.md 明确写出今日动作只有在存在近+长或近+短时才给具体动作",
-      "静态检索确认旧的 今日结论 section 规则不再残留为行业摘要口径"
+      "useEnvProxy=false 且未配置 telegram.proxy 时 HTTPXRequest 获得 trust_env=false",
+      "该场景下 Telegram 有效代理状态显示为 direct"
     ],
     "passes": false
   },
   {
     "id": 10,
-    "category": "integration",
-    "description": "为 daily cache 增加规则版本校验并允许旧版归档自动重生",
+    "category": "functional",
+    "description": "保留 useEnvProxy=true 且无 telegram.proxy 时的环境代理兼容行为",
     "steps": [
-      "SKILL.md 明确写出只有匹配 quadrant-v2 的归档才允许直接命中 cache",
-      "SKILL.md 明确写出旧版归档需要重生成并覆盖",
-      "jobs.json 的 daily prompt 与 SKILL.md 对此口径完全一致"
+      "useEnvProxy=true 且未配置 telegram.proxy 时 HTTPXRequest 不关闭 trust_env",
+      "该场景下 Telegram 有效代理状态显示为 env"
     ],
     "passes": false
   },
   {
     "id": 11,
-    "category": "integration",
-    "description": "同步更新 daily cron prompt 以匹配 quadrant-v2 输出规则",
+    "category": "functional",
+    "description": "记录 Telegram 运行时 effective_proxy 字段",
     "steps": [
-      "jobs.json 中 44aa7473 的 payload.message 包含 quadrant-v2 cache 校验",
-      "jobs.json 中 daily 输出 section 与 SKILL.md 完全一致",
-      "静态检索确认 jobs.json 不再要求 今日结论/值得深挖/值得试试/知道即可 旧式五段"
+      "启动 Telegram 通道后能读到 effective_proxy",
+      "effective_proxy 能区分 explicit、env 与 direct 三种来源"
     ],
     "passes": false
   },
   {
     "id": 12,
-    "category": "data",
-    "description": "按新规则重写 2026-04-03 日报归档并补发 Telegram 修正版",
+    "category": "functional",
+    "description": "建立 Telegram 运行时状态结构",
     "steps": [
-      "ai-digest-2026-04-03.md 写入 quadrant-v2 规则版本与新结构",
-      "内容中 Gemini inference tier 不再默认落入近+长",
-      "内容中 codex-flexible-pricing-for-teams 不再以标题级信息进入近+长"
+      "Telegram 通道初始化后存在统一的运行时状态容器",
+      "状态容器包含本轮计划要求的全部固定字段"
     ],
     "passes": false
   },
   {
     "id": 13,
-    "category": "testing",
-    "description": "验证 Anthropic interpretability 在样本回放下继续停留在远加长",
+    "category": "functional",
+    "description": "记录 last_inbound_at",
     "steps": [
-      "重写后的 2026-04-03 归档里 interpretability 论文位于左上角或等价地图感 section",
-      "该条不会主导 今天该把时间投在哪",
-      "该条建议动作保持知道即可而非具体投入"
+      "Telegram 收到并成功入队消息后刷新 last_inbound_at",
+      "未收到新消息时 last_inbound_at 不会被无关路径覆盖"
     ],
     "passes": false
   },
   {
     "id": 14,
-    "category": "testing",
-    "description": "回放近几天旧日报样本，确认无右上角时会明确留空而不是硬凑",
+    "category": "functional",
+    "description": "记录 last_outbound_at",
     "steps": [
-      "抽查最近 2-3 份日报样本时能看见无右上角的明确表达",
-      "不会把远+长或行业价格新闻冒充右上角",
-      "回放记录在 PROGRESS.md 中留有结论"
+      "Telegram 成功发送普通消息后刷新 last_outbound_at",
+      "Telegram 成功发送流式最终输出后也会刷新 last_outbound_at"
     ],
     "passes": false
   },
   {
     "id": 15,
-    "category": "testing",
-    "description": "验证 Telegram 渲染后的 section 层级与条目格式清晰可读",
+    "category": "functional",
+    "description": "记录 last_poll_error_at",
     "steps": [
-      "当前 renderer 下粗体 section 标题正常显示",
-      "每条 item 中标题/象限理由/建议动作和链接仍可读",
-      "最终消息中不出现左下角 section 和长篇筛选过程"
+      "Polling error callback 触发时刷新 last_poll_error_at",
+      "非 polling 错误不会错误地写入 last_poll_error_at"
     ],
     "passes": false
   },
   {
     "id": 16,
-    "category": "testing",
-    "description": "手动触发 daily job 并确认命中新规则与新版缓存逻辑",
+    "category": "functional",
+    "description": "记录 last_send_error_at",
     "steps": [
-      "手动触发 44aa7473 后 lastStatus 为 ok",
-      "若归档版本不匹配则自动重生并覆盖",
-      "Telegram 实际收到 quadrant-v2 的修正版摘要"
+      "发送普通消息失败时刷新 last_send_error_at",
+      "发送流式消息失败时同样刷新 last_send_error_at"
     ],
     "passes": false
   },
   {
     "id": 17,
-    "category": "setup",
-    "description": "任务完成后清理 harness 状态文件并保留可复用 init.sh",
+    "category": "functional",
+    "description": "统计 consecutive_poll_errors",
     "steps": [
-      "PLAN.json 全部 passes 为 true 后追加完成记录到 PROGRESS.md",
-      "仓库根目录删除 PLAN.json 与 PROGRESS.md 但保留 init.sh",
-      "存在 cleanup commit 作为本轮任务收尾 checkpoint"
+      "连续 polling 错误会递增 consecutive_poll_errors",
+      "健康探测成功后 consecutive_poll_errors 会清零"
+    ],
+    "passes": false
+  },
+  {
+    "id": 18,
+    "category": "functional",
+    "description": "统计 consecutive_send_errors",
+    "steps": [
+      "连续发送错误会递增 consecutive_send_errors",
+      "后续一次成功发送会清零 consecutive_send_errors"
+    ],
+    "passes": false
+  },
+  {
+    "id": 19,
+    "category": "functional",
+    "description": "记录 last_error_summary",
+    "steps": [
+      "最近一次 Telegram poll 或 send 错误会更新 last_error_summary",
+      "last_error_summary 可用于 /status 或 channel status 展示"
+    ],
+    "passes": false
+  },
+  {
+    "id": 20,
+    "category": "functional",
+    "description": "统计 reconnect_count",
+    "steps": [
+      "每次 watchdog 触发的 Telegram 重建都会增加 reconnect_count",
+      "普通成功轮询不会误增 reconnect_count"
+    ],
+    "passes": false
+  },
+  {
+    "id": 21,
+    "category": "functional",
+    "description": "暴露 running 状态到 Telegram 运行时状态",
+    "steps": [
+      "Telegram 运行时状态中的 running 与通道生命周期一致",
+      "停止通道后运行时状态中的 running 会变为 false"
+    ],
+    "passes": false
+  },
+  {
+    "id": 22,
+    "category": "functional",
+    "description": "提供 Telegram get_runtime_status() 接口",
+    "steps": [
+      "外部调用 get_runtime_status() 可获得稳定字典结构",
+      "未启动 Telegram 时 get_runtime_status() 仍返回可展示状态"
+    ],
+    "passes": false
+  },
+  {
+    "id": 23,
+    "category": "refactor",
+    "description": "拆分 Telegram _build_application 生命周期辅助函数",
+    "steps": [
+      "Telegram 通道可单独构建 Application 和 HTTPXRequest",
+      "构建逻辑只在一个入口维护代理与请求参数"
+    ],
+    "passes": false
+  },
+  {
+    "id": 24,
+    "category": "refactor",
+    "description": "拆分 Telegram _start_application 生命周期辅助函数",
+    "steps": [
+      "Telegram 启动 Application 与 polling 的代码路径集中到独立函数",
+      "重复重建时不会复制 handler 或命令注册逻辑"
+    ],
+    "passes": false
+  },
+  {
+    "id": 25,
+    "category": "refactor",
+    "description": "拆分 Telegram _stop_application 生命周期辅助函数",
+    "steps": [
+      "Telegram 停止 updater、application 与后台任务都走统一出口",
+      "正常停止和异常恢复都复用同一清理逻辑"
+    ],
+    "passes": false
+  },
+  {
+    "id": 26,
+    "category": "functional",
+    "description": "让 Telegram updater 停止逻辑幂等",
+    "steps": [
+      "重复 stop 不会抛出 This Updater is not running",
+      "watchdog 重建前后的 stop 路径都能安全复用"
+    ],
+    "passes": false
+  },
+  {
+    "id": 27,
+    "category": "functional",
+    "description": "让 Telegram application 停止逻辑幂等",
+    "steps": [
+      "重复 shutdown 不会导致 Telegram 通道卡死或抛异常",
+      "失败后的清理仍能完整释放 _app 引用"
+    ],
+    "passes": false
+  },
+  {
+    "id": 28,
+    "category": "functional",
+    "description": "给 start_polling 接入同步 polling error callback",
+    "steps": [
+      "Telegram polling error 会进入本仓库自定义 callback",
+      "callback 本身不要求 async 也不会阻塞 PTB polling"
+    ],
+    "passes": false
+  },
+  {
+    "id": 29,
+    "category": "functional",
+    "description": "在 polling error callback 中更新错误状态",
+    "steps": [
+      "polling error callback 会刷新时间、摘要与连续错误计数",
+      "发生异常时日志仍保留 Telegram polling 出错上下文"
+    ],
+    "passes": false
+  },
+  {
+    "id": 30,
+    "category": "functional",
+    "description": "统一普通发送与流式发送的错误状态写入",
+    "steps": [
+      "send 和 send_delta 失败路径都会刷新发送错误状态",
+      "同类错误摘要格式在两个路径上保持一致"
+    ],
+    "passes": false
+  },
+  {
+    "id": 31,
+    "category": "functional",
+    "description": "在发送成功后清理发送错误 streak",
+    "steps": [
+      "一次成功 send 会清零 consecutive_send_errors",
+      "一次成功 send_delta 最终完成也会清零 consecutive_send_errors"
+    ],
+    "passes": false
+  },
+  {
+    "id": 32,
+    "category": "functional",
+    "description": "在消息入队成功后刷新 inbound 活跃时间",
+    "steps": [
+      "Telegram 入站消息通过 ACL 与 routing 后刷新 last_inbound_at",
+      "被忽略的群消息不会伪造入站活跃时间"
+    ],
+    "passes": false
+  },
+  {
+    "id": 33,
+    "category": "functional",
+    "description": "在流式输出成功完成后刷新 outbound 活跃时间",
+    "steps": [
+      "流式首包发送成功后能更新 outbound 活跃时间",
+      "流式结束成功编辑后仍保持最新 outbound 活跃时间"
+    ],
+    "passes": false
+  },
+  {
+    "id": 34,
+    "category": "functional",
+    "description": "新增 Telegram watchdog 后台任务",
+    "steps": [
+      "Telegram 通道启动后 watchdog 会随通道生命周期启动",
+      "通道停止后 watchdog 会被取消并清理引用"
+    ],
+    "passes": false
+  },
+  {
+    "id": 35,
+    "category": "functional",
+    "description": "实现 polling 错误阈值触发条件",
+    "steps": [
+      "连续 polling 错误达到阈值后 watchdog 会进入探测流程",
+      "未达到阈值时 watchdog 不会误触发重建"
+    ],
+    "passes": false
+  },
+  {
+    "id": 36,
+    "category": "functional",
+    "description": "实现 send 错误阈值触发条件",
+    "steps": [
+      "连续发送错误达到阈值后 watchdog 会进入探测流程",
+      "偶发单次发送失败不会立即触发重建"
+    ],
+    "passes": false
+  },
+  {
+    "id": 37,
+    "category": "functional",
+    "description": "watchdog 使用 get_me 作为 Telegram 活性探测",
+    "steps": [
+      "阈值触发后 watchdog 会先执行 get_me 探测",
+      "探测成功时会清理错误 streak 而不是直接重建"
+    ],
+    "passes": false
+  },
+  {
+    "id": 38,
+    "category": "functional",
+    "description": "实现 capped backoff 重连节奏",
+    "steps": [
+      "连续恢复失败时 backoff 依次采用 5s、15s、30s",
+      "恢复成功后 backoff 会回到初始节奏"
+    ],
+    "passes": false
+  },
+  {
+    "id": 39,
+    "category": "functional",
+    "description": "watchdog 触发时完整重建 Telegram application 与 updater",
+    "steps": [
+      "watchdog 触发恢复后 Telegram 通道会重新构建请求客户端与 updater",
+      "重建后 Telegram 仍能继续接收与发送消息"
+    ],
+    "passes": false
+  },
+  {
+    "id": 40,
+    "category": "functional",
+    "description": "watchdog 恢复路径正确清理旧任务和旧 app 引用",
+    "steps": [
+      "恢复后旧 watchdog 或旧 app 不会残留重复任务",
+      "恢复后运行时状态仍只对应一个活跃 Telegram 通道实例"
+    ],
+    "passes": false
+  },
+  {
+    "id": 41,
+    "category": "functional",
+    "description": "让 ChannelManager 汇总通道运行时状态",
+    "steps": [
+      "ChannelManager.get_status() 能返回 Telegram 运行时状态摘要",
+      "没有运行时状态接口的通道仍保持兼容返回"
+    ],
+    "passes": false
+  },
+  {
+    "id": 42,
+    "category": "functional",
+    "description": "保留 ChannelManager 现有启停行为同时注入运行时信息",
+    "steps": [
+      "ChannelManager 启停通道的现有逻辑不回归",
+      "新增运行时信息不会破坏现有 channel 插件测试"
+    ],
+    "passes": false
+  },
+  {
+    "id": 43,
+    "category": "functional",
+    "description": "为 AgentLoop 增加可选 channel_status_provider",
+    "steps": [
+      "gateway 创建的 AgentLoop 能接收 channel_status_provider",
+      "未提供 provider 的 CLI AgentLoop 仍可正常创建和运行"
+    ],
+    "passes": false
+  },
+  {
+    "id": 44,
+    "category": "functional",
+    "description": "让 /status 在 gateway 模式追加 Telegram 健康摘要",
+    "steps": [
+      "Telegram /status 响应包含模型和上下文信息外的 Telegram 健康摘要",
+      "没有 channel_status_provider 时 /status 输出保持原有兼容格式"
+    ],
+    "passes": false
+  },
+  {
+    "id": 45,
+    "category": "functional",
+    "description": "新增状态文本格式化辅助函数以渲染通道健康摘要",
+    "steps": [
+      "状态文本格式稳定且紧凑，包含代理来源与最近错误摘要",
+      "缺失字段时状态文本仍能优雅降级"
+    ],
+    "passes": false
+  },
+  {
+    "id": 46,
+    "category": "functional",
+    "description": "扩展 nanobot channels status 输出 Telegram 运行时信息",
+    "steps": [
+      "nanobot channels status 会显示 Telegram enabled 状态之外的代理与健康摘要",
+      "其他通道仍至少显示原有 enabled 信息"
+    ],
+    "passes": false
+  },
+  {
+    "id": 47,
+    "category": "testing",
+    "description": "为三种 Telegram 代理模式补充 focused tests",
+    "steps": [
+      "显式 proxy、继承环境代理、强制直连三种模式均有测试覆盖",
+      "focused tests 能断言 trust_env 与 proxy 传参符合预期"
+    ],
+    "passes": false
+  },
+  {
+    "id": 48,
+    "category": "testing",
+    "description": "为 Telegram 运行时状态记录补充测试",
+    "steps": [
+      "测试可验证 inbound、outbound、poll error、send error 状态更新",
+      "测试可验证成功路径会清理相应错误 streak"
+    ],
+    "passes": false
+  },
+  {
+    "id": 49,
+    "category": "testing",
+    "description": "为 watchdog 自动恢复补充测试",
+    "steps": [
+      "测试可验证错误阈值达到后 watchdog 会触发探测与重建",
+      "测试可验证探测成功时只清理 streak 而不重建"
+    ],
+    "passes": false
+  },
+  {
+    "id": 50,
+    "category": "testing",
+    "description": "为 Telegram stop 幂等行为补充测试",
+    "steps": [
+      "重复调用 stop 不会抛出异常",
+      "watchdog 存在时重复 stop 仍能完整清理"
+    ],
+    "passes": false
+  },
+  {
+    "id": 51,
+    "category": "testing",
+    "description": "为 /status 与 channels status 的 Telegram 展示补充测试",
+    "steps": [
+      "测试可验证 /status 包含 Telegram 健康摘要",
+      "测试可验证 channels status 输出包含代理来源或连接状态"
+    ],
+    "passes": false
+  },
+  {
+    "id": 52,
+    "category": "integration",
+    "description": "完成 tmux 原地重启与 Telegram E2E 验证",
+    "steps": [
+      "确认机器上仅有一个 nanobot gateway 进程并在现有 nanobot tmux pane 原地重启",
+      "在清空 HTTP_PROXY/HTTPS_PROXY 的 shell 中启动后，Telegram /status 与普通消息都能正常回复"
     ],
     "passes": false
   }
