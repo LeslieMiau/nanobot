@@ -1,0 +1,189 @@
+[
+  {
+    "id": 1,
+    "category": "setup",
+    "description": "为本轮 AI 日报四象限纠偏任务初始化 harness 状态文件",
+    "steps": [
+      "确认仓库根目录存在 PLAN.json 与 PROGRESS.md",
+      "确认 init.sh 复用现有脚本且 .gitignore 已包含 harness 临时文件",
+      "确认初始化后有独立 checkpoint commit 可供后续 session 恢复"
+    ],
+    "passes": false
+  },
+  {
+    "id": 2,
+    "category": "functional",
+    "description": "收紧四象限横轴定义，明确近是离用户当前生产力近而不是离 AI 行业近",
+    "steps": [
+      "SKILL.md 明确写出 近 = 能映射到未来 1-2 周重复任务",
+      "SKILL.md 明确写出 不能因 builder 圈重要就判近",
+      "静态检索确认相关措辞在 daily 规则中只保留一套口径"
+    ],
+    "passes": false
+  },
+  {
+    "id": 3,
+    "category": "functional",
+    "description": "为近加长设置强门槛，禁止仅因 pricing 或平台姿态就升级为右上角",
+    "steps": [
+      "SKILL.md 明确写出 近+长 至少满足具体使用场景与长期复利条件",
+      "SKILL.md 明确写出 pricing tier team procurement 标题级新闻默认不得进近+长",
+      "静态检索确认近+长规则与 hard exclusion 没有冲突"
+    ],
+    "passes": false
+  },
+  {
+    "id": 4,
+    "category": "functional",
+    "description": "把近加短定义为默认承接区，并要求评估三个移动信号",
+    "steps": [
+      "SKILL.md 明确要求谁在用/背后投入/形态收敛三信号",
+      "SKILL.md 明确 Telegram 只保留一句迁移判断而不展开长分析",
+      "静态检索确认 daily 模板能容纳迁移结论"
+    ],
+    "passes": false
+  },
+  {
+    "id": 5,
+    "category": "functional",
+    "description": "把远加长限制为地图感来源，不能主导当天主结论或动作",
+    "steps": [
+      "SKILL.md 明确写出远+长不能主导今天该把时间投在哪",
+      "SKILL.md 明确写出无右上角时需直说无值得深挖项",
+      "静态检索确认今日动作的触发条件与此一致"
+    ],
+    "passes": false
+  },
+  {
+    "id": 6,
+    "category": "functional",
+    "description": "把远加短改成静默过滤逻辑而不是推送内容",
+    "steps": [
+      "SKILL.md 明确列出融资跑分概念炒作价格标题新闻默认进入左下角",
+      "SKILL.md 明确写出 Telegram 不显示左下角 section",
+      "静态检索确认 daily 输出 contract 中不再要求显示今日可忽略"
+    ],
+    "passes": false
+  },
+  {
+    "id": 7,
+    "category": "integration",
+    "description": "重写 daily 归档模板为 quadrant-v2 结构并写入规则版本",
+    "steps": [
+      "SKILL.md 的归档模板包含 规则版本：quadrant-v2",
+      "归档模板包含 今天该把时间投在哪 与三可见象限 section",
+      "归档模板中每条 item 都要求 标题/象限理由/建议动作/原文链接"
+    ],
+    "passes": false
+  },
+  {
+    "id": 8,
+    "category": "integration",
+    "description": "重写 daily Telegram 模板为宝玉原文导向的三可见象限版式",
+    "steps": [
+      "SKILL.md 的 Telegram 模板以 AI 日报 标题和统计窗口开头",
+      "Telegram 模板使用 今天该把时间投在哪 / 右上角 / 右下角 / 左上角 / 今日动作",
+      "模板中每条 item 都压成 这是什么 / 象限理由 / 建议动作加原文链接"
+    ],
+    "passes": false
+  },
+  {
+    "id": 9,
+    "category": "integration",
+    "description": "把 daily 结论与动作改成严格由象限结果倒推",
+    "steps": [
+      "SKILL.md 明确写出没有近+长时必须直说今天没有值得深挖的右上角项",
+      "SKILL.md 明确写出今日动作只有在存在近+长或近+短时才给具体动作",
+      "静态检索确认旧的 今日结论 section 规则不再残留为行业摘要口径"
+    ],
+    "passes": false
+  },
+  {
+    "id": 10,
+    "category": "integration",
+    "description": "为 daily cache 增加规则版本校验并允许旧版归档自动重生",
+    "steps": [
+      "SKILL.md 明确写出只有匹配 quadrant-v2 的归档才允许直接命中 cache",
+      "SKILL.md 明确写出旧版归档需要重生成并覆盖",
+      "jobs.json 的 daily prompt 与 SKILL.md 对此口径完全一致"
+    ],
+    "passes": false
+  },
+  {
+    "id": 11,
+    "category": "integration",
+    "description": "同步更新 daily cron prompt 以匹配 quadrant-v2 输出规则",
+    "steps": [
+      "jobs.json 中 44aa7473 的 payload.message 包含 quadrant-v2 cache 校验",
+      "jobs.json 中 daily 输出 section 与 SKILL.md 完全一致",
+      "静态检索确认 jobs.json 不再要求 今日结论/值得深挖/值得试试/知道即可 旧式五段"
+    ],
+    "passes": false
+  },
+  {
+    "id": 12,
+    "category": "data",
+    "description": "按新规则重写 2026-04-03 日报归档并补发 Telegram 修正版",
+    "steps": [
+      "ai-digest-2026-04-03.md 写入 quadrant-v2 规则版本与新结构",
+      "内容中 Gemini inference tier 不再默认落入近+长",
+      "内容中 codex-flexible-pricing-for-teams 不再以标题级信息进入近+长"
+    ],
+    "passes": false
+  },
+  {
+    "id": 13,
+    "category": "testing",
+    "description": "验证 Anthropic interpretability 在样本回放下继续停留在远加长",
+    "steps": [
+      "重写后的 2026-04-03 归档里 interpretability 论文位于左上角或等价地图感 section",
+      "该条不会主导 今天该把时间投在哪",
+      "该条建议动作保持知道即可而非具体投入"
+    ],
+    "passes": false
+  },
+  {
+    "id": 14,
+    "category": "testing",
+    "description": "回放近几天旧日报样本，确认无右上角时会明确留空而不是硬凑",
+    "steps": [
+      "抽查最近 2-3 份日报样本时能看见无右上角的明确表达",
+      "不会把远+长或行业价格新闻冒充右上角",
+      "回放记录在 PROGRESS.md 中留有结论"
+    ],
+    "passes": false
+  },
+  {
+    "id": 15,
+    "category": "testing",
+    "description": "验证 Telegram 渲染后的 section 层级与条目格式清晰可读",
+    "steps": [
+      "当前 renderer 下粗体 section 标题正常显示",
+      "每条 item 中标题/象限理由/建议动作和链接仍可读",
+      "最终消息中不出现左下角 section 和长篇筛选过程"
+    ],
+    "passes": false
+  },
+  {
+    "id": 16,
+    "category": "testing",
+    "description": "手动触发 daily job 并确认命中新规则与新版缓存逻辑",
+    "steps": [
+      "手动触发 44aa7473 后 lastStatus 为 ok",
+      "若归档版本不匹配则自动重生并覆盖",
+      "Telegram 实际收到 quadrant-v2 的修正版摘要"
+    ],
+    "passes": false
+  },
+  {
+    "id": 17,
+    "category": "setup",
+    "description": "任务完成后清理 harness 状态文件并保留可复用 init.sh",
+    "steps": [
+      "PLAN.json 全部 passes 为 true 后追加完成记录到 PROGRESS.md",
+      "仓库根目录删除 PLAN.json 与 PROGRESS.md 但保留 init.sh",
+      "存在 cleanup commit 作为本轮任务收尾 checkpoint"
+    ],
+    "passes": false
+  }
+]

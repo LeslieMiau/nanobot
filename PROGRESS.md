@@ -1,0 +1,16 @@
+## Harness initialized — 2026-04-03
+- Project type: Python CLI / gateway
+- Features planned: 17
+- init.sh generated: skipped (already exists)
+- .gitignore updated: skipped (already contains harness entries)
+- Existing work detected:
+  - 已完成 daily digest 的 source 收窄与 Telegram 版式收缩
+  - 当前最新日报 `~/.nanobot/workspace/inbox/ai-digest-2026-04-03.md` 明显把 builder 圈重要性误判成离用户生产力近
+  - 当前 daily cron job id 为 `44aa7473`
+- Baseline verification:
+  - `bash ~/.codex/scripts/global-init.sh` 通过 CLI health，但仍有已知 Matrix 依赖告警，详见 `/tmp/nanobot-harness-pytest.log`
+  - `.venv/bin/pytest tests/coding_tasks -q` 通过（81 passed）
+- Key decisions:
+  - 本轮只改 daily AI digest，不改 weekly
+  - 左下角保留为静默过滤逻辑，不在 Telegram 推送显式展示
+  - 除更新未来规则外，还要重生 2026-04-03 归档并补发 Telegram 修正版
