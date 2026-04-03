@@ -54,13 +54,23 @@ class Tool(ABC):
         pass
 
     @property
-    def is_read_only(self) -> bool:
-        """Whether this tool only reads state without modifying it.
+    def read_only(self) -> bool:
+        """Whether this tool is side-effect free and safe to parallelize."""
+        return False
 
-        Used by plan mode to filter available tools and by the tool executor
-        to determine safe concurrency batching.  Defaults to ``False``
-        (conservative / fail-closed).
-        """
+    @property
+    def is_read_only(self) -> bool:
+        """Backward-compatible alias used by plan mode code paths."""
+        return self.read_only
+
+    @property
+    def concurrency_safe(self) -> bool:
+        """Whether this tool can run alongside other concurrency-safe tools."""
+        return self.read_only and not self.exclusive
+
+    @property
+    def exclusive(self) -> bool:
+        """Whether this tool should run alone even if concurrency is enabled."""
         return False
 
     @abstractmethod

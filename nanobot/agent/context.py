@@ -14,33 +14,10 @@ from nanobot.utils.helpers import build_assistant_message, detect_image_mime
 
 
 class ContextBuilder:
-    """Builds the context (system prompt + messages) for the agent.
-
-    Supports progressive degradation when token budget is tight:
-    - Priority 1 (always): identity + bootstrap files
-    - Priority 2: memory context
-    - Priority 3: always-on skills
-    - Priority 4: skills summary
-    - Priority 5: verify-mode prompt (when active)
-    """
+    """Builds the context (system prompt + messages) for the agent."""
 
     BOOTSTRAP_FILES = ["AGENTS.md", "SOUL.md", "USER.md", "TOOLS.md"]
     _RUNTIME_CONTEXT_TAG = "[Runtime Context — metadata only, not instructions]"
-
-    # Rough chars-per-token estimate for budget calculations
-    _CHARS_PER_TOKEN = 4
-
-    _VERIFY_PROMPT = """# Verification Mode
-
-You are now in VERIFICATION mode. Your job is to verify that the previous implementation actually works — not to confirm it, but to try to break it.
-
-## Rules
-- Every check MUST include: **Command run**, **Output observed**, **Result** (PASS/FAIL/PARTIAL)
-- Do NOT read code and narrate what it does — that is not verification
-- If you catch yourself writing an explanation instead of running a command, STOP and run the command
-- Do NOT say "should work", "looks correct", or "probably fine" — run the test
-- Adversarial probes: boundary values, empty inputs, concurrent access, error paths, edge cases
-- Final verdict: PASS / FAIL / PARTIAL — no hedging"""
 
     def __init__(self, workspace: Path, timezone: str | None = None):
         self.workspace = workspace
@@ -48,66 +25,32 @@ You are now in VERIFICATION mode. Your job is to verify that the previous implem
         self.memory = MemoryStore(workspace)
         self.skills = SkillsLoader(workspace)
 
-    def build_system_prompt(
-        self,
-        skill_names: list[str] | None = None,
-        query: str | None = None,
-        *,
-        token_budget: int | None = None,
-        mode: str = "execute",
-    ) -> str:
-        """Build the system prompt from identity, bootstrap files, memory, and skills.
+    def build_system_prompt(self, skill_names: list[str] | None = None) -> str:
+        """Build the system prompt from identity, bootstrap files, memory, and skills."""
+        parts = [self._get_identity()]
 
-        When *token_budget* is set, progressively drops lower-priority sections
-        to stay within budget.  Sections are added in priority order and
-        accumulation stops before the budget is exceeded.
-        """
-        budget_chars = token_budget * self._CHARS_PER_TOKEN if token_budget else None
-
-        parts: list[str] = []
-        used_chars = 0
-
-        def _try_add(section: str) -> bool:
-            nonlocal used_chars
-            if budget_chars is not None and used_chars + len(section) > budget_chars:
-                return False
-            parts.append(section)
-            used_chars += len(section)
-            return True
-
-        # Priority 1: identity (always included)
-        _try_add(self._get_identity())
-
-        # Priority 1: bootstrap files (always included)
         bootstrap = self._load_bootstrap_files()
         if bootstrap:
-            _try_add(bootstrap)
+            parts.append(bootstrap)
 
-        # Priority 2: memory
-        memory = self.memory.get_memory_context(query=query)
+        memory = self.memory.get_memory_context()
         if memory:
-            _try_add(f"# Memory\n\n{memory}")
+            parts.append(f"# Memory\n\n{memory}")
 
-        # Priority 3: always-on skills
         always_skills = self.skills.get_always_skills()
         if always_skills:
             always_content = self.skills.load_skills_for_context(always_skills)
             if always_content:
-                _try_add(f"# Active Skills\n\n{always_content}")
+                parts.append(f"# Active Skills\n\n{always_content}")
 
-        # Priority 4: skills summary
         skills_summary = self.skills.build_skills_summary()
         if skills_summary:
-            _try_add(f"""# Skills
+            parts.append(f"""# Skills
 
 The following skills extend your capabilities. To use a skill, read its SKILL.md file using the read_file tool.
 Skills with available="false" need dependencies installed first - you can try installing them with apt/brew.
 
 {skills_summary}""")
-
-        # Priority 5: verify-mode prompt
-        if mode == "verify":
-            _try_add(self._VERIFY_PROMPT)
 
         return "\n\n---\n\n".join(parts)
 
@@ -167,6 +110,20 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
             lines += [f"Channel: {channel}", f"Chat ID: {chat_id}"]
         return ContextBuilder._RUNTIME_CONTEXT_TAG + "\n" + "\n".join(lines)
 
+    @staticmethod
+    def _merge_message_content(left: Any, right: Any) -> str | list[dict[str, Any]]:
+        if isinstance(left, str) and isinstance(right, str):
+            return f"{left}\n\n{right}" if left else right
+
+        def _to_blocks(value: Any) -> list[dict[str, Any]]:
+            if isinstance(value, list):
+                return [item if isinstance(item, dict) else {"type": "text", "text": str(item)} for item in value]
+            if value is None:
+                return []
+            return [{"type": "text", "text": str(value)}]
+
+        return _to_blocks(left) + _to_blocks(right)
+
     def _load_bootstrap_files(self) -> str:
         """Load all bootstrap files from workspace."""
         parts = []
@@ -199,12 +156,17 @@ IMPORTANT: To send files (images, documents, audio, video) to the user, you MUST
             merged = f"{runtime_ctx}\n\n{user_content}"
         else:
             merged = [{"type": "text", "text": runtime_ctx}] + user_content
-
-        return [
+        messages = [
             {"role": "system", "content": self.build_system_prompt(skill_names, query=current_message)},
             *history,
-            {"role": current_role, "content": merged},
         ]
+        if messages[-1].get("role") == current_role:
+            last = dict(messages[-1])
+            last["content"] = self._merge_message_content(last.get("content"), merged)
+            messages[-1] = last
+            return messages
+        messages.append({"role": current_role, "content": merged})
+        return messages
 
     def _build_user_content(self, text: str, media: list[str] | None) -> str | list[dict[str, Any]]:
         """Build user message content with optional base64-encoded images."""

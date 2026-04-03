@@ -115,11 +115,30 @@ class ToolRegistry:
     # Execution
     # ------------------------------------------------------------------
 
+    def prepare_call(
+        self,
+        name: str,
+        params: dict[str, Any],
+    ) -> tuple[Tool | None, dict[str, Any], str | None]:
+        """Resolve, cast, and validate one tool call."""
+        tool = self._tools.get(name)
+        if not tool:
+            return None, params, (
+                f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
+            )
+
+        cast_params = tool.cast_params(params)
+        errors = tool.validate_params(cast_params)
+        if errors:
+            return tool, cast_params, (
+                f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors)
+            )
+        return tool, cast_params, None
+
     async def execute(self, name: str, params: dict[str, Any]) -> Any:
         """Execute a tool by name with given parameters."""
         _HINT = "\n\n[Analyze the error above and try a different approach.]"
 
-        # Plan mode guard
         if self._plan_mode:
             tool = self._tools.get(name)
             if tool and not tool.is_read_only:
@@ -129,7 +148,6 @@ class ToolRegistry:
                     f"Available: {', '.join(self._visible_tools())}"
                 )
 
-        # Circuit breaker guard
         if self.is_disabled(name):
             return (
                 f"Error: Tool '{name}' has been disabled after "
@@ -137,18 +155,12 @@ class ToolRegistry:
                 f"Try a completely different approach." + _HINT
             )
 
-        tool = self._tools.get(name)
-        if not tool:
-            return f"Error: Tool '{name}' not found. Available: {', '.join(self.tool_names)}"
+        tool, params, error = self.prepare_call(name, params)
+        if error:
+            return error + _HINT
 
         try:
-            # Attempt to cast parameters to match schema types
-            params = tool.cast_params(params)
-
-            # Validate parameters
-            errors = tool.validate_params(params)
-            if errors:
-                return f"Error: Invalid parameters for tool '{name}': " + "; ".join(errors) + _HINT
+            assert tool is not None
             result = await tool.execute(**params)
             if isinstance(result, str) and result.startswith("Error"):
                 self.record_failure(name)
