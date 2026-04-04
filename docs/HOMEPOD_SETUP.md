@@ -1,179 +1,172 @@
 # HomePod Mini 语音控制 Nanobot
 
-通过 HomePod Mini 与 Nanobot 进行语音对话：用 Siri 提问，听 Nanobot 回答。
+通过 HomePod Mini 与 Nanobot 进行多轮语音对话。
 
-## 架构概览
+## 架构
 
 ```
-语音输入: HomePod → Siri → Apple Shortcut → HTTP POST /v1/voice/ask → Nanobot → 返回文本
-语音输出（基础）: Shortcut "Speak Text" → Siri 朗读回答
-语音输出（增强）: Nanobot → HomePod Channel → TTS → AirPlay → HomePod 播放
+HomePod → Siri → iPhone 快捷指令 → HTTP POST /v1/voice/ask → Nanobot
+                                  ← {"reply": "...", "end_conversation": false}
+                                  → Speak Text → HomePod 播放
+                                  → 循环：继续对话直到 end_conversation=true
 ```
 
-## 前提条件
+## 第一步：启动 API 服务
 
-- Nanobot 运行在与 HomePod Mini **同一局域网** 内
-- iPhone/iPad 已配对 HomePod Mini
-- Nanobot 已安装 `aiohttp`：`pip install 'nanobot-ai[api]'`
-
-## Phase 1: API 配置
-
-### 1.1 编辑 config.json
+### 1.1 编辑 `~/.nanobot/config.json`
 
 ```json
 {
   "api": {
     "host": "0.0.0.0",
     "port": 8900,
-    "apiKey": "your-secret-key-here",
-    "tts": {
-      "provider": "openai",
-      "voice": "alloy",
-      "model": "tts-1"
-    }
+    "apiKey": "你的密钥"
   }
 }
 ```
 
-| 字段 | 说明 |
-|------|------|
-| `host` | 设为 `0.0.0.0` 以允许局域网访问 |
-| `apiKey` | Bearer token 鉴权，**强烈建议** 在绑定 `0.0.0.0` 时设置 |
-| `tts.provider` | `openai` 或 `groq`，TTS API key 自动从对应 LLM provider 继承 |
-| `tts.voice` | OpenAI 语音：alloy, echo, fable, onyx, nova, shimmer |
-
-### 1.2 启动 API 服务
+### 1.2 启动
 
 ```bash
-nanobot api --host 0.0.0.0 --port 8900
+# 前台运行
+nanobot serve -v
+
+# 或后台运行（推荐）
+tmux new-session -d -s nanobot-api '.venv/bin/nanobot serve -v'
 ```
 
 ### 1.3 验证
 
 ```bash
-# 测试鉴权
 curl http://192.168.x.x:8900/health
+# → {"status": "ok"}
 
-# 测试语音问答（替换 IP 和 key）
 curl -X POST http://192.168.x.x:8900/v1/voice/ask \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer your-secret-key-here" \
-  -d '{"text": "今天天气怎么样？", "session_id": "homepod"}'
-
-# 测试 TTS
-curl -X POST http://192.168.x.x:8900/v1/audio/speech \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer your-secret-key-here" \
-  -d '{"input": "你好，我是 Nanobot"}' \
-  --output test.mp3
+  -H "Authorization: Bearer 你的密钥" \
+  -d '{"text": "你好", "speaker": "test"}'
+# → {"reply": "...", "end_conversation": false}
 ```
 
-## Phase 2: 创建 Siri Shortcut
+## 第二步：在 iPhone 上创建快捷指令
 
-在 iPhone 上打开 **Shortcuts** 应用，创建新 Shortcut：
+> 必须在 **iPhone** 上创建，不是 Mac。HomePod 通过 iPhone 运行快捷指令。
 
-### 基础版：Siri 朗读回答
+打开「快捷指令」App → 右上角 `+` → 按以下步骤添加动作：
 
-1. **Shortcut 名称**: `Ask Nanobot`（这也是 Siri 触发短语）
-2. 添加动作 **Dictate Text** — 录入用户的问题
-3. 添加动作 **Get Contents of URL**:
-   - URL: `http://192.168.x.x:8900/v1/voice/ask`
-   - Method: `POST`
-   - Headers:
-     - `Content-Type`: `application/json`
-     - `Authorization`: `Bearer your-secret-key-here`
-   - Request Body (JSON):
-     ```json
-     {"text": "Dictated Text", "session_id": "homepod"}
-     ```
-     （将 `Dictated Text` 替换为上一步的变量）
-4. 添加动作 **Get Dictionary Value**: Key = `text`
-5. 添加动作 **Speak Text** — 朗读返回的文本
+### 动作 1：文本
 
-### 高级版：高质量 TTS 语音
+搜索「文本」，添加「文本」动作。内容填写你的 API 地址：
 
-将步骤 4-5 替换为：
-
-4. 添加动作 **Get Dictionary Value**: Key = `text`
-5. 添加动作 **Get Contents of URL** (POST to `/v1/audio/speech`):
-   - Body: `{"input": "Dictionary Value"}`
-6. 添加动作 **Play Sound** — 播放返回的音频
-
-### 使用方式
-
-对 HomePod 说：
-
-> "Hey Siri, Ask Nanobot"
-
-Siri 会让你说出问题，然后朗读 Nanobot 的回答。
-
-### 多轮对话
-
-Shortcut 中的 `session_id: "homepod"` 保持会话上下文。同一个 session_id 的请求共享对话历史。
-
-## Phase 3: AirPlay 主动推送（可选）
-
-让 Nanobot **主动** 通过 HomePod 播放语音（如定时播报、通知）。
-
-### 3.1 安装依赖
-
-```bash
-pip install 'nanobot-ai[homepod]'
+```
+http://192.168.x.x:8900
 ```
 
-### 3.2 配置 HomePod Channel
+长按这个动作 → 「重新命名」→ 改名为 `服务器地址`
 
-在 `config.json` 中添加：
+### 动作 2：要求输入
 
-```json
-{
-  "channels": {
-    "homepod": {
-      "enabled": true,
-      "deviceName": "客厅 HomePod",
-      "ttsProvider": "openai",
-      "ttsVoice": "nova",
-      "ttsModel": "tts-1",
-      "allowFrom": ["*"]
-    }
-  }
-}
+搜索「要求输入」，添加。设置：
+- 提示语：`你想问什么？`
+- 输入类型：`文本`
+
+### 动作 3：获取 URL 内容
+
+搜索「获取 URL 内容」，添加。设置：
+
+- URL 栏：点击输入框 → 选择变量 `服务器地址` → 然后手动追加 `/v1/voice/ask`
+  - 最终显示为：`[服务器地址]/v1/voice/ask`
+- 点击「显示更多」：
+  - 方法：`POST`
+  - 头部：添加 2 个
+    - `Content-Type` → `application/json`
+    - `Authorization` → `Bearer 你的密钥`
+  - 请求体：`JSON`
+    - 添加字段 `text`（文本）→ 值选择变量 `要求输入的结果`
+    - 添加字段 `speaker`（文本）→ 值填 `homepod`
+
+### 动作 4：获取字典值
+
+搜索「从字典中获取值」，添加。设置：
+- 键：`reply`
+
+### 动作 5：朗读文本
+
+搜索「朗读文本」，添加。
+- 勾选「等待完成」
+
+### 保存
+
+- 快捷指令名称：`问机器人`（纯中文，不含英文）
+- 点完成
+
+### 测试
+
+直接点击运行按钮测试。输入"你好"，应该能听到 Nanobot 的回答被朗读出来。
+
+## 第三步：绑定 HomePod
+
+### 3.1 启用 Personal Content
+
+在 iPhone 上：
+1. 打开「家庭」App
+2. 点右上角 `...` → 「家庭设置」
+3. 找到你的用户 → 点击进入
+4. 启用「个人请求」/ Personal Requests
+5. 选择你的 iPhone 作为设备
+
+### 3.2 对 HomePod 说
+
+```
+"嘿 Siri, 运行问机器人"
 ```
 
-| 字段 | 说明 |
-|------|------|
-| `deviceName` | HomePod 在 Home app 中显示的名称。留空则自动选择第一个设备 |
-| `ttsProvider` | `openai` 或 `groq` |
-| `ttsVoice` | TTS 语音名称 |
+Siri 会问「你想问什么？」，说出你的问题，等待回答。
 
-### 3.3 使用场景
+## 进阶：多轮对话版本
 
-启用 HomePod channel 后，以下功能的输出可以通过 HomePod 播放：
+如果你想支持多轮对话（不需要每次重新喊 Siri），在上面的基础上修改：
 
-- **Cron 定时任务**：如每早 8:00 播报天气和日程
-- **Agent 主动通知**：任务完成、异常告警等
-- **其他 channel 转发**：将特定消息路由到 HomePod
-
-### 3.4 首次配对
-
-首次连接 HomePod 时，pyatv 可能需要配对。运行 `nanobot gateway` 后查看日志获取配对指引。
+1. 在「朗读文本」后面添加「获取字典值」→ 键 `end_conversation`（从步骤 3 的结果获取）
+2. 添加「如果」→ 条件：`end_conversation` 等于 `1`
+   - 是：添加「什么也不做」
+   - 否：回到步骤 2（要求输入），用「重复」动作包裹步骤 2-5
+3. 用「重复」动作包裹，重复 20 次（防止无限循环）
 
 ## 故障排查
 
 | 问题 | 解决方案 |
 |------|----------|
-| Shortcut 超时 | 增大 `api.timeout`；检查 LLM provider 连通性 |
-| 401 Unauthorized | 检查 Shortcut 中的 `Authorization` header 是否正确 |
-| 找不到 HomePod | 确保同一局域网，无 AP 隔离；尝试重启 HomePod |
-| TTS 无声 | 检查 TTS provider API key；用 `/v1/audio/speech` 手动测试 |
-| 回答过长 Siri 念不完 | 改用高级版 TTS 方案或在 agent prompt 中限制回答长度 |
+| Siri 自己回答了 | 加"运行"前缀："嘿 Siri, **运行**问机器人" |
+| 快捷指令没反应 | 先在 iPhone 上手动运行测试 |
+| 网络请求失败 | 确认 iPhone 和服务器在同一局域网，无 AP 隔离 |
+| HomePod 不触发 | 检查「家庭」App → 个人请求是否已开启 |
+| 401 错误 | 检查 Authorization header 中的 API key |
+| 超时 | 增大 `api.timeout` 配置，默认 120 秒 |
 
-## API 端点参考
+## API 参考
 
-| 端点 | 方法 | 说明 |
-|------|------|------|
-| `/v1/voice/ask` | POST | 语音问答，返回纯文本 `{"text": "..."}` |
-| `/v1/audio/speech` | POST | 文本转语音，返回 audio/mpeg |
-| `/v1/chat/completions` | POST | OpenAI 兼容完整 API |
-| `/v1/models` | GET | 可用模型列表 |
-| `/health` | GET | 健康检查（无需鉴权） |
+### POST /v1/voice/ask
+
+请求：
+```json
+{"text": "你的问题", "speaker": "homepod"}
+```
+
+响应：
+```json
+{"reply": "纯文本回答", "end_conversation": false}
+```
+
+### POST /v1/audio/speech
+
+请求：
+```json
+{"input": "要转语音的文本", "voice": "alloy", "model": "tts-1"}
+```
+
+响应：`audio/mpeg` 字节流
+
+### GET /health
+
+响应：`{"status": "ok"}`（无需鉴权）

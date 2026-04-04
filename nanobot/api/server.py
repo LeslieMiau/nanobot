@@ -193,10 +193,12 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
 
 
 async def handle_voice_ask(request: web.Request) -> web.Response:
-    """POST /v1/voice/ask — simplified voice Q&A endpoint.
+    """POST /v1/voice/ask — voice Q&A endpoint (ClawPod-compatible).
 
-    Accepts {"text": "question", "session_id": "homepod"} and returns
-    {"text": "plain-text answer"} with markdown stripped for voice output.
+    Accepts {"text": "question", "speaker": "name"} and returns
+    {"reply": "plain-text answer", "end_conversation": false}.
+
+    Also accepts legacy fields: "session_id" (alias for speaker).
     """
     try:
         body = await request.json()
@@ -207,15 +209,16 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
     if not user_text:
         return _error_json(400, "Missing 'text' field")
 
-    session_id = body.get("session_id", "voice")
-    session_key = f"api:{session_id}"
+    # Speaker / session identification — compatible with ClawPod
+    speaker = body.get("speaker", "") or body.get("session_id", "voice")
+    session_key = f"api:{speaker}"
 
     agent_loop = request.app["agent_loop"]
     timeout_s: float = request.app.get("request_timeout", 120.0)
     session_locks: dict[str, asyncio.Lock] = request.app["session_locks"]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
-    logger.info("Voice ask session_key={} text={}", session_key, user_text[:80])
+    logger.info("Voice ask speaker={} text={}", speaker, user_text[:80])
 
     try:
         async with session_lock:
@@ -235,14 +238,22 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
             except asyncio.TimeoutError:
                 return _error_json(504, f"Request timed out after {timeout_s}s")
             except Exception:
-                logger.exception("Error processing voice request for session {}", session_key)
+                logger.exception("Error processing voice request for speaker {}", speaker)
                 return _error_json(500, "Internal server error", err_type="server_error")
     except Exception:
-        logger.exception("Unexpected voice API lock error for session {}", session_key)
+        logger.exception("Unexpected voice API lock error for speaker {}", speaker)
         return _error_json(500, "Internal server error", err_type="server_error")
 
     plain_text = _strip_markdown(response_text)
-    return web.json_response({"text": plain_text})
+
+    # Detect end-of-conversation signals in the response
+    end_phrases = {"再见", "拜拜", "下次见", "goodbye", "bye"}
+    end_conversation = any(p in plain_text.lower() for p in end_phrases)
+
+    return web.json_response({
+        "reply": plain_text,
+        "end_conversation": end_conversation,
+    })
 
 
 async def handle_audio_speech(request: web.Request) -> web.Response:
