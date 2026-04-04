@@ -922,16 +922,19 @@ def coding_task_create(
 def coding_task_list(
     workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
     config: str | None = typer.Option(None, "--config", "-c", help="Path to config file"),
+    all_tasks: bool = typer.Option(False, "--all", help="Include completed, failed, and cancelled task history"),
 ):
     """List persisted coding tasks."""
     config_obj = _load_runtime_config(config, workspace)
     runtime = _load_coding_task_runtime(config_obj)
-    store = runtime.store
     manager = runtime.manager
-    tasks = store.list_tasks()
+    tasks = runtime.policy.visible_tasks(include_terminal=all_tasks)
 
     if not tasks:
-        console.print("No coding tasks.")
+        if all_tasks:
+            console.print("No coding tasks.")
+        else:
+            console.print("No visible coding tasks. Use `nanobot coding-task list --all` for task history.")
         return
 
     console.print("Coding tasks:")
@@ -1321,7 +1324,7 @@ def channels_status(
     if resolved_config_path is not None:
         set_config_path(resolved_config_path)
 
-    config = load_config(resolved_config_path)
+    config = load_config() if resolved_config_path is None else load_config(resolved_config_path)
     manager = ChannelManager(config, MessageBus())
     status_map = manager.get_status()
 

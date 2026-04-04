@@ -445,7 +445,7 @@ def _make_control_handler(
                 chat_id=msg.chat_id,
                 content=(
                     "**当前私聊里没有可管理的编程任务**\n"
-                    "失败或已取消的任务不会显示在 Telegram `/coding` 列表里。\n"
+                    "已完成、失败或已取消的任务不会显示在 Telegram `/coding` 列表里。\n"
                     "先发送 `开始编程 ...` 或 `/coding <repo> <goal>` 创建一个新任务。"
                 ),
             )
@@ -631,7 +631,7 @@ def _format_task_list(policy: CodingTaskPolicy, channel: str, chat_id: str, mana
     if not tasks:
         return (
             "**当前私聊里没有可管理的编程任务**\n"
-            "失败或已取消的任务已隐藏；先发送 `开始编程 ...` 或 `/coding <repo> <goal>` 创建一个新任务。"
+            "已完成、失败或已取消的任务已隐藏；先发送 `开始编程 ...` 或 `/coding <repo> <goal>` 创建一个新任务。"
         )
     lines = ["**当前编程任务列表**"]
     for index, task in enumerate(tasks, start=1):

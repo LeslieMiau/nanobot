@@ -7,7 +7,7 @@ from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.types import CodingTask
 from nanobot.coding_tasks.types import WAITING_REASON_KIND_WORKER_EXIT_REVIEW
 
-_HIDDEN_TASK_STATUSES = {"failed", "cancelled"}
+_HIDDEN_TASK_STATUSES = {"completed", "failed", "cancelled"}
 _CONTROL_TASK_STATUSES = {"starting", "running", "waiting_user"}
 _HARNESS_CONFLICT_EXPECTED_STATES = {
     "repo_active_harness": "active",
@@ -53,6 +53,15 @@ class CodingTaskPolicy:
             )
             if task.status not in _HIDDEN_TASK_STATUSES
         ]
+
+    def visible_tasks(self, *, include_terminal: bool = False) -> list[CodingTask]:
+        """Return workspace tasks in UI order, optionally including terminal history."""
+        tasks = self._reconcile_stale_harness_conflicts(
+            self.manager._newest_first(self.manager.store.list_tasks())
+        )
+        if include_terminal:
+            return tasks
+        return [task for task in tasks if task.status not in _HIDDEN_TASK_STATUSES]
 
     def task_for_origin_index(self, channel: str, chat_id: str, index: int) -> CodingTask | None:
         """Return the 1-based indexed task for one origin chat, if any."""

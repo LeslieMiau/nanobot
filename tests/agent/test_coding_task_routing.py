@@ -502,6 +502,28 @@ async def test_private_telegram_slash_coding_list_hides_cancelled_tasks(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_private_telegram_slash_coding_list_hides_completed_tasks(tmp_path: Path) -> None:
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
+    manager, visible = _create_origin_task(store, tmp_path, status="running", summary="visible task")
+    manager, completed = _create_origin_task(store, tmp_path, status="running", summary="done task")
+    manager.mark_completed(completed.id, summary="done")
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding list",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "`demo-repo`" in response.content
+    assert completed.id not in response.content
+
+
+@pytest.mark.asyncio
 async def test_private_telegram_slash_coding_status_can_target_indexed_task(tmp_path: Path) -> None:
     loop, store, _manager, _launcher = _make_loop(tmp_path)
     _manager, first = _create_origin_task(store, tmp_path, status="running", summary="first task")

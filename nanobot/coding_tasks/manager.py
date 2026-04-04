@@ -26,6 +26,7 @@ _ALLOWED_TRANSITIONS = {
     "cancelled": set(),
 }
 _ACTIVE_TASK_STATUSES = {"starting", "running", "waiting_user"}
+_ARTIFACT_SUFFIXES = (".prompt.txt", ".launch.sh", ".codex.log")
 
 
 class CodexWorkerManager:
@@ -302,6 +303,8 @@ class CodexWorkerManager:
                 },
             )
         )
+        if new_status == "completed":
+            self._cleanup_task_artifacts(updated)
         return updated
 
     def _default_tmux_session(self, task_id: str, repo_path: str) -> str:
@@ -316,3 +319,36 @@ class CodexWorkerManager:
         self._validate_status(task.status)
         if task.harness_state not in HARNESS_STATE_VALUES:
             raise ValueError(f"Unknown harness state: {task.harness_state}")
+
+    def _cleanup_task_artifacts(self, task: CodingTask) -> None:
+        removed: list[str] = []
+        failed: list[str] = []
+
+        for path in self._task_artifact_paths(task.id):
+            if not path.exists():
+                continue
+            try:
+                path.unlink()
+                removed.append(path.name)
+            except OSError as exc:
+                failed.append(f"{path.name}: {exc}")
+
+        message = "Removed task artifacts after completion."
+        if failed:
+            message = "Best-effort artifact cleanup completed with errors."
+        self.store.append_run_event(
+            CodingRunEvent(
+                task_id=task.id,
+                event="artifact_cleanup",
+                status=task.status,
+                message=message,
+                payload={
+                    "removed_files": removed,
+                    "failed_files": failed,
+                },
+            )
+        )
+
+    def _task_artifact_paths(self, task_id: str) -> list[Path]:
+        artifact_dir = self.workspace / "automation" / "coding" / "artifacts"
+        return [artifact_dir / f"{task_id}{suffix}" for suffix in _ARTIFACT_SUFFIXES]

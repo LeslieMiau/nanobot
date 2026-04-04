@@ -23,9 +23,11 @@ def test_lifecycle_changes_append_structured_run_events_in_order(tmp_path: Path)
         "status_changed",
         "status_changed",
         "status_changed",
+        "artifact_cleanup",
     ]
+    assert events[-2].status == "completed"
+    assert events[-2].message == "Done"
     assert events[-1].status == "completed"
-    assert events[-1].message == "Done"
 
 
 def test_user_controls_are_logged_separately_from_status_changes(tmp_path: Path) -> None:

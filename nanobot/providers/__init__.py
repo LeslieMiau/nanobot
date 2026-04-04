@@ -26,6 +26,10 @@ _LAZY_IMPORTS = {
     "GitHubCopilotProvider": ".github_copilot_provider",
     "AzureOpenAIProvider": ".azure_openai_provider",
 }
+_LAZY_MODULES = {
+    module_name.removeprefix("."): module_name
+    for module_name in set(_LAZY_IMPORTS.values())
+}
 
 if TYPE_CHECKING:
     from nanobot.providers.anthropic_provider import AnthropicProvider
@@ -38,6 +42,9 @@ if TYPE_CHECKING:
 
 def __getattr__(name: str):
     """Lazily expose provider implementations without importing all backends up front."""
+    module_name = _LAZY_MODULES.get(name)
+    if module_name is not None:
+        return import_module(module_name, __name__)
     module_name = _LAZY_IMPORTS.get(name)
     if module_name is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

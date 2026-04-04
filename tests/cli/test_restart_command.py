@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -282,3 +283,48 @@ def test_channels_status_shows_runtime_details(monkeypatch):
     assert result.exit_code == 0
     assert "Telegram" in result.stdout
     assert "explicit:http://127.0.0.1:1082" in result.stdout
+
+
+def test_channels_status_honors_explicit_config_path(monkeypatch, tmp_path):
+    from nanobot.cli.commands import app
+    from nanobot.config.schema import Config
+
+    runner = CliRunner()
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{}", encoding="utf-8")
+    config = Config.model_validate(
+        {
+            "channels": {
+                "telegram": {
+                    "enabled": True,
+                    "token": "123:abc",
+                    "allowFrom": ["*"],
+                }
+            }
+        }
+    )
+    seen_paths: list[Path] = []
+
+    class _FakeManager:
+        def __init__(self, _config, _bus) -> None:
+            pass
+
+        def get_status(self):
+            return {"telegram": {"enabled": True, "running": False, "runtime": {}}}
+
+    def _fake_load_config(path=None):
+        seen_paths.append(path)
+        return config
+
+    monkeypatch.setattr("nanobot.config.loader.load_config", _fake_load_config)
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr(
+        "nanobot.channels.registry.discover_all",
+        lambda: {"telegram": SimpleNamespace(display_name="Telegram")},
+    )
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeManager)
+
+    result = runner.invoke(app, ["channels", "status", "--config", str(config_path)])
+
+    assert result.exit_code == 0
+    assert seen_paths == [config_path.resolve()]
