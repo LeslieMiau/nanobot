@@ -28,7 +28,7 @@ RESPONSE=$(curl -s -m 120 \
   -H "Authorization: Bearer ${API_KEY}" \
   -d "{\"text\": ${ESCAPED}, \"session_id\": \"${SESSION}\"}")
 
-# 提取 text 字段
-TEXT=$(echo "$RESPONSE" | python3 -c 'import json,sys; print(json.loads(sys.stdin.read()).get("text","无回复"))')
+# 提取 reply 字段，兼容旧版 text 字段
+TEXT=$(echo "$RESPONSE" | python3 -c 'import json,sys; data=json.loads(sys.stdin.read()); print(data.get("reply") or data.get("text","无回复"))')
 
 echo "$TEXT"

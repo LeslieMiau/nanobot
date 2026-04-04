@@ -6,7 +6,7 @@
 
 实际方案: 生成两个版本 —
   1. 固定问题版（验证 API 连通性）
-  2. 交互版（用 ask + URL 变量拼接）
+  2. 交互版（推荐导入为 Siri 入口，名称与文档保持一致）
 """
 
 import plistlib
@@ -111,7 +111,7 @@ def build_interactive_shortcut():
 
     base_url = f"{ENDPOINT}?speaker={SPEAKER}&key={API_KEY}&text="
 
-    return "呼叫助手", {
+    return "问机器人", {
         "WFWorkflowMinimumClientVersion": 900,
         "WFWorkflowMinimumClientVersionString": "900",
         "WFWorkflowIcon": {
@@ -186,7 +186,7 @@ def build_interactive_shortcut():
         "WFWorkflowTypes": [],
         "WFWorkflowHasShortcutInputVariables": False,
         "WFQuickActionSurfaces": [],
-        "WFWorkflowName": "呼叫助手",
+        "WFWorkflowName": "问机器人",
     }
 
 
@@ -201,8 +201,8 @@ def main():
 
     print()
     print("第一步: 导入并运行「测试助手」验证 API 连通性")
-    print("第二步: 导入「呼叫助手」用于日常使用")
-    print('使用: "嘿 Siri, 运行呼叫助手"')
+    print("第二步: 导入「问机器人」作为 Siri 日常入口")
+    print('使用: "嘿 Siri, 运行问机器人"')
 
 
 if __name__ == "__main__":

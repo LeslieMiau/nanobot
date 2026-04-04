@@ -48,7 +48,24 @@ curl -X POST http://192.168.x.x:8900/v1/voice/ask \
 # → {"reply": "...", "end_conversation": false}
 ```
 
-## 第二步：在 iPhone 上创建快捷指令
+## 第二步：导入快捷指令
+
+推荐直接使用仓库里已经生成好的快捷指令文件：
+
+- [测试助手](../测试助手.shortcut)：先验证 API 是否可达
+- [问机器人](../问机器人.shortcut)：日常对话入口，推荐绑定 Siri
+- 如果你更想自己搭动作，继续阅读下面的手工步骤
+
+建议顺序：
+
+1. 在 iPhone 上打开仓库页面，先导入 [测试助手](../测试助手.shortcut)
+2. 运行一次，确认能正常朗读返回结果
+3. 再导入 [问机器人](../问机器人.shortcut)
+4. 对 HomePod 说：`嘿 Siri, 运行问机器人`
+
+如果你想完全手工搭建，继续看下面的动作拆解。
+
+## 第三步：在 iPhone 上手工创建快捷指令
 
 > 必须在 **iPhone** 上创建，不是 Mac。HomePod 通过 iPhone 运行快捷指令。
 
@@ -104,9 +121,9 @@ http://192.168.x.x:8900
 
 直接点击运行按钮测试。输入"你好"，应该能听到 Nanobot 的回答被朗读出来。
 
-## 第三步：绑定 HomePod
+## 第四步：绑定 HomePod
 
-### 3.1 启用 Personal Content
+### 4.1 启用 Personal Content
 
 在 iPhone 上：
 1. 打开「家庭」App
@@ -115,7 +132,7 @@ http://192.168.x.x:8900
 4. 启用「个人请求」/ Personal Requests
 5. 选择你的 iPhone 作为设备
 
-### 3.2 对 HomePod 说
+### 4.2 对 HomePod 说
 
 ```
 "嘿 Siri, 运行问机器人"
