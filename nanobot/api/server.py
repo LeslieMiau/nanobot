@@ -27,17 +27,19 @@ API_CHAT_ID = "default"
 
 @web.middleware
 async def api_key_middleware(request: web.Request, handler):
-    """Check Bearer token when an API key is configured."""
+    """Check Bearer token or ?key= query param when an API key is configured."""
     api_key: str = request.app.get("api_key", "")
     if not api_key:
         return await handler(request)
     # Skip auth for health check
     if request.path == "/health":
         return await handler(request)
+    # Accept key via Authorization header or ?key= query param
     auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {api_key}":
-        return _error_json(401, "Invalid or missing API key", "authentication_error")
-    return await handler(request)
+    query_key = request.query.get("key", "")
+    if auth == f"Bearer {api_key}" or query_key == api_key:
+        return await handler(request)
+    return _error_json(401, "Invalid or missing API key", "authentication_error")
 
 
 # ---------------------------------------------------------------------------
@@ -193,19 +195,23 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
 
 
 async def handle_voice_ask(request: web.Request) -> web.Response:
-    """POST /v1/voice/ask — voice Q&A endpoint (ClawPod-compatible).
+    """POST/GET /v1/voice/ask — voice Q&A endpoint.
 
-    Accepts {"text": "question", "speaker": "name"} and returns
-    {"reply": "plain-text answer", "end_conversation": false}.
+    POST: {"text": "question", "speaker": "name"}
+    GET:  ?text=question&speaker=name
 
-    Also accepts legacy fields: "session_id" (alias for speaker).
+    Returns {"reply": "plain-text answer", "end_conversation": false}.
     """
-    try:
-        body = await request.json()
-    except Exception:
-        return _error_json(400, "Invalid JSON body")
+    if request.method == "GET":
+        user_text = request.query.get("text", "").strip()
+        body = dict(request.query)
+    else:
+        try:
+            body = await request.json()
+        except Exception:
+            return _error_json(400, "Invalid JSON body")
+        user_text = body.get("text", "").strip()
 
-    user_text = body.get("text", "").strip()
     if not user_text:
         return _error_json(400, "Missing 'text' field")
 
@@ -347,6 +353,7 @@ def create_app(
 
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
     app.router.add_post("/v1/voice/ask", handle_voice_ask)
+    app.router.add_get("/v1/voice/ask", handle_voice_ask)
     app.router.add_post("/v1/audio/speech", handle_audio_speech)
     app.router.add_get("/v1/models", handle_models)
     app.router.add_get("/health", handle_health)
