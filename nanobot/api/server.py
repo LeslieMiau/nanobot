@@ -27,17 +27,19 @@ API_CHAT_ID = "default"
 
 @web.middleware
 async def api_key_middleware(request: web.Request, handler):
-    """Check Bearer token when an API key is configured."""
+    """Check Bearer token or ?key= query param when an API key is configured."""
     api_key: str = request.app.get("api_key", "")
     if not api_key:
         return await handler(request)
     # Skip auth for health check
     if request.path == "/health":
         return await handler(request)
+    # Accept key via Authorization header or ?key= query param
     auth = request.headers.get("Authorization", "")
-    if auth != f"Bearer {api_key}":
-        return _error_json(401, "Invalid or missing API key", "authentication_error")
-    return await handler(request)
+    query_key = request.query.get("key", "")
+    if auth == f"Bearer {api_key}" or query_key == api_key:
+        return await handler(request)
+    return _error_json(401, "Invalid or missing API key", "authentication_error")
 
 
 # ---------------------------------------------------------------------------
@@ -193,29 +195,36 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
 
 
 async def handle_voice_ask(request: web.Request) -> web.Response:
-    """POST /v1/voice/ask — simplified voice Q&A endpoint.
+    """POST/GET /v1/voice/ask — voice Q&A endpoint.
 
-    Accepts {"text": "question", "session_id": "homepod"} and returns
-    {"text": "plain-text answer"} with markdown stripped for voice output.
+    POST: {"text": "question", "speaker": "name"}
+    GET:  ?text=question&speaker=name
+
+    Returns {"reply": "plain-text answer", "end_conversation": false}.
     """
-    try:
-        body = await request.json()
-    except Exception:
-        return _error_json(400, "Invalid JSON body")
+    if request.method == "GET":
+        user_text = request.query.get("text", "").strip()
+        body = dict(request.query)
+    else:
+        try:
+            body = await request.json()
+        except Exception:
+            return _error_json(400, "Invalid JSON body")
+        user_text = body.get("text", "").strip()
 
-    user_text = body.get("text", "").strip()
     if not user_text:
         return _error_json(400, "Missing 'text' field")
 
-    session_id = body.get("session_id", "voice")
-    session_key = f"api:{session_id}"
+    # Speaker / session identification — compatible with ClawPod
+    speaker = body.get("speaker", "") or body.get("session_id", "voice")
+    session_key = f"api:{speaker}"
 
     agent_loop = request.app["agent_loop"]
     timeout_s: float = request.app.get("request_timeout", 120.0)
     session_locks: dict[str, asyncio.Lock] = request.app["session_locks"]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
-    logger.info("Voice ask session_key={} text={}", session_key, user_text[:80])
+    logger.info("Voice ask speaker={} text={}", speaker, user_text[:80])
 
     try:
         async with session_lock:
@@ -235,14 +244,22 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
             except asyncio.TimeoutError:
                 return _error_json(504, f"Request timed out after {timeout_s}s")
             except Exception:
-                logger.exception("Error processing voice request for session {}", session_key)
+                logger.exception("Error processing voice request for speaker {}", speaker)
                 return _error_json(500, "Internal server error", err_type="server_error")
     except Exception:
-        logger.exception("Unexpected voice API lock error for session {}", session_key)
+        logger.exception("Unexpected voice API lock error for speaker {}", speaker)
         return _error_json(500, "Internal server error", err_type="server_error")
 
     plain_text = _strip_markdown(response_text)
-    return web.json_response({"text": plain_text})
+
+    # Detect end-of-conversation signals in the response
+    end_phrases = {"再见", "拜拜", "下次见", "goodbye", "bye"}
+    end_conversation = any(p in plain_text.lower() for p in end_phrases)
+
+    return web.json_response({
+        "reply": plain_text,
+        "end_conversation": end_conversation,
+    })
 
 
 async def handle_audio_speech(request: web.Request) -> web.Response:
@@ -336,6 +353,7 @@ def create_app(
 
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
     app.router.add_post("/v1/voice/ask", handle_voice_ask)
+    app.router.add_get("/v1/voice/ask", handle_voice_ask)
     app.router.add_post("/v1/audio/speech", handle_audio_speech)
     app.router.add_get("/v1/models", handle_models)
     app.router.add_get("/health", handle_health)
