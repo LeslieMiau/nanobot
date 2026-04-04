@@ -455,15 +455,15 @@ Quick links:
 
 - [Setup guide](./docs/HOMEPOD_SETUP.md)
 - [测试助手.shortcut](./测试助手.shortcut) for connectivity checks
-- [问机器人.shortcut](./问机器人.shortcut) as the recommended Siri-facing shortcut
+- [嘿助手.shortcut](./嘿助手.shortcut) as the recommended Siri-facing shortcut
 
 Recommended voice command:
 
 ```text
-嘿 Siri, 运行问机器人
+嘿 Siri, 运行嘿助手
 ```
 
-Import `测试助手.shortcut` first, confirm it can read a reply aloud, then import `问机器人.shortcut` for daily use.
+Import `测试助手.shortcut` first, confirm it can read a reply aloud, then import `嘿助手.shortcut` for daily use.
 
 </details>
 

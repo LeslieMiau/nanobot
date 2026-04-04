@@ -29,8 +29,8 @@ def test_recommended_shortcuts_keep_expected_names_and_api_shape() -> None:
 
     assert test_name == "测试助手"
     assert test_shortcut["WFWorkflowName"] == "测试助手"
-    assert interactive_name == "问机器人"
-    assert interactive_shortcut["WFWorkflowName"] == "问机器人"
+    assert interactive_name == "嘿助手"
+    assert interactive_shortcut["WFWorkflowName"] == "嘿助手"
 
     test_download = test_shortcut["WFWorkflowActions"][0]["WFWorkflowActionParameters"]
     assert test_download["WFHTTPMethod"] == "GET"
@@ -63,8 +63,8 @@ def test_docs_expose_recommended_shortcut_links() -> None:
 
     assert "./docs/HOMEPOD_SETUP.md" in readme
     assert "./测试助手.shortcut" in readme
-    assert "./问机器人.shortcut" in readme
+    assert "./嘿助手.shortcut" in readme
 
     assert "../测试助手.shortcut" in setup_doc
-    assert "../问机器人.shortcut" in setup_doc
-    assert "嘿 Siri, 运行问机器人" in setup_doc
+    assert "../嘿助手.shortcut" in setup_doc
+    assert "嘿 Siri, 运行嘿助手" in setup_doc

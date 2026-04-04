@@ -20,6 +20,7 @@ NANOBOT_HOST = "192.168.3.79"
 NANOBOT_PORT = 8900
 API_KEY = "nb-3b7d4b91132c9bb850c2646f92860dc8"
 SPEAKER = "homepod"
+INTERACTIVE_SHORTCUT_NAME = "嘿助手"
 # ============================================================
 
 ENDPOINT = f"http://{NANOBOT_HOST}:{NANOBOT_PORT}/v1/voice/ask"
@@ -143,7 +144,7 @@ def build_interactive_shortcut():
     url_id = _uuid()
     dict_id = _uuid()
 
-    return "问机器人", {
+    return INTERACTIVE_SHORTCUT_NAME, {
         "WFWorkflowMinimumClientVersion": 900,
         "WFWorkflowMinimumClientVersionString": "900",
         "WFWorkflowIcon": {
@@ -232,7 +233,7 @@ def build_interactive_shortcut():
         "WFWorkflowTypes": [],
         "WFWorkflowHasShortcutInputVariables": False,
         "WFQuickActionSurfaces": [],
-        "WFWorkflowName": "问机器人",
+        "WFWorkflowName": INTERACTIVE_SHORTCUT_NAME,
     }
 
 
@@ -250,8 +251,8 @@ def main():
 
     print()
     print("第一步: 导入并运行「测试助手」验证 API 连通性")
-    print("第二步: 导入「问机器人」作为 Siri 日常入口")
-    print('使用: "嘿 Siri, 运行问机器人"')
+    print(f"第二步: 导入「{INTERACTIVE_SHORTCUT_NAME}」作为 Siri 日常入口")
+    print(f'使用: "嘿 Siri, 运行{INTERACTIVE_SHORTCUT_NAME}"')
 
 
 if __name__ == "__main__":
