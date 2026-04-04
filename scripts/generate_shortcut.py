@@ -10,6 +10,8 @@
 """
 
 import plistlib
+import shutil
+import subprocess
 import uuid
 from pathlib import Path
 
@@ -44,6 +46,40 @@ def _text(attachments, s):
 def _simple_text(s):
     """纯文本，无变量。"""
     return {"Value": {"string": s}, "WFSerializationType": "WFTextTokenString"}
+
+
+def _sign_shortcut_file(path: Path) -> bool:
+    """Use macOS shortcuts CLI to produce an importable signed file when available."""
+    shortcuts_cli = shutil.which("shortcuts")
+    if not shortcuts_cli:
+        return False
+
+    signed_path = path.with_name(f"{path.stem}.signed{path.suffix}")
+    try:
+        subprocess.run(
+            [
+                shortcuts_cli,
+                "sign",
+                "--mode",
+                "anyone",
+                "--input",
+                str(path),
+                "--output",
+                str(signed_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.strip()
+        if stderr:
+            print(f"[warn] 签名失败 {path.name}: {stderr}")
+        return False
+
+    path.write_bytes(signed_path.read_bytes())
+    signed_path.unlink(missing_ok=True)
+    return True
 
 
 def build_test_shortcut():
@@ -207,7 +243,10 @@ def main():
         out = out_dir / f"{name}.shortcut"
         with open(out, "wb") as f:
             plistlib.dump(data, f, fmt=plistlib.FMT_BINARY)
+        signed = _sign_shortcut_file(out)
         print(f"已生成: {out}")
+        if signed:
+            print(f"已签名: {out}")
 
     print()
     print("第一步: 导入并运行「测试助手」验证 API 连通性")
