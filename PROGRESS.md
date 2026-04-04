@@ -1,0 +1,6 @@
+## 2026-04-04 Session Start
+- Initialized a new harness checkpoint for the Telegram `/coding status` mismatch repair in `/Users/miau/Documents/nanobot`.
+- Baseline verification from `bash ~/.codex/scripts/global-init.sh` found one pre-existing unrelated pytest failure: `tests/cli/test_restart_command.py::test_channels_status_shows_runtime_details` exits via a `load_config` monkeypatch signature mismatch. This task will keep that baseline separate and use focused verification for the `/coding` repair.
+- Runtime diagnosis confirmed the active workspace store is `/Users/miau/.nanobot/workspace/automation/coding/tasks.json`, not the repository-local tree.
+- The current Telegram private-chat task store still contains a visible `waiting_user` placeholder task `e15939a3` for `/Users/miau/Documents/codex-remote`, but the actual repo no longer has `PLAN.json` or `PROGRESS.md`; only `init.sh` remains, so the stored `repo_active_harness` conflict reason is stale.
+- Repair intent for this task: when `/coding` sees a placeholder conflict record whose stored harness expectation no longer matches the repository's actual harness files, clear that stale record immediately and continue using live repo state as the source of truth.
