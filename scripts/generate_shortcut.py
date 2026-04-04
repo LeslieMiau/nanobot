@@ -6,7 +6,7 @@
 
 实际方案: 生成两个版本 —
   1. 固定问题版（验证 API 连通性）
-  2. 交互版（推荐导入为 Siri 入口，名称与文档保持一致）
+  2. 交互版（按 Apple 官方 Web API 模式使用 POST JSON）
 """
 
 import plistlib
@@ -102,14 +102,10 @@ def build_test_shortcut():
 
 
 def build_interactive_shortcut():
-    """交互版 — 要求输入 + URL 编码 + GET 请求。"""
+    """交互版 — Ask for Input + POST JSON + 朗读 reply。"""
     ask_id = _uuid()
-    encode_id = _uuid()
-    text_id = _uuid()
     url_id = _uuid()
     dict_id = _uuid()
-
-    base_url = f"{ENDPOINT}?speaker={SPEAKER}&key={API_KEY}&text="
 
     return "问机器人", {
         "WFWorkflowMinimumClientVersion": 900,
@@ -132,38 +128,52 @@ def build_interactive_shortcut():
                     "CustomOutputName": "问题",
                 },
             },
-            # 2. URL 编码用户输入
-            {
-                "WFWorkflowActionIdentifier": "is.workflow.actions.urlencode",
-                "WFWorkflowActionParameters": {
-                    "WFInput": _text({"0,1": _ref(ask_id, "问题")}, "\uFFFC"),
-                    "UUID": encode_id,
-                    "CustomOutputName": "编码问题",
-                },
-            },
-            # 3. 文本：拼接 base_url + 编码后的问题
-            {
-                "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
-                "WFWorkflowActionParameters": {
-                    "WFTextActionText": _text(
-                        {f"{len(base_url)},1": _ref(encode_id, "编码问题")},
-                        base_url + "\uFFFC",
-                    ),
-                    "UUID": text_id,
-                    "CustomOutputName": "完整地址",
-                },
-            },
-            # 4. 获取 URL 内容
+            # 2. 获取 URL 内容（Apple 官方 Web API 模式：POST + JSON body）
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
                 "WFWorkflowActionParameters": {
-                    "WFURL": _text({"0,1": _ref(text_id, "完整地址")}, "\uFFFC"),
-                    "WFHTTPMethod": "GET",
+                    "WFURL": ENDPOINT,
+                    "WFHTTPMethod": "POST",
+                    "WFHTTPBodyType": "JSON",
+                    "WFHTTPHeaders": {
+                        "Value": {
+                            "WFDictionaryFieldValueItems": [
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("Content-Type"),
+                                    "WFValue": _simple_text("application/json"),
+                                },
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("Authorization"),
+                                    "WFValue": _simple_text(f"Bearer {API_KEY}"),
+                                },
+                            ]
+                        },
+                        "WFSerializationType": "WFDictionaryFieldValue",
+                    },
+                    "WFJSONValues": {
+                        "Value": {
+                            "WFDictionaryFieldValueItems": [
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("text"),
+                                    "WFValue": _text({"0,1": _ref(ask_id, "问题")}, "\uFFFC"),
+                                },
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("speaker"),
+                                    "WFValue": _simple_text(SPEAKER),
+                                },
+                            ]
+                        },
+                        "WFSerializationType": "WFDictionaryFieldValue",
+                    },
                     "UUID": url_id,
                     "CustomOutputName": "回复",
                 },
             },
-            # 5. 取字典值
+            # 3. 取字典值
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
                 "WFWorkflowActionParameters": {
@@ -173,7 +183,7 @@ def build_interactive_shortcut():
                     "CustomOutputName": "回答",
                 },
             },
-            # 6. 朗读
+            # 4. 朗读
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.speaktext",
                 "WFWorkflowActionParameters": {

@@ -38,9 +38,23 @@ def test_recommended_shortcuts_keep_expected_names_and_api_shape() -> None:
     assert "speaker=homepod" in test_download["WFURL"]
     assert "key=" in test_download["WFURL"]
 
-    interactive_download = interactive_shortcut["WFWorkflowActions"][3]["WFWorkflowActionParameters"]
-    assert interactive_download["WFHTTPMethod"] == "GET"
-    assert interactive_shortcut["WFWorkflowActions"][4]["WFWorkflowActionParameters"]["WFDictionaryKey"] == "reply"
+    interactive_download = interactive_shortcut["WFWorkflowActions"][1]["WFWorkflowActionParameters"]
+    assert interactive_download["WFHTTPMethod"] == "POST"
+    assert interactive_download["WFHTTPBodyType"] == "JSON"
+    assert interactive_download["WFURL"].endswith("/v1/voice/ask")
+
+    header_items = interactive_download["WFHTTPHeaders"]["Value"]["WFDictionaryFieldValueItems"]
+    headers = {
+        item["WFKey"]["Value"]["string"]: item["WFValue"]["Value"]["string"]
+        for item in header_items
+    }
+    assert headers["Content-Type"] == "application/json"
+    assert headers["Authorization"].startswith("Bearer ")
+
+    json_items = interactive_download["WFJSONValues"]["Value"]["WFDictionaryFieldValueItems"]
+    keys = [item["WFKey"]["Value"]["string"] for item in json_items]
+    assert keys == ["text", "speaker"]
+    assert interactive_shortcut["WFWorkflowActions"][2]["WFWorkflowActionParameters"]["WFDictionaryKey"] == "reply"
 
 
 def test_docs_expose_recommended_shortcut_links() -> None:
