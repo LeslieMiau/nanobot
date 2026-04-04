@@ -121,12 +121,24 @@ class HeartbeatConfig(Base):
     keep_recent_messages: int = 8
 
 
+class TTSConfig(Base):
+    """Text-to-speech configuration."""
+
+    provider: Literal["openai", "groq"] = "openai"
+    api_key: str = ""  # Falls back to the matching LLM provider key if empty.
+    api_base: str = ""  # Custom TTS endpoint. Empty = provider default.
+    model: str = "tts-1"
+    voice: str = "alloy"  # OpenAI voices: alloy, echo, fable, onyx, nova, shimmer
+
+
 class ApiConfig(Base):
     """OpenAI-compatible API server configuration."""
 
     host: str = "127.0.0.1"  # Safer default: local-only bind.
     port: int = 8900
     timeout: float = 120.0  # Per-request timeout in seconds.
+    api_key: str = ""  # Bearer token auth. Empty = no authentication.
+    tts: TTSConfig = Field(default_factory=TTSConfig)
 
 
 class GatewayConfig(Base):

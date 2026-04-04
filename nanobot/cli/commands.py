@@ -603,17 +603,32 @@ def serve(
     model_name = runtime_config.agents.defaults.model
     console.print(f"{__logo__} Starting OpenAI-compatible API server")
     console.print(f"  [cyan]Endpoint[/cyan] : http://{host}:{port}/v1/chat/completions")
+    console.print(f"  [cyan]Voice[/cyan]    : http://{host}:{port}/v1/voice/ask")
+    console.print(f"  [cyan]TTS[/cyan]      : http://{host}:{port}/v1/audio/speech")
     console.print(f"  [cyan]Model[/cyan]    : {model_name}")
     console.print("  [cyan]Session[/cyan]  : api:default")
     console.print(f"  [cyan]Timeout[/cyan]  : {timeout}s")
+    console.print(f"  [cyan]Auth[/cyan]     : {'enabled' if api_cfg.api_key else 'disabled'}")
     if host in {"0.0.0.0", "::"}:
-        console.print(
-            "[yellow]Warning:[/yellow] API is bound to all interfaces. "
-            "Only do this behind a trusted network boundary, firewall, or reverse proxy."
-        )
+        if not api_cfg.api_key:
+            console.print(
+                "[red]Warning:[/red] API is bound to all interfaces without authentication. "
+                "Set api.apiKey in config.json to protect the endpoint."
+            )
+        else:
+            console.print(
+                "[yellow]Note:[/yellow] API is bound to all interfaces (auth enabled)."
+            )
     console.print()
 
-    api_app = create_app(agent_loop, model_name=model_name, request_timeout=timeout)
+    api_app = create_app(
+        agent_loop,
+        model_name=model_name,
+        request_timeout=timeout,
+        api_key=api_cfg.api_key,
+        tts_config=api_cfg.tts,
+        nanobot_config=runtime_config,
+    )
 
     async def on_startup(_app):
         await agent_loop._connect_mcp()
