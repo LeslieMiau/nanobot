@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from nanobot.coding_tasks.manager import CodexWorkerManager
@@ -69,12 +69,13 @@ class TaskProgressReport:
     branch_name: str
     recent_commit_summary: str
     summary: str
+    plan_features: list[dict] = field(default_factory=list)
 
 
 def build_notification_progress(report: TaskProgressReport, *, last_progress_summary: str = "") -> str:
     """Build a short proactive-notification summary from detailed task progress."""
     if waiting_reason := detect_waiting_reason(report.live_output):
-        return _trim_summary(waiting_reason, limit=96)
+        return _trim_summary(waiting_reason, limit=160)
     if live_output := _normalize_notification_candidate(report.live_output):
         return live_output
     if summary_progress := _extract_progress_from_summary(last_progress_summary):
@@ -118,10 +119,25 @@ def summarize_plan_progress(repo_path: str | Path) -> PlanProgress:
     return PlanProgress(completed=completed, remaining=max(total - completed, 0), total=total)
 
 
+def _read_plan_features(repo_path: str | Path) -> list[dict]:
+    """Read PLAN.json and return the raw list of feature items."""
+    path = Path(repo_path) / "PLAN.json"
+    if not path.exists():
+        return []
+    try:
+        items = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(items, list):
+        return []
+    return items
+
+
 def build_task_progress_report(repo_path: str | Path, pane_output: str) -> TaskProgressReport:
     """Combine harness state and live pane output into a concise task report."""
     latest_note = extract_latest_progress_note(repo_path)
     plan_progress = summarize_plan_progress(repo_path)
+    plan_features = _read_plan_features(repo_path)
     live_output = _extract_live_output(pane_output)
     repo_snapshot = inspect_repo_snapshot(repo_path)
 
@@ -143,6 +159,7 @@ def build_task_progress_report(repo_path: str | Path, pane_output: str) -> TaskP
         branch_name=repo_snapshot.branch_name,
         recent_commit_summary=repo_snapshot.recent_commit_summary,
         summary=summary,
+        plan_features=plan_features,
     )
 
 
@@ -403,7 +420,7 @@ def _normalize_notification_candidate(text: str, *, prefer_clause: bool = False)
         return ""
     if prefer_clause:
         compact = _first_clause(compact)
-    return _trim_summary(compact, limit=96)
+    return _trim_summary(compact, limit=160)
 
 
 def _first_clause(text: str) -> str:
@@ -414,7 +431,7 @@ def _first_clause(text: str) -> str:
     return text
 
 
-def _trim_summary(text: str, limit: int = 160) -> str:
+def _trim_summary(text: str, limit: int = 256) -> str:
     compact = " ".join(text.split())
     if len(compact) <= limit:
         return compact
