@@ -206,10 +206,15 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
         user_text = request.query.get("text", "").strip()
         body = dict(request.query)
     else:
-        try:
-            body = await request.json()
-        except Exception:
-            return _error_json(400, "Invalid JSON body")
+        content_type = request.content_type or ""
+        if "form" in content_type:
+            form_data = await request.post()
+            body = dict(form_data)
+        else:
+            try:
+                body = await request.json()
+            except Exception:
+                return _error_json(400, "Invalid JSON body")
         user_text = body.get("text", "").strip()
 
     if not user_text:
