@@ -455,15 +455,15 @@ Quick links:
 
 - [Setup guide](./docs/HOMEPOD_SETUP.md)
 - [测试助手.shortcut](./测试助手.shortcut) for connectivity checks
-- [嘿助手.shortcut](./嘿助手.shortcut) as the recommended Siri-facing shortcut
+- [纳博特.shortcut](./纳博特.shortcut) as the recommended Siri-facing shortcut
 
 Recommended voice command:
 
 ```text
-嘿 Siri, 运行嘿助手
+嘿 Siri, 运行纳博特
 ```
 
-Import `测试助手.shortcut` first, confirm it can read a reply aloud, then import `嘿助手.shortcut` for daily use.
+Import `测试助手.shortcut` first, confirm it can read a reply aloud, then delete or rename old interactive shortcuts such as `问机器人` and `嘿助手`, and import `纳博特.shortcut` for daily use.
 
 </details>
 

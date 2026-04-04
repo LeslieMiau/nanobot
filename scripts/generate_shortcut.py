@@ -20,7 +20,7 @@ NANOBOT_HOST = "192.168.3.79"
 NANOBOT_PORT = 8900
 API_KEY = "nb-3b7d4b91132c9bb850c2646f92860dc8"
 SPEAKER = "homepod"
-INTERACTIVE_SHORTCUT_NAME = "嘿助手"
+INTERACTIVE_SHORTCUT_NAME = "纳博特"
 # ============================================================
 
 ENDPOINT = f"http://{NANOBOT_HOST}:{NANOBOT_PORT}/v1/voice/ask"
