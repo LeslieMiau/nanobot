@@ -128,3 +128,70 @@ def test_policy_does_not_block_new_tasks_on_worker_exit_review_wait(tmp_path) ->
     assert policy.blocking_active_task() is None
     assert policy.select_control_task("telegram", "chat-a") is not None
     assert policy.select_control_task("telegram", "chat-a").id == review.id
+
+
+def test_policy_clears_stale_harness_conflict_from_blocking_selection(tmp_path) -> None:
+    store = CodingTaskStore(tmp_path / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(tmp_path, store)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    stale = manager.create_task(
+        repo_path=str(repo),
+        goal="Resume old harness",
+        metadata={
+            "origin_channel": "telegram",
+            "origin_chat_id": "chat-a",
+            "harness_conflict_reason": "repo_active_harness",
+            "harness_conflict_resolution": "resume_existing",
+        },
+    )
+    manager.mark_starting(stale.id, summary="Boot")
+    manager.mark_waiting_user(stale.id, summary="Waiting for old harness choice")
+
+    policy = CodingTaskPolicy(manager)
+
+    assert policy.blocking_active_task() is None
+    updated = store.get_task(stale.id)
+    assert updated is not None
+    assert updated.status == "cancelled"
+    assert "Cleared stale harness conflict record" in updated.last_progress_summary
+
+
+def test_policy_hides_stale_harness_conflict_from_origin_task_list(tmp_path) -> None:
+    store = CodingTaskStore(tmp_path / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(tmp_path, store)
+    stale_repo = tmp_path / "stale-repo"
+    stale_repo.mkdir()
+    valid_repo = tmp_path / "valid-repo"
+    valid_repo.mkdir()
+
+    valid = manager.create_task(
+        repo_path=str(valid_repo),
+        goal="Completed",
+        metadata={"origin_channel": "telegram", "origin_chat_id": "chat-a"},
+    )
+    manager.mark_starting(valid.id, summary="Boot")
+    manager.mark_completed(valid.id, summary="Done")
+
+    stale = manager.create_task(
+        repo_path=str(stale_repo),
+        goal="Resume old harness",
+        metadata={
+            "origin_channel": "telegram",
+            "origin_chat_id": "chat-a",
+            "harness_conflict_reason": "repo_active_harness",
+            "harness_conflict_resolution": "resume_existing",
+        },
+    )
+    manager.mark_starting(stale.id, summary="Boot")
+    manager.mark_waiting_user(stale.id, summary="Waiting for old harness choice")
+
+    policy = CodingTaskPolicy(manager)
+
+    tasks = policy.tasks_for_origin("telegram", "chat-a")
+
+    assert [task.id for task in tasks] == [valid.id]
+    updated = store.get_task(stale.id)
+    assert updated is not None
+    assert updated.status == "cancelled"

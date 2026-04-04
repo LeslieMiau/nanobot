@@ -104,6 +104,27 @@ def _create_origin_task(store: CodingTaskStore, tmp_path: Path, *, status: str =
     return manager, task
 
 
+def _create_stale_harness_conflict_task(store: CodingTaskStore, tmp_path: Path, *, chat_id: str = "chat-1"):
+    manager = CodexWorkerManager(tmp_path, store)
+    repo_path = tmp_path / "stale-repo"
+    repo_path.mkdir(exist_ok=True)
+    task = manager.create_task(
+        repo_path=str(repo_path),
+        goal="继续旧的 harness",
+        metadata={
+            "origin_channel": "telegram",
+            "origin_chat_id": chat_id,
+            "requested_via": "telegram_private_chat",
+            "harness_conflict_reason": "repo_active_harness",
+            "harness_conflict_resolution": "resume_existing",
+            "existing_harness_summary": "old harness note",
+        },
+    )
+    task = manager.mark_starting(task.id, summary="Launching Codex")
+    task = manager.mark_waiting_user(task.id, summary="等待确认继续旧任务")
+    return manager, task
+
+
 def _init_active_harness(repo_path: Path, *, note: str = "Continue old task") -> None:
     repo_path.mkdir(exist_ok=True)
     (repo_path / "PLAN.json").write_text('[{"id": 1, "passes": false}]', encoding="utf-8")
@@ -753,6 +774,29 @@ async def test_private_telegram_status_reports_no_manageable_tasks_when_only_hid
 
 
 @pytest.mark.asyncio
+async def test_private_telegram_status_clears_stale_harness_conflict_task(tmp_path: Path) -> None:
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
+    _create_stale_harness_conflict_task(store, tmp_path)
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding status",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "当前私聊里没有可管理的编程任务" in response.content
+    tasks = store.list_tasks()
+    assert len(tasks) == 1
+    assert tasks[0].status == "cancelled"
+    assert "Cleared stale harness conflict record" in tasks[0].last_progress_summary
+
+
+@pytest.mark.asyncio
 async def test_private_telegram_start_coding_ignores_failed_task_for_workspace_blocking(tmp_path: Path) -> None:
     loop, store, manager, launcher = _make_loop(tmp_path, attach_launcher=True)
     _create_origin_task(store, tmp_path, status="failed", summary="old failure")
@@ -773,6 +817,32 @@ async def test_private_telegram_start_coding_ignores_failed_task_for_workspace_b
     assert "已创建并启动编程任务" in response.content
     tasks = store.list_tasks()
     created = next(task for task in tasks if task.repo_path == str(repo_path))
+    assert launcher.launched_ids[-1] == created.id
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_start_coding_clears_stale_harness_conflict_before_blocking(tmp_path: Path) -> None:
+    loop, store, _manager, launcher = _make_loop(tmp_path, attach_launcher=True)
+    _create_stale_harness_conflict_task(store, tmp_path)
+    repo_path = tmp_path / "new-repo"
+    repo_path.mkdir()
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-2",
+            content=f"/coding {repo_path} 修复新的问题",
+            metadata={"is_group": False, "message_id": 109},
+        )
+    )
+
+    assert response is not None
+    assert "已创建并启动编程任务" in response.content
+    tasks = store.list_tasks()
+    stale = next(task for task in tasks if task.goal == "继续旧的 harness")
+    created = next(task for task in tasks if task.repo_path == str(repo_path))
+    assert stale.status == "cancelled"
     assert launcher.launched_ids[-1] == created.id
 
 

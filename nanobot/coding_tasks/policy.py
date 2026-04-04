@@ -2,11 +2,20 @@
 
 from __future__ import annotations
 
+from nanobot.coding_tasks.harness import detect_repo_harness
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.types import CodingTask
 from nanobot.coding_tasks.types import WAITING_REASON_KIND_WORKER_EXIT_REVIEW
 
 _HIDDEN_TASK_STATUSES = {"failed", "cancelled"}
+_CONTROL_TASK_STATUSES = {"starting", "running", "waiting_user"}
+_HARNESS_CONFLICT_EXPECTED_STATES = {
+    "repo_active_harness": "active",
+    "repo_completed_harness": "completed",
+}
+_STALE_HARNESS_CONFLICT_SUMMARY = (
+    "Cleared stale harness conflict record because the repository's current harness state no longer matches it."
+)
 
 
 class CodingTaskPolicy:
@@ -17,25 +26,31 @@ class CodingTaskPolicy:
 
     def blocking_active_task(self) -> CodingTask | None:
         """Return the workspace-wide task that blocks creating another task."""
-        for task in self.manager.active_tasks():
+        for task in self._reconcile_stale_harness_conflicts(self.manager.active_tasks()):
             if not self._is_nonblocking_review_wait(task):
                 return task
         return None
 
     def select_control_task(self, channel: str, chat_id: str) -> CodingTask | None:
         """Return the newest active visible task for one origin chat."""
-        return self.manager.latest_active_task_for_origin(channel, chat_id)
+        for task in self.tasks_for_origin(channel, chat_id):
+            if task.status in _CONTROL_TASK_STATUSES:
+                return task
+        return None
 
     def latest_origin_task(self, channel: str, chat_id: str) -> CodingTask | None:
         """Return the latest visible task for one origin chat."""
         tasks = self.manager.tasks_for_origin(channel, chat_id)
-        return tasks[0] if tasks else None
+        visible = self._reconcile_stale_harness_conflicts(tasks)
+        return visible[0] if visible else None
 
     def tasks_for_origin(self, channel: str, chat_id: str) -> list[CodingTask]:
         """Return visible tasks for one origin chat, newest first."""
         return [
             task
-            for task in self.manager.tasks_for_origin(channel, chat_id)
+            for task in self._reconcile_stale_harness_conflicts(
+                self.manager.tasks_for_origin(channel, chat_id)
+            )
             if task.status not in _HIDDEN_TASK_STATUSES
         ]
 
@@ -54,3 +69,22 @@ class CodingTaskPolicy:
             task.status == "waiting_user"
             and task.metadata.get("waiting_reason_kind") == WAITING_REASON_KIND_WORKER_EXIT_REVIEW
         )
+
+    def _reconcile_stale_harness_conflicts(self, tasks: list[CodingTask]) -> list[CodingTask]:
+        reconciled: list[CodingTask] = []
+        for task in tasks:
+            if self._is_stale_harness_conflict(task):
+                self.manager.cancel_task(task.id, summary=_STALE_HARNESS_CONFLICT_SUMMARY)
+                continue
+            reconciled.append(task)
+        return reconciled
+
+    def _is_stale_harness_conflict(self, task: CodingTask) -> bool:
+        if task.status != "waiting_user":
+            return False
+        expected_state = _HARNESS_CONFLICT_EXPECTED_STATES.get(
+            str(task.metadata.get("harness_conflict_reason") or "")
+        )
+        if expected_state is None:
+            return False
+        return detect_repo_harness(task.repo_path).harness_state != expected_state
