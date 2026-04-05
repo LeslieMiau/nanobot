@@ -15,3 +15,19 @@
   - `xcodebuild -showsdks` currently fails because full Xcode is not installed.
   - `xcrun simctl list devices available` currently fails because simulator tooling is unavailable without full Xcode.
   - The harness should treat full iOS build and Siri/App Intent runtime validation as blocked until the Xcode toolchain is available, while still allowing architecture and core code to progress.
+
+## Session update - 2026-04-05 (Voice Bridge AppShell/Docs scaffold)
+- Completed features:
+  - Added a self-contained `ios/VoiceBridge/` subtree with a top-level `README.md` that explains the migration intent and keeps the bridge subtree portable for a future repo split.
+  - Added architecture and operational docs under `ios/VoiceBridge/Docs/` covering the three-layer bridge design, local development/Xcode gating, Siri validation expectations, and future ingress/backend reservations.
+  - Added an AppShell scaffold with Swift source for the bridge app entry, shared runtime/state container, App Intent/App Shortcuts entry point, nanobot backend client, local config storage, history model, manual smoke-test UI, settings UI, and history UI.
+  - Added shared bridge support types for request/response models, source platform/device enums, session IDs, reply truncation policy, and local configuration persistence.
+- Verification:
+  - `rg --files ios/VoiceBridge` -> confirmed the subtree contains the README, Docs, and AppShell scaffolding files.
+  - `swift -e 'import Foundation; print("foundation-ok")'` -> passed.
+  - `swift -e 'import Foundation; import Combine; print("combine-ok")'` -> passed.
+  - `python3 -m json.tool PLAN.json` and `python3 -m json.tool .harness/status.json` -> passed.
+- Remaining blockers / follow-up:
+  - Full Xcode is still missing, so `SwiftUI` / `AppIntents` / actual iOS build and Siri validation remain environment-gated.
+  - `ios/VoiceBridge/` still lacks a checked-in Xcode project or Swift Package manifest by design for this write scope; the next thread can decide whether to add that packaging layer or keep the subtree source-only until the app repo split.
+  - BridgeCore tests were intentionally not touched in this worker scope.

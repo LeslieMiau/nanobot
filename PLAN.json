@@ -8,7 +8,7 @@
       "Verify brittle tests touched during bootstrap remain green under `.venv/bin/pytest` so later harness rounds can trust the baseline.",
       "Record the baseline verification outcome in `PROGRESS.md` before marking the feature complete."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 2,
@@ -19,7 +19,7 @@
       "Create `PROGRESS.md` with the initial task summary, baseline state, and current blockers.",
       "Commit the initialization checkpoint before beginning the first implementation feature."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,
@@ -30,7 +30,7 @@
       "Update `.gitignore` so `.harness/` is treated as harness communication state rather than product source.",
       "Verify the local harness files can be recreated or inspected without polluting normal repo status."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,
@@ -41,7 +41,7 @@
       "Ensure the spec explicitly treats `iPhone Siri` as the only v1 runtime success target and `HomePod` as a future experiment.",
       "Verify the spec documents the self-contained subtree requirement for later repo extraction."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,
@@ -52,7 +52,7 @@
       "Include user-visible and testable success criteria for each round-one capability.",
       "Verify the contract names explicit validation commands or checks rather than vague completion claims."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,
@@ -63,7 +63,7 @@
       "Run `xcodebuild -showsdks` and `xcrun simctl list devices available` to confirm whether full Xcode and simulator tooling exist.",
       "Persist the missing-toolchain result in `.harness/status.json` and `PROGRESS.md` if the machine is still limited to Command Line Tools."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,
@@ -74,7 +74,7 @@
       "Keep app shell, core, docs, and tests under that subtree instead of scattering files across the repo root.",
       "Verify nothing inside the subtree requires relative imports from the Python codebase."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 8,
@@ -96,7 +96,7 @@
       "Document which files can move as a unit and which runtime contract with nanobot must stay stable.",
       "Verify the migration note does not assume the presence of Python package internals."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 10,
@@ -107,7 +107,7 @@
       "Keep internal types and folders named around `VoiceBridge` rather than a single backend brand.",
       "Verify future backend switching would not require renaming the core data models."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 11,
@@ -118,7 +118,7 @@
       "Include `nanobot` as the only active v1 runtime case and reserve `openclaw` as a future-facing placeholder.",
       "Verify the rest of BridgeCore consumes the abstraction rather than hard-coding nanobot everywhere."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 12,
@@ -129,7 +129,7 @@
       "Default v1 runtime wiring to `siri` while leaving the others reserved and documented.",
       "Verify the model is used by `BridgeRequest` instead of leaving source metadata implicit."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 13,
@@ -140,7 +140,7 @@
       "Set the iPhone Siri path to the phone device type in v1.",
       "Verify backend requests only see the normalized device metadata rather than App Intent specifics."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 14,
@@ -151,7 +151,7 @@
       "Ensure the model treats the prompt text as the canonical payload rather than raw audio or Siri-specific state.",
       "Verify the request model is serializable or otherwise testable independent of the app shell."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 15,
@@ -162,7 +162,7 @@
       "Make the raw backend `reply` the canonical value and derive display or spoken variants from it.",
       "Verify the response model can represent both short and truncated long replies."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 16,
@@ -173,7 +173,7 @@
       "Keep the config representation independent of SwiftUI screens so it can move into a standalone core package later.",
       "Verify missing or invalid config can be detected before a network request is sent."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 17,
@@ -184,7 +184,7 @@
       "Keep the protocol signature centered on `BridgeRequest` and `BridgeResponse`.",
       "Verify app shell and Siri intent code depend on the protocol rather than a concrete nanobot client."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 18,
@@ -195,7 +195,7 @@
       "Map the request into `POST /chat` using the expected headers and body shape.",
       "Verify the backend returns a normalized `BridgeResponse` rather than raw JSON."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 19,
@@ -206,7 +206,7 @@
       "Document that v1 intentionally leaves openclaw unimplemented while preserving the interface slot.",
       "Verify unsupported future backends fail clearly rather than silently defaulting to nanobot."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 20,
@@ -217,7 +217,7 @@
       "Keep any additional metadata out of the nanobot payload unless it is explicitly supported.",
       "Verify encoding tests cover the JSON field names and speaker value."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 21,
@@ -228,7 +228,7 @@
       "Map those decoded fields into `BridgeResponse` with sensible display and spoken defaults.",
       "Verify response decoding tests cover both standard and optional-field cases."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 22,
@@ -239,7 +239,7 @@
       "Reject missing required credentials before sending a request when the config is incomplete.",
       "Verify request-construction tests assert the authorization header behavior."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 23,
@@ -250,7 +250,7 @@
       "Ensure the timeout error can be surfaced both in the app UI and Siri dialog text.",
       "Verify the timeout mapping with a focused unit test."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 24,
@@ -261,7 +261,7 @@
       "Return a user-facing message that instructs the operator to configure the server or API key in the app.",
       "Verify the auth error mapping with a focused unit test."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 25,
@@ -272,7 +272,7 @@
       "Ensure these errors carry user-facing text suitable for Siri playback and on-screen display.",
       "Verify the mapping with focused tests for offline and malformed JSON cases."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 26,
@@ -283,7 +283,7 @@
       "Keep the mapping in bridge core rather than scattering string literals through views and intents.",
       "Verify the speaker value appears in encoded `/chat` requests."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 27,
@@ -294,7 +294,7 @@
       "Keep the session identifier creation separate from the backend request encoder.",
       "Verify repeated manual requests create or carry session ids consistently."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 28,
@@ -305,7 +305,7 @@
       "Use a clear appendage such as `完整回复已保存在纳博特应用中` for spoken truncation cases.",
       "Verify the truncation behavior with focused unit tests."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 29,
@@ -316,7 +316,7 @@
       "Keep the model inside the self-contained iOS subtree rather than reusing Python-side message classes.",
       "Verify the model can represent both successful replies and surfaced errors."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 30,
@@ -327,7 +327,7 @@
       "Expose the stored entries to app-shell screens without coupling them to the networking layer.",
       "Verify the store retains only the most recent 20 entries."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 31,
@@ -338,7 +338,7 @@
       "Keep persistence behind a small abstraction so future extraction or security upgrades remain localized.",
       "Verify changed settings are loaded back into the app on the next launch or state refresh."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 32,
@@ -349,7 +349,7 @@
       "Inject the model into SwiftUI screens and Siri intent handling through a stable boundary.",
       "Verify manual requests update both the latest reply and recent-history state."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 33,
@@ -360,7 +360,7 @@
       "Ensure the entrypoint boots the shared state container and routes to the configuration/testing surfaces.",
       "Verify the app can present the primary screens without Siri involvement."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 34,
@@ -371,7 +371,7 @@
       "Validate obvious configuration mistakes before saving or sending requests.",
       "Verify updated settings persist and are reused by manual and Siri-triggered requests."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 35,
@@ -382,7 +382,7 @@
       "Show the most recent reply or surfaced error after each manual request.",
       "Verify sending `你好` through the manual screen produces the same backend behavior as a direct `/chat` smoke test."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 36,
@@ -393,7 +393,7 @@
       "Display prompt, reply, and time metadata clearly enough for debugging.",
       "Verify new interactions appear in history after manual or Siri requests."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 37,
@@ -404,7 +404,7 @@
       "Present a clear on-screen message that points the operator to the settings screen.",
       "Verify the same missing-config state can be surfaced as a Siri-spoken error."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 38,
@@ -415,7 +415,7 @@
       "Show request progress or disabled controls while a manual test is running.",
       "Verify repeated manual sends do not produce ambiguous double-submit behavior."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 39,
@@ -426,7 +426,7 @@
       "Ensure this latest-reply view updates after both success and failure states.",
       "Verify long replies remain readable on-screen after spoken truncation is applied."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 40,
@@ -437,7 +437,7 @@
       "Make the intent depend on bridge-core request execution rather than reimplementing transport logic.",
       "Verify the source is structured so Siri entrypoint code stays thin and declarative."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 41,
@@ -448,7 +448,7 @@
       "Treat the prompt as the only required semantic input for v1.",
       "Verify the parameter value flows unchanged into `BridgeRequest.prompt`."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 42,
@@ -459,7 +459,7 @@
       "Keep the dialog text in a shared constant so branding changes remain localized.",
       "Verify documentation and manual Siri tests expect the follow-up prompt path."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 43,
@@ -470,7 +470,7 @@
       "Register phrases in Chinese that map to the bridge intent without requiring the Shortcuts app.",
       "Verify the provider references the same intent and prompt parameter used by the rest of the Siri path."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 44,
@@ -481,7 +481,7 @@
       "Ensure the no-inline phrase still reaches the same App Intent rather than a separate code path.",
       "Verify the manual Siri test plan includes the follow-up-question flow."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 45,
@@ -492,7 +492,7 @@
       "Keep the inline phrase optional so the system can still fall back to follow-up collection if parsing fails.",
       "Verify the Siri validation notes cover both inline success and follow-up fallback."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 46,
@@ -503,7 +503,7 @@
       "Avoid direct URLSession or JSON handling inside the intent body.",
       "Verify the perform path updates or records history in the same way as manual app requests where feasible."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 47,
@@ -514,7 +514,7 @@
       "Prefer the computed spoken text over ad hoc local summarization.",
       "Verify the success path never ends with a bare `完成` when a reply exists."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 48,
@@ -525,7 +525,7 @@
       "Ensure missing config, timeout, auth, and network failures each surface distinct messages.",
       "Verify the failure path does not silently succeed or collapse to a vague acknowledgement."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 49,
@@ -536,7 +536,7 @@
       "Add focused tests for response decoding into `BridgeResponse`.",
       "Verify the tests run without requiring a full iOS runtime or Siri environment."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 50,
@@ -547,7 +547,7 @@
       "Add tests for spoken-text truncation versus full display text retention.",
       "Verify the bridge returns stable user-facing text for each tested error case."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 51,
@@ -558,7 +558,7 @@
       "Document a simple manual smoke prompt such as `你好` and the expected reply shape.",
       "Verify the instructions reference only files or UI that actually exist in the subtree."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 52,
@@ -569,7 +569,7 @@
       "Document the `嘿 Siri，问纳博特 你好` inline-input flow and the fallback expectations if inline parsing fails.",
       "Verify the instructions distinguish iPhone Siri acceptance from non-goal HomePod testing."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 53,
@@ -580,7 +580,7 @@
       "Record the current CommandLineTools-only state and its concrete symptoms if full Xcode is still absent.",
       "Verify the docs point to the local environment gate rather than implying the code itself is broken."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 54,
@@ -591,7 +591,7 @@
       "Explain that v1 only implements iPhone Siri while the others remain protocol-level placeholders.",
       "Verify the docs do not claim unimplemented platforms already work."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 55,
@@ -602,7 +602,7 @@
       "Explain how backend routing hangs off `BackendKind` without changing Siri or app-shell interfaces.",
       "Verify the docs separate reserved architecture from actual v1 runtime support."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 56,
