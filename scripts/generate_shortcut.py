@@ -151,7 +151,7 @@ def build_test_shortcut():
 
 
 def build_interactive_shortcut():
-    """交互版 — Ask for Input + POST JSON + 朗读 reply。"""
+    """交互版 — Dictate Text + POST JSON + 显示结果 + 朗读 reply。"""
     ask_id = _uuid()
     url_id = _uuid()
     dict_id = _uuid()
@@ -167,12 +167,10 @@ def build_interactive_shortcut():
         "WFWorkflowOutputContentItemClasses": [],
         "WFWorkflowHasOutputFallback": False,
         "WFWorkflowActions": [
-            # 1. 要求输入
+            # 1. 口述文本，更适合 Siri / HomePod 语音路径
             {
-                "WFWorkflowActionIdentifier": "is.workflow.actions.ask",
+                "WFWorkflowActionIdentifier": "is.workflow.actions.dictatetext",
                 "WFWorkflowActionParameters": {
-                    "WFAskActionPrompt": "你想问什么？",
-                    "WFInputType": "Text",
                     "UUID": ask_id,
                     "CustomOutputName": "问题",
                 },

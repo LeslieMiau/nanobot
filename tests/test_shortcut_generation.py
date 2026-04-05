@@ -38,6 +38,8 @@ def test_recommended_shortcuts_keep_expected_names_and_api_shape() -> None:
     assert "speaker=homepod" in test_download["WFURL"]
     assert "key=" in test_download["WFURL"]
 
+    assert interactive_shortcut["WFWorkflowActions"][0]["WFWorkflowActionIdentifier"] == "is.workflow.actions.dictatetext"
+
     interactive_download = interactive_shortcut["WFWorkflowActions"][1]["WFWorkflowActionParameters"]
     assert interactive_download["WFHTTPMethod"] == "POST"
     assert interactive_download["WFHTTPBodyType"] == "JSON"
