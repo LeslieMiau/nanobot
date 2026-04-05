@@ -270,7 +270,7 @@ def test_channels_status_shows_runtime_details(monkeypatch):
                 }
             }
 
-    monkeypatch.setattr("nanobot.config.loader.load_config", lambda: config)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
     monkeypatch.setattr(
         "nanobot.channels.registry.discover_all",
         lambda: {"telegram": SimpleNamespace(display_name="Telegram")},

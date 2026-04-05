@@ -3,7 +3,7 @@ import SwiftUI
 struct ManualTestView: View {
     @EnvironmentObject var state: BridgeAppState
     @State private var prompt = "你好"
-    @State private var response = "No reply yet"
+    @State private var response = "尚未收到回复"
 
     var body: some View {
         Form {

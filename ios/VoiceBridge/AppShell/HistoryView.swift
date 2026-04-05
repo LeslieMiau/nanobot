@@ -11,8 +11,9 @@ struct HistoryView: View {
                     Text(reply).font(.subheadline)
                 }
                 if let errorMessage = item.errorMessage {
-                    Text(errorMessage).font(.footnote)
+                    Text(errorMessage).font(.footnote).foregroundStyle(.red)
                 }
+                Text(item.timestamp.formatted()).font(.caption).foregroundStyle(.secondary)
             }
         }
     }

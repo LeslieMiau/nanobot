@@ -9,10 +9,9 @@ struct VoiceBridgeShortcuts: AppShortcutsProvider {
                     "问纳博特",
                     "问纳博特 \(\.$prompt)"
                 ],
-                shortTitle: "Ask Nanobot",
+                shortTitle: "问纳博特",
                 systemImageName: "waveform"
             )
         ]
     }
 }
-

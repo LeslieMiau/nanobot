@@ -31,3 +31,17 @@
   - Full Xcode is still missing, so `SwiftUI` / `AppIntents` / actual iOS build and Siri validation remain environment-gated.
   - `ios/VoiceBridge/` still lacks a checked-in Xcode project or Swift Package manifest by design for this write scope; the next thread can decide whether to add that packaging layer or keep the subtree source-only until the app repo split.
   - BridgeCore tests were intentionally not touched in this worker scope.
+
+## Session update - 2026-04-05 (Voice Bridge BridgeCore package + AppShell alignment)
+- Completed features:
+  - Added a checked-in Swift Package under `ios/VoiceBridge/` with a `BridgeCore` library target and `BridgeCoreTests` so the bridge protocol, backend mapping, history store, and reply formatting can be validated on this machine without full Xcode.
+  - Implemented BridgeCore source for backend kind/platform/device models, `BridgeRequest`, `BridgeResponse`, `BridgeConfig`, `BridgeError`, reply truncation, `BridgeRuntime`, `NanobotBackend`, `OpenClawBackend` placeholder, local history store, and config persistence.
+  - Refactored the AppShell scaffold so Siri/App Intent and SwiftUI-facing runtime code depend on `BridgeCore` instead of duplicating bridge models and backend transport logic inside the app layer.
+  - Added `.build/` to `.gitignore` and removed generated Swift Package artifacts from the worktree so the repository only carries source and harness state.
+- Verification:
+  - `swift test` in `ios/VoiceBridge/` -> passed (9 tests covering `/chat` encoding, response decoding, timeout/auth/malformed JSON mapping, truncation, and history retention).
+  - `bash init.sh` in the repo root -> passed after the Voice Bridge source additions.
+  - `git status --short` after removing `.build/` -> only shows source changes intended for the next checkpoint.
+- Remaining blockers / follow-up:
+  - Final iPhone Siri/App Intent runtime acceptance is still blocked by the local Xcode gate; this harness must not report v1 as complete until a full Xcode toolchain is available and the voice path is exercised on-device.
+  - The current AppShell files are still scaffold source and have not been compiled on-device; they now point at the correct `BridgeCore` boundary, but real SwiftUI/App Intents validation remains pending.

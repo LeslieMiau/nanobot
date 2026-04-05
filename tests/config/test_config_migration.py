@@ -23,7 +23,9 @@ def test_load_config_keeps_max_tokens_and_ignores_legacy_memory_window(tmp_path)
 
     assert config.agents.defaults.max_tokens == 1234
     assert config.agents.defaults.context_window_tokens == 65_536
-    assert not hasattr(config.agents.defaults, "memory_window")
+    assert config.agents.defaults.memory_window == 42
+    dumped = config.agents.defaults.model_dump(by_alias=True)
+    assert "memoryWindow" not in dumped
 
 
 def test_save_config_writes_context_window_tokens_but_not_memory_window(tmp_path) -> None:

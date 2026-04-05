@@ -1,8 +1,9 @@
+import BridgeCore
 import SwiftUI
 
 struct SettingsView: View {
     @EnvironmentObject var state: BridgeAppState
-    @State private var baseURL = "http://127.0.0.1:8900"
+    @State private var baseURL = BridgeDefaults.manualDefaultURL
     @State private var apiKey = ""
     @State private var saveStatus = "Not saved"
 
@@ -12,11 +13,15 @@ struct SettingsView: View {
                 TextField("Base URL", text: $baseURL)
                 SecureField("API Key", text: $apiKey)
                 Button("Save") {
-                    if let url = URL(string: baseURL) {
-                        state.updateConfig(BridgeConfig(backendKind: .nanobot, baseURL: url, apiKey: apiKey))
+                    Task {
+                        await state.updateConfig(
+                            BridgeConfig(
+                                backendKind: .nanobot,
+                                baseURL: baseURL,
+                                apiKey: apiKey
+                            )
+                        )
                         saveStatus = "Saved locally"
-                    } else {
-                        saveStatus = "Invalid base URL"
                     }
                 }
                 Text(saveStatus)
@@ -28,16 +33,11 @@ struct SettingsView: View {
                 Text("Official v1 backend: nanobot /chat")
             }
         }
-        .onAppear {
+        .task {
+            await state.loadStoredConfig()
             if let current = state.config {
-                baseURL = current.baseURL.absoluteString
+                baseURL = current.baseURL
                 apiKey = current.apiKey
-            } else {
-                state.loadStoredConfig()
-                if let current = state.config {
-                    baseURL = current.baseURL.absoluteString
-                    apiKey = current.apiKey
-                }
             }
         }
     }
