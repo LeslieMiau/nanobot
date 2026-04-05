@@ -451,6 +451,8 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 
 Use HomePod as a voice entrypoint for nanobot through Siri Shortcuts.
 
+The bundled shortcuts now use the ClawPod-compatible `POST /chat` bridge by default.
+
 Quick links:
 
 - [Setup guide](./docs/HOMEPOD_SETUP.md)

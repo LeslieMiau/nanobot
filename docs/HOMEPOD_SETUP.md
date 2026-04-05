@@ -5,7 +5,7 @@
 ## 架构
 
 ```
-HomePod → Siri → iPhone 快捷指令 → HTTP POST /v1/voice/ask → Nanobot
+HomePod → Siri → iPhone 快捷指令 → HTTP POST /chat → Nanobot
                                   ← {"reply": "...", "end_conversation": false}
                                   → Speak Text → HomePod 播放
                                   → 循环：继续对话直到 end_conversation=true
@@ -62,12 +62,6 @@ tmux new-session -d -s nanobot-api '.venv/bin/nanobot serve -v'
 curl http://192.168.x.x:8900/health
 # → {"status": "ok"}
 
-curl -X POST http://192.168.x.x:8900/v1/voice/ask \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer 你的密钥" \
-  -d '{"text": "你好", "speaker": "test"}'
-# → {"reply": "...", "end_conversation": false}
-
 curl -X POST http://192.168.x.x:8900/chat \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer 你的密钥" \
@@ -83,7 +77,7 @@ python3 scripts/verify_homepod_e2e.py
 
 它会自动验证：
 - API 监听与 `/health`
-- `/v1/voice/ask` 返回 `reply`
+- `/chat` 返回 `reply`
 - `shortcuts run '测试助手'` 是否真正打到服务端
 - 当前库中的 `测试助手` / `纳博特` 是否还是预期动作数
 
@@ -136,8 +130,8 @@ http://192.168.x.x:8900
 
 搜索「获取 URL 内容」，添加。设置：
 
-- URL 栏：点击输入框 → 选择变量 `服务器地址` → 然后手动追加 `/v1/voice/ask`
-  - 最终显示为：`[服务器地址]/v1/voice/ask`
+- URL 栏：点击输入框 → 选择变量 `服务器地址` → 然后手动追加 `/chat`
+  - 最终显示为：`[服务器地址]/chat`
 - 点击「显示更多」：
   - 方法：`POST`
   - 头部：添加 2 个
@@ -208,7 +202,7 @@ Siri 运行快捷指令后，直接按系统的口述流程说出你的问题，
 
 ## API 参考
 
-### POST /v1/voice/ask
+### POST /chat
 
 请求：
 ```json
@@ -219,6 +213,10 @@ Siri 运行快捷指令后，直接按系统的口述流程说出你的问题，
 ```json
 {"reply": "纯文本回答", "end_conversation": false}
 ```
+
+### POST /v1/voice/ask
+
+兼容旧入口，仍可用；快捷指令默认已切到 `/chat`。
 
 ### POST /v1/audio/speech
 

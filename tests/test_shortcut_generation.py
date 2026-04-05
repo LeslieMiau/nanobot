@@ -33,17 +33,31 @@ def test_recommended_shortcuts_keep_expected_names_and_api_shape() -> None:
     assert interactive_shortcut["WFWorkflowName"] == "纳博特"
 
     test_download = test_shortcut["WFWorkflowActions"][0]["WFWorkflowActionParameters"]
-    assert test_download["WFHTTPMethod"] == "GET"
-    assert "/v1/voice/ask" in test_download["WFURL"]
-    assert "speaker=homepod" in test_download["WFURL"]
-    assert "key=" in test_download["WFURL"]
+    assert test_download["WFHTTPMethod"] == "POST"
+    assert test_download["WFHTTPBodyType"] == "JSON"
+    assert test_download["WFURL"].endswith("/chat")
+
+    test_header_items = test_download["WFHTTPHeaders"]["Value"]["WFDictionaryFieldValueItems"]
+    test_headers = {
+        item["WFKey"]["Value"]["string"]: item["WFValue"]["Value"]["string"]
+        for item in test_header_items
+    }
+    assert test_headers["Content-Type"] == "application/json"
+    assert test_headers["Authorization"].startswith("Bearer ")
+
+    test_json_items = test_download["WFJSONValues"]["Value"]["WFDictionaryFieldValueItems"]
+    test_json = {
+        item["WFKey"]["Value"]["string"]: item["WFValue"]["Value"]["string"]
+        for item in test_json_items
+    }
+    assert test_json == {"text": "你好", "speaker": "homepod"}
 
     assert interactive_shortcut["WFWorkflowActions"][0]["WFWorkflowActionIdentifier"] == "is.workflow.actions.dictatetext"
 
     interactive_download = interactive_shortcut["WFWorkflowActions"][1]["WFWorkflowActionParameters"]
     assert interactive_download["WFHTTPMethod"] == "POST"
     assert interactive_download["WFHTTPBodyType"] == "JSON"
-    assert interactive_download["WFURL"].endswith("/v1/voice/ask")
+    assert interactive_download["WFURL"].endswith("/chat")
 
     header_items = interactive_download["WFHTTPHeaders"]["Value"]["WFDictionaryFieldValueItems"]
     headers = {
@@ -75,3 +89,5 @@ def test_docs_expose_recommended_shortcut_links() -> None:
     assert "../纳博特.shortcut" in setup_doc
     assert "嘿 Siri, 运行纳博特" in setup_doc
     assert "弹出 reply 文本并朗读" in setup_doc
+    assert "POST /chat" in setup_doc
+    assert "ClawPod-compatible `POST /chat` bridge" in readme

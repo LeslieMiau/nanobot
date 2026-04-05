@@ -3,7 +3,7 @@
 
 Automates the locally testable stages:
   1. API process/listener + /health
-  2. /v1/voice/ask business response
+  2. /chat business response
   3. macOS Shortcuts runtime + shortcut shape
 
 It also provides a lightweight log watch mode for iPhone / Siri / HomePod
@@ -156,7 +156,7 @@ def stage_api_baseline(args: argparse.Namespace) -> StageResult:
             "15",
             "-X",
             "POST",
-            f"http://{args.host}:{args.port}/v1/voice/ask",
+            f"http://{args.host}:{args.port}/chat",
             "-H",
             "Content-Type: application/json",
             "-H",
@@ -171,11 +171,11 @@ def stage_api_baseline(args: argparse.Namespace) -> StageResult:
         try:
             body = json.loads(voice.stdout)
             voice_ok = isinstance(body.get("reply"), str) and bool(body["reply"].strip())
-            evidence.append(f"/v1/voice/ask reply -> {body.get('reply', '')[:80]}")
+            evidence.append(f"/chat reply -> {body.get('reply', '')[:80]}")
         except json.JSONDecodeError:
-            evidence.append(f"/v1/voice/ask invalid json -> {voice.stdout[:120]}")
+            evidence.append(f"/chat invalid json -> {voice.stdout[:120]}")
     else:
-        evidence.append(f"/v1/voice/ask failed -> {voice.stderr or voice.stdout or f'code={voice.code}'}")
+        evidence.append(f"/chat failed -> {voice.stderr or voice.stdout or f'code={voice.code}'}")
 
     log_delta = read_log_delta(args.log_file, marker)
     relevant = filter_relevant_lines(log_delta, args.api_speaker)

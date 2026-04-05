@@ -7,6 +7,8 @@
 实际方案: 生成两个版本 —
   1. 固定问题版（验证 API 连通性）
   2. 交互版（按 Apple 官方 Web API 模式使用 POST JSON）
+
+两者默认都走 ClawPod 兼容的 `POST /chat`。
 """
 
 import plistlib
@@ -23,7 +25,7 @@ SPEAKER = "homepod"
 INTERACTIVE_SHORTCUT_NAME = "纳博特"
 # ============================================================
 
-ENDPOINT = f"http://{NANOBOT_HOST}:{NANOBOT_PORT}/v1/voice/ask"
+ENDPOINT = f"http://{NANOBOT_HOST}:{NANOBOT_PORT}/chat"
 
 
 def _uuid():
@@ -98,8 +100,6 @@ def build_test_shortcut():
     url_id = _uuid()
     dict_id = _uuid()
 
-    test_url = f"{ENDPOINT}?text=%E4%BD%A0%E5%A5%BD&speaker={SPEAKER}&key={API_KEY}"
-
     return "测试助手", {
         "WFWorkflowMinimumClientVersion": 900,
         "WFWorkflowMinimumClientVersionString": "900",
@@ -111,12 +111,47 @@ def build_test_shortcut():
         "WFWorkflowOutputContentItemClasses": [],
         "WFWorkflowHasOutputFallback": False,
         "WFWorkflowActions": [
-            # 1. 获取 URL — 纯字符串，零变量
+            # 1. 获取 URL 内容（ClawPod-compatible POST + JSON body）
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
                 "WFWorkflowActionParameters": {
-                    "WFURL": test_url,
-                    "WFHTTPMethod": "GET",
+                    "WFURL": ENDPOINT,
+                    "WFHTTPMethod": "POST",
+                    "WFHTTPBodyType": "JSON",
+                    "WFHTTPHeaders": {
+                        "Value": {
+                            "WFDictionaryFieldValueItems": [
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("Content-Type"),
+                                    "WFValue": _simple_text("application/json"),
+                                },
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("Authorization"),
+                                    "WFValue": _simple_text(f"Bearer {API_KEY}"),
+                                },
+                            ]
+                        },
+                        "WFSerializationType": "WFDictionaryFieldValue",
+                    },
+                    "WFJSONValues": {
+                        "Value": {
+                            "WFDictionaryFieldValueItems": [
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("text"),
+                                    "WFValue": _simple_text("你好"),
+                                },
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("speaker"),
+                                    "WFValue": _simple_text(SPEAKER),
+                                },
+                            ]
+                        },
+                        "WFSerializationType": "WFDictionaryFieldValue",
+                    },
                     "UUID": url_id,
                     "CustomOutputName": "回复",
                 },
