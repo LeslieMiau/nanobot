@@ -463,7 +463,7 @@ Recommended voice command:
 嘿 Siri, 运行纳博特
 ```
 
-Import `测试助手.shortcut` first, confirm it can read a reply aloud, then delete or rename old interactive shortcuts such as `问机器人` and `嘿助手`, and import `纳博特.shortcut` for daily use.
+Import `测试助手.shortcut` first, confirm it shows the reply on screen and reads it aloud, then delete or rename old interactive shortcuts such as `问机器人` and `嘿助手`, and import `纳博特.shortcut` for daily use.
 
 </details>
 

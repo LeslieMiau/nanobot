@@ -55,6 +55,10 @@ def test_recommended_shortcuts_keep_expected_names_and_api_shape() -> None:
     keys = [item["WFKey"]["Value"]["string"] for item in json_items]
     assert keys == ["text", "speaker"]
     assert interactive_shortcut["WFWorkflowActions"][2]["WFWorkflowActionParameters"]["WFDictionaryKey"] == "reply"
+    assert test_shortcut["WFWorkflowActions"][2]["WFWorkflowActionIdentifier"] == "is.workflow.actions.showresult"
+    assert interactive_shortcut["WFWorkflowActions"][3]["WFWorkflowActionIdentifier"] == "is.workflow.actions.showresult"
+    assert test_shortcut["WFWorkflowActions"][3]["WFWorkflowActionIdentifier"] == "is.workflow.actions.speaktext"
+    assert interactive_shortcut["WFWorkflowActions"][4]["WFWorkflowActionIdentifier"] == "is.workflow.actions.speaktext"
 
 
 def test_docs_expose_recommended_shortcut_links() -> None:
@@ -68,3 +72,4 @@ def test_docs_expose_recommended_shortcut_links() -> None:
     assert "../测试助手.shortcut" in setup_doc
     assert "../纳博特.shortcut" in setup_doc
     assert "嘿 Siri, 运行纳博特" in setup_doc
+    assert "弹出 reply 文本并朗读" in setup_doc

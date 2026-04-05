@@ -49,6 +49,16 @@ def _simple_text(s):
     return {"Value": {"string": s}, "WFSerializationType": "WFTextTokenString"}
 
 
+def _show_result_action(output_id, output_name):
+    """在屏幕上展示返回文本，避免“执行了但没反应”的假象。"""
+    return {
+        "WFWorkflowActionIdentifier": "is.workflow.actions.showresult",
+        "WFWorkflowActionParameters": {
+            "Text": _text({"0,1": _ref(output_id, output_name)}, "\uFFFC"),
+        },
+    }
+
+
 def _sign_shortcut_file(path: Path) -> bool:
     """Use macOS shortcuts CLI to produce an importable signed file when available."""
     shortcuts_cli = shutil.which("shortcuts")
@@ -121,7 +131,9 @@ def build_test_shortcut():
                     "CustomOutputName": "回答",
                 },
             },
-            # 3. 朗读
+            # 3. 显示结果，便于人工确认
+            _show_result_action(dict_id, "回答"),
+            # 4. 朗读
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.speaktext",
                 "WFWorkflowActionParameters": {
@@ -220,7 +232,9 @@ def build_interactive_shortcut():
                     "CustomOutputName": "回答",
                 },
             },
-            # 4. 朗读
+            # 4. 显示结果，便于人工确认
+            _show_result_action(dict_id, "回答"),
+            # 5. 朗读
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.speaktext",
                 "WFWorkflowActionParameters": {
