@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -789,6 +790,25 @@ async def test_loop_retries_think_only_final_response(tmp_path):
 
     assert final_content == "Recovered answer"
     assert call_count["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_loop_records_usage_without_cumulative_usage_field(tmp_path):
+    loop = _make_loop(tmp_path)
+    loop.runner.run = AsyncMock(return_value=SimpleNamespace(
+        final_content="done",
+        tools_used=[],
+        messages=[],
+        usage={"prompt_tokens": 7, "completion_tokens": 3},
+        stop_reason="completed",
+    ))
+
+    final_content, _, _ = await loop._run_agent_loop([])
+
+    assert final_content == "done"
+    assert loop.session_usage.total_prompt_tokens == 7
+    assert loop.session_usage.total_completion_tokens == 3
+    assert loop.session_usage.total_requests == 1
 
 
 @pytest.mark.asyncio

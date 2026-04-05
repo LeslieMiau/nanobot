@@ -10,11 +10,10 @@ from oauth_cli_kit import OAuthProviderConfig, get_token
 from nanobot.providers.base import LLMProvider, LLMResponse
 from nanobot.providers.openai_codex_provider import (
     _build_headers,
-    _convert_messages,
-    _convert_tools,
     _prompt_cache_key,
     _request_codex,
 )
+from nanobot.providers.openai_responses import convert_messages, convert_tools
 
 DEFAULT_OPENAI_OAUTH_URL = "https://chatgpt.com/backend-api/codex/responses"
 
@@ -53,7 +52,7 @@ class OpenAIOAuthProvider(LLMProvider):
         tool_choice: str | dict[str, Any] | None = None,
     ) -> LLMResponse:
         effective_model = _strip_model_prefix(model or self.default_model)
-        system_prompt, input_items = _convert_messages(messages)
+        system_prompt, input_items = convert_messages(messages)
 
         try:
             token = await asyncio.to_thread(get_token, provider=OPENAI_OAUTH_PROVIDER)
@@ -74,7 +73,7 @@ class OpenAIOAuthProvider(LLMProvider):
             if reasoning_effort:
                 body["reasoning"] = {"effort": reasoning_effort}
             if tools:
-                body["tools"] = _convert_tools(tools)
+                body["tools"] = convert_tools(tools)
 
             url = self.api_base or DEFAULT_OPENAI_OAUTH_URL
 

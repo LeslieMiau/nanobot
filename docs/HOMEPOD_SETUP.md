@@ -11,6 +11,27 @@ HomePod → Siri → iPhone 快捷指令 → HTTP POST /v1/voice/ask → Nanobot
                                   → 循环：继续对话直到 end_conversation=true
 ```
 
+## ClawPod 兼容模式
+
+如果你想沿用 [clawpod](https://github.com/algal/clawpod) 的 Shortcut 结构，nanobot 现在也提供兼容的 `POST /chat`：
+
+```bash
+curl -X POST http://192.168.x.x:8900/chat \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer 你的密钥" \
+  -d '{"text": "你好", "speaker": "Alexis"}'
+# → {"reply": "...", "end_conversation": false}
+```
+
+兼容范围：
+- 请求体：`{"text": "...", "speaker": "..."}`
+- 响应体：`{"reply": "...", "end_conversation": false}`
+- 会话隔离：按 `speaker` 维持会话，与 `clawpod` 习惯一致
+
+重要限制：
+- 这个兼容模式解决的是服务端 bridge 形态，不改变 HomePod 上二次语音输入动作本身的稳定性
+- 如果你照 `clawpod` 文档在快捷指令里继续使用 `Ask for Input` / 循环对话，是否稳定仍取决于 HomePod + iPhone 上的 Shortcut 运行时
+
 ## 第一步：启动 API 服务
 
 ### 1.1 编辑 `~/.nanobot/config.json`
@@ -45,6 +66,12 @@ curl -X POST http://192.168.x.x:8900/v1/voice/ask \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer 你的密钥" \
   -d '{"text": "你好", "speaker": "test"}'
+# → {"reply": "...", "end_conversation": false}
+
+curl -X POST http://192.168.x.x:8900/chat \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer 你的密钥" \
+  -d '{"text": "你好", "speaker": "Alexis"}'
 # → {"reply": "...", "end_conversation": false}
 ```
 

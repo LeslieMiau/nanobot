@@ -233,6 +233,27 @@ async def test_followup_requests_share_same_session_key(aiohttp_client) -> None:
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
+async def test_clawpod_compatible_chat_endpoint_returns_reply_shape(aiohttp_client, mock_agent) -> None:
+    app = create_app(mock_agent, model_name="test-model")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/chat",
+        json={"text": "hello", "speaker": "Alexis"},
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["reply"] == "mock response"
+    assert body["end_conversation"] is False
+    mock_agent.process_direct.assert_called_once_with(
+        content="hello",
+        session_key="api:Alexis",
+        channel="api",
+        chat_id=API_CHAT_ID,
+    )
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
 async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
     order: list[str] = []
 

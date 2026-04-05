@@ -437,7 +437,8 @@ class AgentLoop:
             checkpoint_callback=_checkpoint,
         ))
         self._last_usage = result.usage
-        self.session_usage.record(result.cumulative_usage)
+        cumulative_usage = getattr(result, "cumulative_usage", None) or result.usage
+        self.session_usage.record(cumulative_usage)
         if result.stop_reason == "max_iterations":
             logger.warning("Max iterations ({}) reached", self.max_iterations)
         elif result.stop_reason == "error":

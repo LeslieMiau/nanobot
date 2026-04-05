@@ -73,6 +73,27 @@ def test_runtime_context_is_separate_untrusted_user_message(tmp_path) -> None:
     assert "Return exactly: OK" in user_content
 
 
+def test_system_prompt_uses_query_for_memory_lookup(tmp_path, monkeypatch) -> None:
+    workspace = _make_workspace(tmp_path)
+    builder = ContextBuilder(workspace)
+    seen: dict[str, object] = {}
+
+    def _fake_get_memory_context(query=None):
+        seen["query"] = query
+        return ""
+
+    monkeypatch.setattr(builder.memory, "get_memory_context", _fake_get_memory_context)
+
+    builder.build_messages(
+        history=[],
+        current_message="hello from query-aware prompt",
+        channel="cli",
+        chat_id="direct",
+    )
+
+    assert seen["query"] == "hello from query-aware prompt"
+
+
 def test_subagent_result_does_not_create_consecutive_assistant_messages(tmp_path) -> None:
     workspace = _make_workspace(tmp_path)
     builder = ContextBuilder(workspace)
