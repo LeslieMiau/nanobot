@@ -15,6 +15,9 @@ If Xcode is missing, treat this as an environment blocker, not an app bug.
 ## What can be verified early
 
 - `swift test` in `ios/VoiceBridge/`
+- `swift -e 'import SwiftUI'`
+- `swift -e 'import AppIntents'`
+- `swiftc -typecheck ... AppShell/*.swift` against the macOS SDK and the built `BridgeCore` module
 - Swift source structure
 - bridge request/response models
 - backend client behavior in unit tests
@@ -25,6 +28,7 @@ If Xcode is missing, treat this as an environment blocker, not an app bug.
 - app target build
 - App Intents and Siri phrase registration
 - simulator or device validation
+- iPhone Siri / App Intent runtime acceptance
 
 ## Practical rule
 

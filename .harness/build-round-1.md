@@ -5,6 +5,7 @@
 - 在 `ios/VoiceBridge/` 下建立了自含子树，包括 `README.md`、`Docs/`、`AppShell/`、`Package.swift`、`Sources/BridgeCore/`、`Tests/BridgeCoreTests/`
 - 新增了可在当前机器验证的 `BridgeCore` Swift Package，实现统一文本回合协议、nanobot `/chat` backend、错误映射、回复截断、配置存储和本地历史存储
 - 将 AppShell scaffold 改为依赖 `BridgeCore`，不再在 Siri/UI 层复制桥接协议和 backend 实现
+- 修正了 `AskBridgeIntent.swift` 和 `VoiceBridgeShortcuts.swift`，让 `AppShell/*.swift` 可以在当前 macOS SDK + `BridgeCore` 模块上完成静态 typecheck
 - 让仓库根 `init.sh` 在新增 iOS 子树后继续保持通过
 
 ## 与上轮的差异
@@ -17,6 +18,7 @@
 
 ## 自评
 - 当前最有价值的结果是：在没有完整 Xcode 的环境下，核心桥接协议和 `/chat` transport 已经进入可测试状态，不再只是文档或概念图
+- AppShell 现在至少具备静态编译证据，不再只是“看起来像 SwiftUI / AppIntents 源码”
 - 当前最大的未完成项是：真实 iPhone Siri / App Intent 运行时还无法在这台机器上验收，不能把 scaffold 误报成已交付产品
 
 ## 已知限制

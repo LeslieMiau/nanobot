@@ -53,3 +53,21 @@
   - `git diff -- ios/VoiceBridge/README.md ios/VoiceBridge/Docs/architecture.md ios/VoiceBridge/Docs/local-development.md` -> only the expected package/alignment clarifications remained after the main bridge-core checkpoint.
 - Remaining blockers / follow-up:
   - Final feature `#56` remains open because package-level and repo-level verification are done, but full Xcode/iPhone Siri runtime validation is still blocked by the local toolchain state.
+
+## Session update - 2026-04-05 (final verification sweep before Xcode gate)
+- Completed verification:
+  - `cd ios/VoiceBridge && swift test` -> passed again after the latest AppShell alignment.
+  - `swift -e 'import Foundation; print("foundation-ok")'` -> passed.
+  - `swift -e 'import SwiftUI; print("swiftui-ok")'` -> passed.
+  - `swift -e 'import AppIntents; print("appintents-ok")'` -> passed.
+  - `cd ios/VoiceBridge && swiftc -typecheck -parse-as-library -sdk "$(xcrun --show-sdk-path --sdk macosx)" -I .build/arm64-apple-macosx/debug/Modules AppShell/*.swift` -> passed after fixing `AskBridgeIntent.swift` and `VoiceBridgeShortcuts.swift` to match the current App Intents builder signatures.
+  - `bash init.sh` -> passed again after the AppShell typecheck fixes.
+- New findings:
+  - `SwiftUI` and `AppIntents` frameworks themselves are available through the current SDK, so the blocker is not “frameworks unavailable”; it is specifically the absence of a full Xcode/iOS build chain.
+  - `xcode-select -p` still points to `/Library/Developer/CommandLineTools`.
+  - `xcodebuild -showsdks` still fails.
+  - `xcrun simctl list devices available` still fails.
+  - `/Applications` has no `Xcode.app`, Spotlight finds no installed Xcode bundle, and helper tools such as `xcodes` / `mas` are not installed locally.
+- Harness decision:
+  - Round 1 contract is now strong enough to record as QA pass.
+  - The overall Voice Bridge v1 harness remains blocked on external environment setup rather than code-level defects.
