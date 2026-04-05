@@ -89,6 +89,7 @@
   - `bash init.sh` -> passed after the iOS subtree/Xcode project changes
 - Harness correction:
   - Feature `#45` in `PLAN.json` had previously been marked complete too optimistically. Real Xcode metadata validation proved that a free-form inline App Shortcut phrase `问纳博特 {prompt}` is not shippable with a plain `String` parameter, so that feature must remain incomplete until a different Apple-supported approach is implemented.
+  - Apple's own App Shortcuts guidance matches the build evidence: App Shortcut phrases can be extended with pre-defined parameters such as `AppEnum` or `AppEntity`, but they do not support open-ended values where the user can say any arbitrary text inline.
 - Remaining blockers / follow-up:
   - The build/test/toolchain blocker is closed, but a device blocker remains: v1 still needs a real iPhone Siri run.
   - The current shippable Siri contract is `嘿 Siri，问纳博特` followed by Siri's spoken prompt. One-shot inline free-text invocation is not part of the current implementation contract.
