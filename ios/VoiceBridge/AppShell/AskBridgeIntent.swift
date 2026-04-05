@@ -10,9 +10,18 @@ struct AskBridgeIntent: AppIntent {
     func perform() async throws -> some IntentResult {
         do {
             let response = try await BridgeIntentExecutor.execute(prompt: prompt)
+            BridgeIntentResultStore.saveSuccess(
+                prompt: prompt,
+                spokenText: response.spokenText
+            )
             return .result(dialog: "\(response.spokenText)")
         } catch {
-            return .result(dialog: "\(BridgeIntentExecutor.fallbackMessage(for: error))")
+            let message = BridgeIntentExecutor.fallbackMessage(for: error)
+            BridgeIntentResultStore.saveFailure(
+                prompt: prompt,
+                message: message
+            )
+            return .result(dialog: "\(message)")
         }
     }
 }

@@ -117,3 +117,24 @@
 - Remaining blockers / follow-up:
   - We now have simulator-level validation for manual prompt -> `/chat` -> reply, but Siri voice invocation on a physical iPhone is still pending
   - Feature `#45` remains the only incomplete `PLAN.json` item because Apple metadata validation still blocks free-form inline App Shortcut phrases
+
+## Session update - 2026-04-05 (simulator Siri probe)
+- Completed features:
+  - Added a lightweight persisted intent-result probe so UI tests can tell whether `AskBridgeIntent` actually executed, instead of inferring Siri success from app foreground state alone.
+  - Added a simulator Siri control test that uses `XCUISiriService` to say `Open Safari`, giving us a clean signal for whether simulator Siri itself is alive.
+  - Added a supported-phrase Siri test that says `问纳博特` and then `你好`, matching the actual v1 follow-up contract instead of the unsupported inline free-text phrase.
+- Verification:
+  - `bash ~/.codex/scripts/global-init.sh` -> passed during session restore.
+  - `bash init.sh` -> passed before the Siri probe.
+  - `cd ios/VoiceBridge && swift test` -> passed (`9` BridgeCore tests).
+  - `cd ios/VoiceBridge && xcodebuild -project VoiceBridge.xcodeproj -scheme VoiceBridge -destination 'platform=iOS Simulator,name=iPhone 16' -derivedDataPath /tmp/voicebridge-deriveddata-siri-probe CODE_SIGNING_ALLOWED=NO test -only-testing:VoiceBridgeUITests` -> ran `3` UI tests:
+    - `testManualSmokeFlowDisplaysBackendReply` -> passed
+    - `testSimulatorSiriCanOpenSafari` -> passed
+    - `testSiriFollowUpPhraseStoresIntentResult` -> failed because `settings.lastIntentOutcome` remained `No Siri intent recorded`
+- Findings:
+  - Simulator Siri itself is functional in this environment; the Safari control proves `XCUISiriService` can drive built-in voice commands.
+  - The custom Voice Bridge Siri flow still does not execute in the simulator, even when using the supported two-step phrase instead of the unsupported inline free-text form.
+  - Therefore simulator Siri cannot satisfy Voice Bridge v1 acceptance for custom invocation; a real iPhone Siri run is still required.
+- Remaining blockers / follow-up:
+  - v1 still needs physical iPhone Siri acceptance for `嘿 Siri，问纳博特` followed by the spoken prompt answer.
+  - Feature `#45` remains incomplete because Apple still does not support free-form inline App Shortcut phrases for this design.

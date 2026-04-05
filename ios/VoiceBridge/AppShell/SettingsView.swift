@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var baseURL = BridgeDefaults.manualDefaultURL
     @State private var apiKey = ""
     @State private var saveStatus = "Not saved"
+    @State private var lastIntentRecord: BridgeIntentRecord?
 
     var body: some View {
         Form {
@@ -36,6 +37,20 @@ struct SettingsView: View {
                 Text("Reserved ingress only: HomePod, 小爱同学, 天猫精灵, car head units")
                 Text("Official v1 backend: nanobot /chat")
             }
+
+            Section("Last Siri Intent") {
+                if let record = lastIntentRecord {
+                    Text(record.prompt)
+                        .accessibilityIdentifier("settings.lastIntentPrompt")
+                    Text(record.outcome)
+                        .accessibilityIdentifier("settings.lastIntentOutcome")
+                    Text(record.succeeded ? "Success" : "Failure")
+                        .accessibilityIdentifier("settings.lastIntentStatus")
+                } else {
+                    Text("No Siri intent recorded")
+                        .accessibilityIdentifier("settings.lastIntentOutcome")
+                }
+            }
         }
         .task {
             await state.loadStoredConfig()
@@ -43,6 +58,10 @@ struct SettingsView: View {
                 baseURL = current.baseURL
                 apiKey = current.apiKey
             }
+            lastIntentRecord = BridgeIntentResultStore.load()
+        }
+        .onAppear {
+            lastIntentRecord = BridgeIntentResultStore.load()
         }
     }
 }
