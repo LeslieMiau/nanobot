@@ -14,6 +14,7 @@ If Xcode is missing, treat this as an environment blocker, not an app bug.
 
 ## What can be verified early
 
+- `swift test` in `ios/VoiceBridge/`
 - Swift source structure
 - bridge request/response models
 - backend client behavior in unit tests
@@ -28,4 +29,3 @@ If Xcode is missing, treat this as an environment blocker, not an app bug.
 ## Practical rule
 
 Do not let the absence of Xcode erase the bridge architecture work. Record the gate clearly and continue with self-contained source scaffolding.
-

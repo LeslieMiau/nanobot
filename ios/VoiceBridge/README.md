@@ -15,7 +15,10 @@ This subtree is intentionally designed to be movable into a dedicated repository
 
 ## Layout
 
-- `AppShell/` - SwiftUI app shell, Siri/App Intent entry points, local bridge runtime, and UI scaffolding
+- `Package.swift` - local Swift package manifest used to validate BridgeCore without full Xcode
+- `Sources/BridgeCore/` - platform-neutral bridge contract, backend routing, reply formatting, history, config storage, and nanobot transport
+- `Tests/BridgeCoreTests/` - focused tests for `/chat` encoding/decoding, error mapping, truncation, and history retention
+- `AppShell/` - SwiftUI app shell, Siri/App Intent entry points, and thin adapters that depend on `BridgeCore`
 - `Docs/` - local development, Xcode gate notes, Siri validation guidance, and future extension notes
 
 ## Migration rule
@@ -27,4 +30,3 @@ When this subtree is moved to a new repository, the runtime contract should stay
 - backends return normalized reply payloads
 
 The goal is to make the subtree portable without rewriting the bridge contract or Siri entry points.
-

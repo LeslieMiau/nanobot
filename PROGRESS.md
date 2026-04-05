@@ -45,3 +45,11 @@
 - Remaining blockers / follow-up:
   - Final iPhone Siri/App Intent runtime acceptance is still blocked by the local Xcode gate; this harness must not report v1 as complete until a full Xcode toolchain is available and the voice path is exercised on-device.
   - The current AppShell files are still scaffold source and have not been compiled on-device; they now point at the correct `BridgeCore` boundary, but real SwiftUI/App Intents validation remains pending.
+
+## Session update - 2026-04-05 (docs alignment)
+- Completed features:
+  - Updated `ios/VoiceBridge/README.md` and architecture/local-development docs so they explicitly describe the checked-in Swift Package, the `Sources/BridgeCore/` contract implementation, and the rule that `AppShell/` must remain a thin layer over BridgeCore.
+- Verification:
+  - `git diff -- ios/VoiceBridge/README.md ios/VoiceBridge/Docs/architecture.md ios/VoiceBridge/Docs/local-development.md` -> only the expected package/alignment clarifications remained after the main bridge-core checkpoint.
+- Remaining blockers / follow-up:
+  - Final feature `#56` remains open because package-level and repo-level verification are done, but full Xcode/iPhone Siri runtime validation is still blocked by the local toolchain state.
