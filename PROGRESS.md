@@ -102,3 +102,18 @@
   - Captured a simulator screenshot after launch; the app opened to the SwiftUI settings screen and rendered the expected `Bridge Config` / `V1 Scope` sections.
 - Remaining limit:
   - This confirms the simulator can install and open the app shell, but it still does not replace a physical iPhone Siri voice round-trip.
+
+## Session update - 2026-04-05 (simulator UI smoke over real /chat)
+- Completed features:
+  - Added simulator-friendly launch seeding so UI tests can inject `baseURL` and `apiKey` into the app without hand-editing settings on every run.
+  - Added accessibility identifiers to the manual smoke-test UI and settings UI so simulator automation can interact with the SwiftUI app reliably under XCTest.
+  - Added a real iOS UI test target under `ios/VoiceBridge/XcodeUITests/` and wired it into the generated Xcode project.
+- Verification:
+  - `curl -X POST http://127.0.0.1:8900/chat ...` with the local bridge API key -> returned a live nanobot reply, confirming the simulator test can point at a real backend
+  - `cd ios/VoiceBridge && xcodegen generate` -> passed
+  - `cd ios/VoiceBridge && xcodebuild -project VoiceBridge.xcodeproj -scheme VoiceBridge -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO test -only-testing:VoiceBridgeUITests` -> passed
+  - The UI test launched the app, switched to the `Test` tab, tapped `Send to nanobot`, waited for `manual.latestReply`, and confirmed that no `manual.latestError` appeared
+  - `bash init.sh` -> passed again after the UI-test additions
+- Remaining blockers / follow-up:
+  - We now have simulator-level validation for manual prompt -> `/chat` -> reply, but Siri voice invocation on a physical iPhone is still pending
+  - Feature `#45` remains the only incomplete `PLAN.json` item because Apple metadata validation still blocks free-form inline App Shortcut phrases

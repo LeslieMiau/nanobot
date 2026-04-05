@@ -43,6 +43,7 @@ targets:
     scheme:
       testTargets:
         - VoiceBridgeTests
+        - VoiceBridgeUITests
   VoiceBridgeTests:
     type: bundle.unit-test
     platform: iOS
@@ -54,4 +55,16 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.miau.voicebridge.tests
+        GENERATE_INFOPLIST_FILE: YES
+  VoiceBridgeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: XcodeUITests
+    dependencies:
+      - target: VoiceBridge
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.miau.voicebridge.uitests
         GENERATE_INFOPLIST_FILE: YES

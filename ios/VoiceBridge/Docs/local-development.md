@@ -16,6 +16,7 @@ If a machine only has Command Line Tools, treat that as an environment blocker, 
 ## What can be verified early
 
 - `swift test` in `ios/VoiceBridge/`
+- `xcodebuild ... test -only-testing:VoiceBridgeUITests` once full Xcode + simulator runtime are available
 - `swift -e 'import SwiftUI'`
 - `swift -e 'import AppIntents'`
 - `swiftc -typecheck ... AppShell/*.swift` against the macOS SDK and the built `BridgeCore` module
@@ -28,7 +29,7 @@ If a machine only has Command Line Tools, treat that as an environment blocker, 
 
 - app target build
 - App Intents and Siri phrase registration
-- simulator or device validation
+- simulator UI validation
 - iPhone Siri / App Intent runtime acceptance
 
 ## What still needs a physical iPhone

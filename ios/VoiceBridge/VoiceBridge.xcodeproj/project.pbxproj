@@ -23,6 +23,7 @@
 		60D465B945D1B90DD5C3CB34 /* BridgeSourcePlatform.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF031A6986E73B06B7EB62B4 /* BridgeSourcePlatform.swift */; };
 		6C74BE4CC49CD5E9D63151A6 /* VoiceBridgeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44859F154602AF2C046D0187 /* VoiceBridgeApp.swift */; };
 		74950DDFE30BB11CF955E7B1 /* BridgeRequest.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23B05B24EC7AEC9935B782B2 /* BridgeRequest.swift */; };
+		7D288D828021EF0C91083C15 /* VoiceBridgeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E1A4F5F5081351F22769B0 /* VoiceBridgeUITests.swift */; };
 		80240E12709D699900CFC86E /* BridgeBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = E98ACCCD835E46D9E076225F /* BridgeBackend.swift */; };
 		871044BA0C820D219034A9DF /* BridgeRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C42C1C5CC888E25754C6249 /* BridgeRuntime.swift */; };
 		88A16B114CB332CE21B7C962 /* ManualTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 737DBE0328864AF81A3B8DDA /* ManualTestView.swift */; };
@@ -47,6 +48,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 1D00B6A9C460D6CCE010E2E6;
 			remoteInfo = BridgeCore;
+		};
+		C8BDE358AECE92ED9F704A80 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D85B493B8C25A16E50FFAE49 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A26FBCA6D97168E74B87D656;
+			remoteInfo = VoiceBridge;
 		};
 		D05E32D6D38F596F97EAD10C /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -99,8 +107,10 @@
 		43638062B7FD5DA262D7F454 /* BridgeResponseFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeResponseFormatter.swift; sourceTree = "<group>"; };
 		44859F154602AF2C046D0187 /* VoiceBridgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceBridgeApp.swift; sourceTree = "<group>"; };
 		47D607880590441CE5309DB6 /* BridgeSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeSupport.swift; sourceTree = "<group>"; };
+		4F21735107EB2777E18BB6B4 /* VoiceBridgeUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = VoiceBridgeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		52F2428DA3B62108B036B9E0 /* BridgeCore.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = BridgeCore.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		5FEDBE6A8B0CF9DBE14B8C98 /* VoiceBridgeTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = VoiceBridgeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		62E1A4F5F5081351F22769B0 /* VoiceBridgeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceBridgeUITests.swift; sourceTree = "<group>"; };
 		6437E5397B3EB31A1DA74548 /* BridgeResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeResponse.swift; sourceTree = "<group>"; };
 		6F69CE061B027FB6CC7743F1 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		737DBE0328864AF81A3B8DDA /* ManualTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualTestView.swift; sourceTree = "<group>"; };
@@ -183,12 +193,21 @@
 			path = AppShell;
 			sourceTree = "<group>";
 		};
+		29463852C8DDB0B39ECD732C /* XcodeUITests */ = {
+			isa = PBXGroup;
+			children = (
+				62E1A4F5F5081351F22769B0 /* VoiceBridgeUITests.swift */,
+			);
+			path = XcodeUITests;
+			sourceTree = "<group>";
+		};
 		392F9BC46D8D4F8DE20022A6 = {
 			isa = PBXGroup;
 			children = (
 				26AEEF2A6C02C8F891EB9702 /* AppShell */,
 				078FE548847231E676EBFA8B /* Sources */,
 				77D6CD1E96C9094BE9B5278F /* XcodeTests */,
+				29463852C8DDB0B39ECD732C /* XcodeUITests */,
 				FCA70922CCABE34C1630BBBC /* Products */,
 			);
 			sourceTree = "<group>";
@@ -207,6 +226,7 @@
 				52F2428DA3B62108B036B9E0 /* BridgeCore.framework */,
 				406ADF00E48235BE1EA133F4 /* VoiceBridge.app */,
 				5FEDBE6A8B0CF9DBE14B8C98 /* VoiceBridgeTests.xctest */,
+				4F21735107EB2777E18BB6B4 /* VoiceBridgeUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -230,6 +250,24 @@
 			productName = BridgeCore;
 			productReference = 52F2428DA3B62108B036B9E0 /* BridgeCore.framework */;
 			productType = "com.apple.product-type.framework";
+		};
+		1FABB7CFFF9B5F07E353F181 /* VoiceBridgeUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EB8A85D6BCE6FA26572E77D5 /* Build configuration list for PBXNativeTarget "VoiceBridgeUITests" */;
+			buildPhases = (
+				50E8DF5BF97FF59FBC946182 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				608EC666E6BC197193F83E71 /* PBXTargetDependency */,
+			);
+			name = VoiceBridgeUITests;
+			packageProductDependencies = (
+			);
+			productName = VoiceBridgeUITests;
+			productReference = 4F21735107EB2777E18BB6B4 /* VoiceBridgeUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 		A26FBCA6D97168E74B87D656 /* VoiceBridge */ = {
 			isa = PBXNativeTarget;
@@ -280,6 +318,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					1FABB7CFFF9B5F07E353F181 = {
+						TestTargetID = A26FBCA6D97168E74B87D656;
+					};
 					A26FBCA6D97168E74B87D656 = {
 						ProvisioningStyle = Automatic;
 					};
@@ -302,11 +343,20 @@
 				1D00B6A9C460D6CCE010E2E6 /* BridgeCore */,
 				A26FBCA6D97168E74B87D656 /* VoiceBridge */,
 				BFC1529A921458F8E9B8CB55 /* VoiceBridgeTests */,
+				1FABB7CFFF9B5F07E353F181 /* VoiceBridgeUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXSourcesBuildPhase section */
+		50E8DF5BF97FF59FBC946182 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7D288D828021EF0C91083C15 /* VoiceBridgeUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		560F68715D4B8A0431F20CEC /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -358,6 +408,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		608EC666E6BC197193F83E71 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A26FBCA6D97168E74B87D656 /* VoiceBridge */;
+			targetProxy = C8BDE358AECE92ED9F704A80 /* PBXContainerItemProxy */;
+		};
 		CEE8EAC57B275E003E4A9263 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 1D00B6A9C460D6CCE010E2E6 /* BridgeCore */;
@@ -453,6 +508,24 @@
 			};
 			name = Debug;
 		};
+		7FCE8FEBFA7D6E436E357F63 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.miau.voicebridge.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = VoiceBridge;
+			};
+			name = Debug;
+		};
 		82B98299FCE2BEA4C846502E /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -504,6 +577,24 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.miau.voicebridge;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		C93BADC4F30B4A9402324831 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.miau.voicebridge.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = VoiceBridge;
 			};
 			name = Release;
 		};
@@ -665,6 +756,15 @@
 			buildConfigurations = (
 				618B40567000ED1F8D297808 /* Debug */,
 				FE1214D225CB750C8C13CD1B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		EB8A85D6BCE6FA26572E77D5 /* Build configuration list for PBXNativeTarget "VoiceBridgeUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7FCE8FEBFA7D6E436E357F63 /* Debug */,
+				C93BADC4F30B4A9402324831 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

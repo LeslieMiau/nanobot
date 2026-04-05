@@ -19,6 +19,8 @@ This subtree is intentionally designed to be movable into a dedicated repository
 - `Sources/BridgeCore/` - platform-neutral bridge contract, backend routing, reply formatting, history, config storage, and nanobot transport
 - `Tests/BridgeCoreTests/` - focused tests for `/chat` encoding/decoding, error mapping, truncation, and history retention
 - `AppShell/` - SwiftUI app shell, Siri/App Intent entry points, and thin adapters that depend on `BridgeCore`
+- `XcodeTests/` - iOS-targeted XCTest smoke coverage for app-facing helpers
+- `XcodeUITests/` - simulator UI smoke coverage for the manual prompt -> `/chat` path
 - `Docs/` - local development, Xcode gate notes, Siri validation guidance, and future extension notes
 
 ## Migration rule

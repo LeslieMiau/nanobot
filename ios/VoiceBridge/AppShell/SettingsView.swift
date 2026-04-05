@@ -11,7 +11,9 @@ struct SettingsView: View {
         Form {
             Section("Bridge Config") {
                 TextField("Base URL", text: $baseURL)
+                    .accessibilityIdentifier("settings.baseURLField")
                 SecureField("API Key", text: $apiKey)
+                    .accessibilityIdentifier("settings.apiKeyField")
                 Button("Save") {
                     Task {
                         await state.updateConfig(
@@ -24,7 +26,9 @@ struct SettingsView: View {
                         saveStatus = "Saved locally"
                     }
                 }
+                .accessibilityIdentifier("settings.saveButton")
                 Text(saveStatus)
+                    .accessibilityIdentifier("settings.saveStatus")
             }
 
             Section("v1 Scope") {
