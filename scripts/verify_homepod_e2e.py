@@ -205,28 +205,43 @@ def stage_shortcuts_runtime(args: argparse.Namespace) -> StageResult:
 
     log_delta = read_log_delta(args.log_file, marker)
     relevant = filter_relevant_lines(log_delta, args.shortcut_speaker)
-    log_ok = any(f"speaker={args.shortcut_speaker}" in line for line in relevant)
+    test_log_ok = any(f"speaker={args.shortcut_speaker}" in line for line in relevant)
     evidence.extend(f"log: {line}" for line in relevant[:4])
 
+    interactive_marker = snapshot_log(args.log_file)
+    interactive_result = run_command(
+        ["shortcuts", "run", args.interactive_shortcut],
+        timeout=8.0,
+    )
+    evidence.append(f"shortcuts run {args.interactive_shortcut} -> code={interactive_result.code}")
+    if interactive_result.stderr:
+        evidence.append(f"{args.interactive_shortcut} stderr -> {interactive_result.stderr[:120]}")
+    interactive_log_delta = read_log_delta(args.log_file, interactive_marker)
+    interactive_relevant = filter_relevant_lines(interactive_log_delta, args.shortcut_speaker)
+    interactive_log_ok = any(f"speaker={args.shortcut_speaker}" in line for line in interactive_relevant)
+    if interactive_relevant:
+        evidence.extend(f"interactive log: {line}" for line in interactive_relevant[:4])
+
+    test_behavior_ok = test_log_ok
+    interactive_behavior_ok = not interactive_log_ok
+
     fix_hint = "只查快捷指令导入版本、showresult/speaktext 动作、签名产物和 Shortcuts 库内容"
-    if test_count == args.expected_interactive_actions and interactive_count == args.expected_test_actions:
+    if test_behavior_ok and interactive_behavior_ok:
+        fix_hint = "Stage 2 的本机行为已正确；下一步直接进入 iPhone 手动运行 / Siri / HomePod 验证"
+    elif not test_behavior_ok:
         fix_hint = (
-            f"当前 Shortcuts 库里的 {args.test_shortcut} / {args.interactive_shortcut} 版本装反了；"
-            "删除设备上的旧条目后，按当前仓库产物重新导入"
+            f"{args.test_shortcut} 没有在无输入时打到 API；删除旧条目并重新导入当前签名产物"
         )
-    elif test_count != args.expected_test_actions or interactive_count != args.expected_interactive_actions:
+    elif interactive_log_ok:
         fix_hint = (
-            f"当前 Shortcuts 库里的 {args.test_shortcut} 或 {args.interactive_shortcut} 不是最新版本；"
-            "删除旧条目并重新导入当前签名产物"
+            f"{args.interactive_shortcut} 在无输入 CLI 运行时直接打到了 API；当前交互快捷指令很可能不是最新结构"
         )
 
     return StageResult(
         name="Stage 2: Shortcuts 运行时",
         passed=(
-            run_result.code == 0
-            and test_count == args.expected_test_actions
-            and interactive_count == args.expected_interactive_actions
-            and log_ok
+            test_behavior_ok
+            and interactive_behavior_ok
         ),
         evidence=evidence,
         fix_hint=fix_hint,
