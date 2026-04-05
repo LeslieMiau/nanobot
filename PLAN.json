@@ -1,0 +1,618 @@
+[
+  {
+    "id": 1,
+    "category": "setup",
+    "description": "Repo baseline stays green before Voice Bridge work begins so new harness sessions can resume from a verified `init.sh` pass instead of inheriting unrelated breakage.",
+    "steps": [
+      "Run `bash init.sh` from the worktree and confirm the repo baseline passes before Voice Bridge implementation starts.",
+      "Verify brittle tests touched during bootstrap remain green under `.venv/bin/pytest` so later harness rounds can trust the baseline.",
+      "Record the baseline verification outcome in `PROGRESS.md` before marking the feature complete."
+    ],
+    "passes": false
+  },
+  {
+    "id": 2,
+    "category": "harness",
+    "description": "A new harness task is initialized for Voice Bridge v1 with a granular PLAN and append-only progress log so future sessions can resume without re-deriving scope.",
+    "steps": [
+      "Create `PLAN.json` with the Voice Bridge v1 feature list and leave every `passes` field false on first write.",
+      "Create `PROGRESS.md` with the initial task summary, baseline state, and current blockers.",
+      "Commit the initialization checkpoint before beginning the first implementation feature."
+    ],
+    "passes": false
+  },
+  {
+    "id": 3,
+    "category": "harness",
+    "description": "The `.harness/` workspace exists for planner/generator/evaluator communication and follows the harness-engineering file protocol.",
+    "steps": [
+      "Create `.harness/` inside the worktree and keep the expected planner/build/QA/status file layout.",
+      "Update `.gitignore` so `.harness/` is treated as harness communication state rather than product source.",
+      "Verify the local harness files can be recreated or inspected without polluting normal repo status."
+    ],
+    "passes": false
+  },
+  {
+    "id": 4,
+    "category": "planning",
+    "description": "The approved Voice Bridge v1 product spec is persisted in `.harness/spec.md` so later generator and evaluator rounds work from the same architecture and acceptance rules.",
+    "steps": [
+      "Write `.harness/spec.md` with the approved three-layer Voice Bridge architecture, v1 scope, and future ingress/backend reservation.",
+      "Ensure the spec explicitly treats `iPhone Siri` as the only v1 runtime success target and `HomePod` as a future experiment.",
+      "Verify the spec documents the self-contained subtree requirement for later repo extraction."
+    ],
+    "passes": false
+  },
+  {
+    "id": 5,
+    "category": "planning",
+    "description": "Round-one build scope is formalized in `.harness/contract.md` so the first generator pass has concrete success criteria instead of open-ended implementation drift.",
+    "steps": [
+      "Write `.harness/contract.md` for round one with a bounded feature slice tied back to the spec.",
+      "Include user-visible and testable success criteria for each round-one capability.",
+      "Verify the contract names explicit validation commands or checks rather than vague completion claims."
+    ],
+    "passes": false
+  },
+  {
+    "id": 6,
+    "category": "environment",
+    "description": "The current Apple toolchain gate is recorded explicitly so the harness does not silently downgrade iOS validation when full Xcode or iOS SDK support is missing.",
+    "steps": [
+      "Run `xcode-select -p` and record the active developer directory in progress and harness status.",
+      "Run `xcodebuild -showsdks` and `xcrun simctl list devices available` to confirm whether full Xcode and simulator tooling exist.",
+      "Persist the missing-toolchain result in `.harness/status.json` and `PROGRESS.md` if the machine is still limited to Command Line Tools."
+    ],
+    "passes": false
+  },
+  {
+    "id": 7,
+    "category": "architecture",
+    "description": "A self-contained `ios/VoiceBridge/` root is created so all iOS-specific code can later move into a dedicated repository without pulling nanobot runtime internals along.",
+    "steps": [
+      "Create `ios/VoiceBridge/` as the top-level subtree for the new app and bridge code.",
+      "Keep app shell, core, docs, and tests under that subtree instead of scattering files across the repo root.",
+      "Verify nothing inside the subtree requires relative imports from the Python codebase."
+    ],
+    "passes": false
+  },
+  {
+    "id": 8,
+    "category": "architecture",
+    "description": "The iOS subtree is split into `AppShell`, `BridgeCore`, and `Docs` so future repo extraction has clean ownership boundaries from day one.",
+    "steps": [
+      "Create directories or targets that correspond to `AppShell`, `BridgeCore`, and `Docs` responsibilities.",
+      "Document each boundary so product UI, bridge logic, and operational docs do not collapse into one module.",
+      "Verify the file layout matches the three-part split described in the spec."
+    ],
+    "passes": false
+  },
+  {
+    "id": 9,
+    "category": "docs",
+    "description": "The iOS subtree includes a migration note that explains how to move Voice Bridge into a future standalone repository without changing runtime behavior.",
+    "steps": [
+      "Add an `ios/VoiceBridge/README.md` or equivalent entrypoint that describes the subtree layout and migration intent.",
+      "Document which files can move as a unit and which runtime contract with nanobot must stay stable.",
+      "Verify the migration note does not assume the presence of Python package internals."
+    ],
+    "passes": false
+  },
+  {
+    "id": 10,
+    "category": "architecture",
+    "description": "User-facing branding stays localizable while internal code names remain platform-neutral so the bridge can later target nanobot, openclaw, or other assistants without a rewrite.",
+    "steps": [
+      "Centralize user-visible assistant naming so the Siri phrase can say `纳博特` without hard-coding nanobot-specific labels everywhere.",
+      "Keep internal types and folders named around `VoiceBridge` rather than a single backend brand.",
+      "Verify future backend switching would not require renaming the core data models."
+    ],
+    "passes": false
+  },
+  {
+    "id": 11,
+    "category": "core",
+    "description": "A `BackendKind` abstraction exists so the bridge can start with nanobot while reserving future backend routing for openclaw and other services.",
+    "steps": [
+      "Add a bridge-core enum or equivalent model for backend selection.",
+      "Include `nanobot` as the only active v1 runtime case and reserve `openclaw` as a future-facing placeholder.",
+      "Verify the rest of BridgeCore consumes the abstraction rather than hard-coding nanobot everywhere."
+    ],
+    "passes": false
+  },
+  {
+    "id": 12,
+    "category": "core",
+    "description": "A `SourcePlatform` abstraction captures where a request came from so Siri/HomePod/小爱/天猫/车机 expansion can reuse the same internal protocol later.",
+    "steps": [
+      "Add a platform model with at least `siri`, `homepod`, `xiaoai`, `tmallgenie`, `carplay`, and `custom` cases.",
+      "Default v1 runtime wiring to `siri` while leaving the others reserved and documented.",
+      "Verify the model is used by `BridgeRequest` instead of leaving source metadata implicit."
+    ],
+    "passes": false
+  },
+  {
+    "id": 13,
+    "category": "core",
+    "description": "A `SourceDeviceType` abstraction records whether the caller is a phone, speaker, car head unit, or another surface without leaking platform-specific logic into backend code.",
+    "steps": [
+      "Add a device-type model such as `phone`, `speaker`, `carHeadUnit`, and `custom`.",
+      "Set the iPhone Siri path to the phone device type in v1.",
+      "Verify backend requests only see the normalized device metadata rather than App Intent specifics."
+    ],
+    "passes": false
+  },
+  {
+    "id": 14,
+    "category": "core",
+    "description": "BridgeCore owns a first-class `BridgeRequest` model so all ingress adapters normalize prompt metadata the same way before routing to a backend.",
+    "steps": [
+      "Implement `BridgeRequest` with backend, speaker, sessionId, prompt, sourcePlatform, and sourceDeviceType fields.",
+      "Ensure the model treats the prompt text as the canonical payload rather than raw audio or Siri-specific state.",
+      "Verify the request model is serializable or otherwise testable independent of the app shell."
+    ],
+    "passes": false
+  },
+  {
+    "id": 15,
+    "category": "core",
+    "description": "BridgeCore owns a first-class `BridgeResponse` model that separates backend truth from how the client displays or speaks the answer.",
+    "steps": [
+      "Implement `BridgeResponse` with at least reply, endConversation, displayText, and spokenText.",
+      "Make the raw backend `reply` the canonical value and derive display or spoken variants from it.",
+      "Verify the response model can represent both short and truncated long replies."
+    ],
+    "passes": false
+  },
+  {
+    "id": 16,
+    "category": "core",
+    "description": "A `BridgeConfig` model exists so backend selection, base URL, and credentials are explicit runtime inputs rather than hidden app globals.",
+    "steps": [
+      "Add a configuration model with backend kind, base URL, and API key fields.",
+      "Keep the config representation independent of SwiftUI screens so it can move into a standalone core package later.",
+      "Verify missing or invalid config can be detected before a network request is sent."
+    ],
+    "passes": false
+  },
+  {
+    "id": 17,
+    "category": "core",
+    "description": "BridgeCore exposes a backend protocol that ingress adapters call instead of constructing HTTP requests directly inside App Intents or views.",
+    "steps": [
+      "Define a protocol such as `BridgeBackend` with an async send method returning `BridgeResponse`.",
+      "Keep the protocol signature centered on `BridgeRequest` and `BridgeResponse`.",
+      "Verify app shell and Siri intent code depend on the protocol rather than a concrete nanobot client."
+    ],
+    "passes": false
+  },
+  {
+    "id": 18,
+    "category": "backend",
+    "description": "A concrete `NanobotBackend` bridges Voice Bridge requests into nanobot's `/chat` API without leaking nanobot-specific transport code throughout the app.",
+    "steps": [
+      "Implement a nanobot backend client that consumes `BridgeConfig` and `BridgeRequest`.",
+      "Map the request into `POST /chat` using the expected headers and body shape.",
+      "Verify the backend returns a normalized `BridgeResponse` rather than raw JSON."
+    ],
+    "passes": false
+  },
+  {
+    "id": 19,
+    "category": "backend",
+    "description": "An `OpenClawBackend` placeholder or reserved extension point exists so future backend work does not require reshaping the bridge core types.",
+    "steps": [
+      "Reserve an openclaw backend case or placeholder type without implementing runtime network behavior in v1.",
+      "Document that v1 intentionally leaves openclaw unimplemented while preserving the interface slot.",
+      "Verify unsupported future backends fail clearly rather than silently defaulting to nanobot."
+    ],
+    "passes": false
+  },
+  {
+    "id": 20,
+    "category": "backend",
+    "description": "The nanobot backend encodes `/chat` requests in the agreed body format so Siri prompts reach nanobot with stable field names.",
+    "steps": [
+      "Encode request bodies as `{\"text\":\"<prompt>\",\"speaker\":\"siri-iphone\"}` for the v1 Siri path.",
+      "Keep any additional metadata out of the nanobot payload unless it is explicitly supported.",
+      "Verify encoding tests cover the JSON field names and speaker value."
+    ],
+    "passes": false
+  },
+  {
+    "id": 21,
+    "category": "backend",
+    "description": "The nanobot backend decodes `/chat` responses into bridge responses so Siri playback logic never has to parse raw transport JSON itself.",
+    "steps": [
+      "Decode `reply` and `end_conversation` from the backend response.",
+      "Map those decoded fields into `BridgeResponse` with sensible display and spoken defaults.",
+      "Verify response decoding tests cover both standard and optional-field cases."
+    ],
+    "passes": false
+  },
+  {
+    "id": 22,
+    "category": "backend",
+    "description": "Bearer authentication is attached to bridge requests so the app can call secured nanobot instances without hard-coding credentials in source.",
+    "steps": [
+      "Attach `Authorization: Bearer <apiKey>` when a configured API key is available.",
+      "Reject missing required credentials before sending a request when the config is incomplete.",
+      "Verify request-construction tests assert the authorization header behavior."
+    ],
+    "passes": false
+  },
+  {
+    "id": 23,
+    "category": "backend",
+    "description": "Timeout behavior is normalized into user-facing bridge errors so Siri can speak an actionable failure instead of ending with a generic system acknowledgement.",
+    "steps": [
+      "Map request timeouts to a stable bridge error describing that nanobot did not respond in time.",
+      "Ensure the timeout error can be surfaced both in the app UI and Siri dialog text.",
+      "Verify the timeout mapping with a focused unit test."
+    ],
+    "passes": false
+  },
+  {
+    "id": 24,
+    "category": "backend",
+    "description": "Authentication failures are normalized into bridge errors so a bad or missing API key produces a clear spoken remediation hint.",
+    "steps": [
+      "Map HTTP 401 or equivalent auth failures to a dedicated bridge error.",
+      "Return a user-facing message that instructs the operator to configure the server or API key in the app.",
+      "Verify the auth error mapping with a focused unit test."
+    ],
+    "passes": false
+  },
+  {
+    "id": 25,
+    "category": "backend",
+    "description": "Network, transport, and invalid-JSON failures are normalized into bridge errors so Siri does not collapse them into a misleading `完成` response.",
+    "steps": [
+      "Map offline, connection, and invalid response payload failures to dedicated bridge errors.",
+      "Ensure these errors carry user-facing text suitable for Siri playback and on-screen display.",
+      "Verify the mapping with focused tests for offline and malformed JSON cases."
+    ],
+    "passes": false
+  },
+  {
+    "id": 26,
+    "category": "core",
+    "description": "The v1 Siri bridge uses a stable speaker value so downstream nanobot logs and policies can distinguish iPhone Siri traffic from HomePod or future adapters.",
+    "steps": [
+      "Define the v1 speaker strategy so App Intent requests use `siri-iphone` when building the backend payload.",
+      "Keep the mapping in bridge core rather than scattering string literals through views and intents.",
+      "Verify the speaker value appears in encoded `/chat` requests."
+    ],
+    "passes": false
+  },
+  {
+    "id": 27,
+    "category": "core",
+    "description": "A session-id strategy exists so future multi-turn or multi-device routing can correlate requests without redesigning the protocol surface.",
+    "steps": [
+      "Add session-id generation or transport to `BridgeRequest` even if v1 uses a simple ephemeral value.",
+      "Keep the session identifier creation separate from the backend request encoder.",
+      "Verify repeated manual requests create or carry session ids consistently."
+    ],
+    "passes": false
+  },
+  {
+    "id": 28,
+    "category": "core",
+    "description": "Reply formatting distinguishes between display text and spoken text so long answers remain useful in the app without making Siri read excessive content.",
+    "steps": [
+      "Implement a reply-formatting policy that preserves full display text while optionally truncating spoken text.",
+      "Use a clear appendage such as `完整回复已保存在纳博特应用中` for spoken truncation cases.",
+      "Verify the truncation behavior with focused unit tests."
+    ],
+    "passes": false
+  },
+  {
+    "id": 29,
+    "category": "core",
+    "description": "A local history entry model exists so the bridge can keep a recent record of prompts and replies for debugging without introducing backend persistence coupling.",
+    "steps": [
+      "Define a history item model containing at least timestamp, prompt, reply, and backend metadata.",
+      "Keep the model inside the self-contained iOS subtree rather than reusing Python-side message classes.",
+      "Verify the model can represent both successful replies and surfaced errors."
+    ],
+    "passes": false
+  },
+  {
+    "id": 30,
+    "category": "core",
+    "description": "A recent-history store keeps the latest 20 interactions locally so Siri or network failures can be diagnosed without leaving the app.",
+    "steps": [
+      "Implement a local history store that appends interactions and trims older entries beyond the cap.",
+      "Expose the stored entries to app-shell screens without coupling them to the networking layer.",
+      "Verify the store retains only the most recent 20 entries."
+    ],
+    "passes": false
+  },
+  {
+    "id": 31,
+    "category": "core",
+    "description": "A configuration store persists the selected backend, base URL, and API key locally so the operator does not need to re-enter settings before each Siri test.",
+    "steps": [
+      "Persist bridge configuration locally on-device using a simple store such as `UserDefaults` for v1.",
+      "Keep persistence behind a small abstraction so future extraction or security upgrades remain localized.",
+      "Verify changed settings are loaded back into the app on the next launch or state refresh."
+    ],
+    "passes": false
+  },
+  {
+    "id": 32,
+    "category": "app-shell",
+    "description": "An app-level state container coordinates config, manual testing, and recent history so views and intents share one bridge runtime model.",
+    "steps": [
+      "Add an app-shell model that owns current config, request execution, and recent history updates.",
+      "Inject the model into SwiftUI screens and Siri intent handling through a stable boundary.",
+      "Verify manual requests update both the latest reply and recent-history state."
+    ],
+    "passes": false
+  },
+  {
+    "id": 33,
+    "category": "app-shell",
+    "description": "A minimal app entrypoint exists so the Voice Bridge app can be opened, configured, and used for non-Siri smoke tests on the device.",
+    "steps": [
+      "Add the main SwiftUI app entry for the Voice Bridge shell.",
+      "Ensure the entrypoint boots the shared state container and routes to the configuration/testing surfaces.",
+      "Verify the app can present the primary screens without Siri involvement."
+    ],
+    "passes": false
+  },
+  {
+    "id": 34,
+    "category": "app-shell",
+    "description": "A settings screen captures the backend URL and API key so operators can configure the bridge without editing source code or plist files.",
+    "steps": [
+      "Add a settings view with editable base URL and API key fields.",
+      "Validate obvious configuration mistakes before saving or sending requests.",
+      "Verify updated settings persist and are reused by manual and Siri-triggered requests."
+    ],
+    "passes": false
+  },
+  {
+    "id": 35,
+    "category": "app-shell",
+    "description": "A manual test screen sends arbitrary prompts to the configured backend so the bridge can be debugged without relying on Siri every time.",
+    "steps": [
+      "Add a manual test view with a prompt input and send action.",
+      "Show the most recent reply or surfaced error after each manual request.",
+      "Verify sending `你好` through the manual screen produces the same backend behavior as a direct `/chat` smoke test."
+    ],
+    "passes": false
+  },
+  {
+    "id": 36,
+    "category": "app-shell",
+    "description": "A history screen exposes recent prompts and replies so operators can inspect what Siri or manual tests actually sent and received.",
+    "steps": [
+      "Add a recent-history screen backed by the local history store.",
+      "Display prompt, reply, and time metadata clearly enough for debugging.",
+      "Verify new interactions appear in history after manual or Siri requests."
+    ],
+    "passes": false
+  },
+  {
+    "id": 37,
+    "category": "app-shell",
+    "description": "The app clearly handles missing configuration so users are told what to fix instead of seeing empty UI or unexplained request failures.",
+    "steps": [
+      "Detect missing base URL or API key before attempting a request.",
+      "Present a clear on-screen message that points the operator to the settings screen.",
+      "Verify the same missing-config state can be surfaced as a Siri-spoken error."
+    ],
+    "passes": false
+  },
+  {
+    "id": 38,
+    "category": "app-shell",
+    "description": "Request execution state is visible in the app so operators can tell when the bridge is waiting on nanobot versus already failed locally.",
+    "steps": [
+      "Add loading and in-flight state to the app-shell model.",
+      "Show request progress or disabled controls while a manual test is running.",
+      "Verify repeated manual sends do not produce ambiguous double-submit behavior."
+    ],
+    "passes": false
+  },
+  {
+    "id": 39,
+    "category": "app-shell",
+    "description": "The app shows the latest reply prominently so long answers remain inspectable even when Siri only speaks a truncated version.",
+    "steps": [
+      "Keep the full display text of the latest backend reply visible in the app shell.",
+      "Ensure this latest-reply view updates after both success and failure states.",
+      "Verify long replies remain readable on-screen after spoken truncation is applied."
+    ],
+    "passes": false
+  },
+  {
+    "id": 40,
+    "category": "siri",
+    "description": "An `AskBridgeIntent` or equivalent App Intent exists so Siri has a dedicated, app-owned execution path instead of routing through brittle Shortcut prompts.",
+    "steps": [
+      "Add the App Intent type inside the iOS subtree and wire it into the app target or intent extension as appropriate.",
+      "Make the intent depend on bridge-core request execution rather than reimplementing transport logic.",
+      "Verify the source is structured so Siri entrypoint code stays thin and declarative."
+    ],
+    "passes": false
+  },
+  {
+    "id": 41,
+    "category": "siri",
+    "description": "The Siri intent exposes a single free-text prompt parameter so users can ask nanobot arbitrary questions from iPhone Siri.",
+    "steps": [
+      "Add a `prompt` string parameter to the App Intent.",
+      "Treat the prompt as the only required semantic input for v1.",
+      "Verify the parameter value flows unchanged into `BridgeRequest.prompt`."
+    ],
+    "passes": false
+  },
+  {
+    "id": 42,
+    "category": "siri",
+    "description": "The Siri intent defines `requestValueDialog` so missing-inline-input cases fall back to a spoken follow-up question instead of ending with `完成`.",
+    "steps": [
+      "Configure the prompt parameter with a request dialog such as `你想问纳博特什么？`.",
+      "Keep the dialog text in a shared constant so branding changes remain localized.",
+      "Verify documentation and manual Siri tests expect the follow-up prompt path."
+    ],
+    "passes": false
+  },
+  {
+    "id": 43,
+    "category": "siri",
+    "description": "An `AppShortcutsProvider` registers the Siri phrases needed for both follow-up and inline-input invocation styles.",
+    "steps": [
+      "Add an App Shortcuts provider or equivalent Siri phrase registration layer.",
+      "Register phrases in Chinese that map to the bridge intent without requiring the Shortcuts app.",
+      "Verify the provider references the same intent and prompt parameter used by the rest of the Siri path."
+    ],
+    "passes": false
+  },
+  {
+    "id": 44,
+    "category": "siri",
+    "description": "The no-inline-input phrase `问纳博特` is registered so Siri can launch the intent and ask a follow-up question when the prompt is omitted.",
+    "steps": [
+      "Register the phrase `问纳博特` as a supported Siri invocation.",
+      "Ensure the no-inline phrase still reaches the same App Intent rather than a separate code path.",
+      "Verify the manual Siri test plan includes the follow-up-question flow."
+    ],
+    "passes": false
+  },
+  {
+    "id": 45,
+    "category": "siri",
+    "description": "The inline-input phrase `问纳博特 {prompt}` is registered so users can attempt a one-shot Siri invocation on iPhone without waiting for a follow-up prompt.",
+    "steps": [
+      "Register an inline-prompt App Shortcut phrase for the intent.",
+      "Keep the inline phrase optional so the system can still fall back to follow-up collection if parsing fails.",
+      "Verify the Siri validation notes cover both inline success and follow-up fallback."
+    ],
+    "passes": false
+  },
+  {
+    "id": 46,
+    "category": "siri",
+    "description": "The Siri intent's `perform()` path executes the shared bridge runtime so Siri, manual app tests, and future ingress adapters all hit the same backend pipeline.",
+    "steps": [
+      "Implement the intent `perform()` method to build a `BridgeRequest` and call the shared backend runtime.",
+      "Avoid direct URLSession or JSON handling inside the intent body.",
+      "Verify the perform path updates or records history in the same way as manual app requests where feasible."
+    ],
+    "passes": false
+  },
+  {
+    "id": 47,
+    "category": "siri",
+    "description": "Successful Siri requests return a spoken dialog derived from the backend reply so the user hears nanobot's answer instead of a generic Siri acknowledgement.",
+    "steps": [
+      "Map successful `BridgeResponse` values into a Siri dialog result.",
+      "Prefer the computed spoken text over ad hoc local summarization.",
+      "Verify the success path never ends with a bare `完成` when a reply exists."
+    ],
+    "passes": false
+  },
+  {
+    "id": 48,
+    "category": "siri",
+    "description": "Failed Siri requests return a spoken, actionable error so missing config or network issues are debuggable from the voice experience itself.",
+    "steps": [
+      "Map bridge errors into Siri dialog results with user-facing Chinese remediation hints.",
+      "Ensure missing config, timeout, auth, and network failures each surface distinct messages.",
+      "Verify the failure path does not silently succeed or collapse to a vague acknowledgement."
+    ],
+    "passes": false
+  },
+  {
+    "id": 49,
+    "category": "testing",
+    "description": "BridgeCore unit tests lock down nanobot request encoding and response decoding so backend contract regressions are caught before Siri testing.",
+    "steps": [
+      "Add focused tests for `/chat` request JSON encoding and speaker selection.",
+      "Add focused tests for response decoding into `BridgeResponse`.",
+      "Verify the tests run without requiring a full iOS runtime or Siri environment."
+    ],
+    "passes": false
+  },
+  {
+    "id": 50,
+    "category": "testing",
+    "description": "BridgeCore unit tests lock down failure mapping and long-reply truncation so the spoken Siri experience stays deterministic and debuggable.",
+    "steps": [
+      "Add tests for timeout, auth, offline, and malformed-JSON error mapping.",
+      "Add tests for spoken-text truncation versus full display text retention.",
+      "Verify the bridge returns stable user-facing text for each tested error case."
+    ],
+    "passes": false
+  },
+  {
+    "id": 51,
+    "category": "testing",
+    "description": "Manual in-app validation instructions exist so the operator can confirm `/chat` connectivity before involving Siri or App Intent behavior.",
+    "steps": [
+      "Document how to enter `baseURL` and `apiKey` in the app.",
+      "Document a simple manual smoke prompt such as `你好` and the expected reply shape.",
+      "Verify the instructions reference only files or UI that actually exist in the subtree."
+    ],
+    "passes": false
+  },
+  {
+    "id": 52,
+    "category": "testing",
+    "description": "Manual Siri validation instructions exist for both follow-up and inline-input flows so iPhone Siri acceptance is repeatable after each harness round.",
+    "steps": [
+      "Document the `嘿 Siri，问纳博特` follow-up flow and the expected spoken reply behavior.",
+      "Document the `嘿 Siri，问纳博特 你好` inline-input flow and the fallback expectations if inline parsing fails.",
+      "Verify the instructions distinguish iPhone Siri acceptance from non-goal HomePod testing."
+    ],
+    "passes": false
+  },
+  {
+    "id": 53,
+    "category": "docs",
+    "description": "Local development docs explain the current Xcode/toolchain requirement and the consequences of running with only Command Line Tools so future sessions do not misread build failures.",
+    "steps": [
+      "Document the expected full-Xcode prerequisites for building the iOS app or running Siri/App Intent validation.",
+      "Record the current CommandLineTools-only state and its concrete symptoms if full Xcode is still absent.",
+      "Verify the docs point to the local environment gate rather than implying the code itself is broken."
+    ],
+    "passes": false
+  },
+  {
+    "id": 54,
+    "category": "docs",
+    "description": "Architecture docs reserve future ingress adapters for HomePod, 小爱同学, 天猫精灵, car head units, and other devices without pretending v1 already implements them.",
+    "steps": [
+      "Document the ingress-adapter concept and list the reserved future platform surfaces.",
+      "Explain that v1 only implements iPhone Siri while the others remain protocol-level placeholders.",
+      "Verify the docs do not claim unimplemented platforms already work."
+    ],
+    "passes": false
+  },
+  {
+    "id": 55,
+    "category": "docs",
+    "description": "Architecture docs reserve future backend adapters for nanobot, openclaw, and related services so later expansion does not force a redesign of the bridge contract.",
+    "steps": [
+      "Document nanobot as the only active backend and openclaw as the primary reserved future backend.",
+      "Explain how backend routing hangs off `BackendKind` without changing Siri or app-shell interfaces.",
+      "Verify the docs separate reserved architecture from actual v1 runtime support."
+    ],
+    "passes": false
+  },
+  {
+    "id": 56,
+    "category": "verification",
+    "description": "The completed Voice Bridge v1 work is revalidated against the repo baseline so introducing the iOS subtree does not break existing nanobot functionality or hide unresolved toolchain blockers.",
+    "steps": [
+      "Re-run the relevant Swift, app-shell, and repo baseline checks after the Voice Bridge changes land.",
+      "Re-run `bash init.sh` and any focused bridge tests that are available in the current environment.",
+      "Record the final passing evidence and any remaining Xcode-only blockers in `PROGRESS.md` before cleanup or handoff."
+    ],
+    "passes": false
+  }
+]

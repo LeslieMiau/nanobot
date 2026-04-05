@@ -1,0 +1,17 @@
+## Harness initialized - 2026-04-05 (Voice Bridge v1)
+- Task summary:
+  - Started a new harness for `Voice Bridge v1`, with the explicit goal of shipping `iPhone Siri -> App Intent -> Bridge -> nanobot /chat -> Siri 播报`.
+  - Locked in the long-term architecture direction: future voice surfaces should go through a generic bridge layer first, using a text-turn protocol rather than raw audio as the internal standard.
+- Baseline validation before new feature work:
+  - `bash ~/.codex/scripts/global-init.sh` -> exited 0 during startup restore.
+  - `bash init.sh` -> passed after repairing four brittle test failures in `tests/cli/test_restart_command.py`, `tests/config/test_config_migration.py`, `tests/test_openai_oauth_provider.py`, and `tests/tools/test_tool_validation.py`.
+  - `.venv/bin/pytest tests/test_openai_oauth_provider.py tests/config/test_config_migration.py tests/cli/test_restart_command.py tests/tools/test_tool_validation.py -q` -> passed before initialization.
+- Confirmed architecture decisions:
+  - v1 runtime target is `iPhone Siri`; `HomePod` stays a future ingress experiment and is not part of the acceptance bar.
+  - v1 backend target is `nanobot /chat`; `openclaw` remains a reserved backend slot only.
+  - The bridge implementation must live inside a self-contained `ios/VoiceBridge/` subtree so it can later move into its own repository.
+- Current blockers / environment gates:
+  - `xcode-select -p` currently points at `/Library/Developer/CommandLineTools`.
+  - `xcodebuild -showsdks` currently fails because full Xcode is not installed.
+  - `xcrun simctl list devices available` currently fails because simulator tooling is unavailable without full Xcode.
+  - The harness should treat full iOS build and Siri/App Intent runtime validation as blocked until the Xcode toolchain is available, while still allowing architecture and core code to progress.
