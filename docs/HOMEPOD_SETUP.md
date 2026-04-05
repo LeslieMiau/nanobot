@@ -48,6 +48,24 @@ curl -X POST http://192.168.x.x:8900/v1/voice/ask \
 # → {"reply": "...", "end_conversation": false}
 ```
 
+如果你想按固定节点逐段排查，仓库里也提供了自动诊断脚本：
+
+```bash
+python3 scripts/verify_homepod_e2e.py
+```
+
+它会自动验证：
+- API 监听与 `/health`
+- `/v1/voice/ask` 返回 `reply`
+- `shortcuts run '测试助手'` 是否真正打到服务端
+- 当前库中的 `测试助手` / `纳博特` 是否还是预期动作数
+
+设备侧排查时，可以单独开一个日志观察窗口：
+
+```bash
+python3 scripts/verify_homepod_e2e.py watch --speaker homepod
+```
+
 ## 第二步：导入快捷指令
 
 推荐直接使用仓库里已经生成好的快捷指令文件：
