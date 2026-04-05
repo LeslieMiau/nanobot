@@ -4,13 +4,14 @@
 
 V1 iOS validation expects a full Xcode installation.
 
-Current local machine notes:
+Current validated machine notes:
 
-- `xcode-select -p` may point to Command Line Tools only
-- `xcodebuild -showsdks` requires a full Xcode toolchain
-- simulator tooling is only available with Xcode installed
+- `xcode-select -p` should point to `/Applications/Xcode.app/Contents/Developer`
+- `xcodebuild -showsdks` should list iOS SDKs
+- `xcrun simctl list devices available` should list iPhone simulator runtimes
+- the current harness has been validated with `Xcode 16.4` plus the `iOS 18.6` simulator runtime
 
-If Xcode is missing, treat this as an environment blocker, not an app bug.
+If a machine only has Command Line Tools, treat that as an environment blocker, not an app bug.
 
 ## What can be verified early
 
@@ -30,6 +31,12 @@ If Xcode is missing, treat this as an environment blocker, not an app bug.
 - simulator or device validation
 - iPhone Siri / App Intent runtime acceptance
 
+## What still needs a physical iPhone
+
+- real Siri voice invocation
+- App Shortcut registration behavior outside the simulator build pipeline
+- confirmation that spoken follow-up reaches nanobot on-device
+
 ## Practical rule
 
-Do not let the absence of Xcode erase the bridge architecture work. Record the gate clearly and continue with self-contained source scaffolding.
+Do not let the absence of a physical device erase the bridge architecture work. Record the gate clearly and continue with buildable, testable source scaffolding.

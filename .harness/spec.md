@@ -6,6 +6,7 @@
 ## 功能列表
 1. **iPhone Siri 文本入口** — 通过 `App Intent` 支持 `嘿 Siri，问纳博特` 和 `嘿 Siri，问纳博特 你好` 两种调用方式。
    - 验收：缺少参数时 Siri 会追问 `你想问纳博特什么？`，提供文本后会播报 nanobot 返回内容，而不是只说“完成”。
+   - 实施发现：真实 Xcode `App Shortcuts` metadata 校验不接受自由 `String` 参数的 inline phrase，因此当前可交付的 v1 合同先收敛为 `嘿 Siri，问纳博特` + follow-up 收集；`嘿 Siri，问纳博特 你好` 仍作为后续探索项保留。
 2. **Bridge 到 nanobot `/chat` 的统一转发** — 所有 v1 Siri 请求都经由统一 Bridge Core 规范化后再调用 `POST /chat`。
    - 验收：桥接层始终发送 `{"text":"<prompt>","speaker":"siri-iphone"}`，并正确解析 `reply` 与 `end_conversation`。
 3. **App 内手动调试面板** — 提供最小 SwiftUI 界面配置 `baseURL` / `apiKey`、发送手动 prompt、查看最近回复。

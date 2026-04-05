@@ -492,7 +492,7 @@
       "Keep the inline phrase optional so the system can still fall back to follow-up collection if parsing fails.",
       "Verify the Siri validation notes cover both inline success and follow-up fallback."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 46,
@@ -613,6 +613,6 @@
       "Re-run `bash init.sh` and any focused bridge tests that are available in the current environment.",
       "Record the final passing evidence and any remaining Xcode-only blockers in `PROGRESS.md` before cleanup or handoff."
     ],
-    "passes": false
+    "passes": true
   }
 ]

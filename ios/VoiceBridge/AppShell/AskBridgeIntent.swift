@@ -1,8 +1,8 @@
 import AppIntents
 
 struct AskBridgeIntent: AppIntent {
-    static var title: LocalizedStringResource = "问纳博特"
-    static var description = IntentDescription("通过 Voice Bridge 问纳博特。")
+    static let title: LocalizedStringResource = "问纳博特"
+    static let description = IntentDescription("通过 Voice Bridge 问纳博特。")
 
     @Parameter(title: "Prompt", requestValueDialog: "你想问纳博特什么？")
     var prompt: String

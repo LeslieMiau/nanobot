@@ -71,3 +71,24 @@
 - Harness decision:
   - Round 1 contract is now strong enough to record as QA pass.
   - The overall Voice Bridge v1 harness remains blocked on external environment setup rather than code-level defects.
+
+## Session update - 2026-04-05 (full Xcode validation and real iOS build)
+- Completed features and corrections:
+  - Confirmed the machine now has a full Apple toolchain: `xcode-select -p` points at `/Applications/Xcode.app/Contents/Developer`, `xcodebuild -showsdks` lists iOS SDKs, and simulator runtimes/devices are available after installing the iOS platform.
+  - Added a checked-in Xcode generation path under `ios/VoiceBridge/` via `project.yml`, generated `VoiceBridge.xcodeproj`, and added `XcodeTests/VoiceBridgeAppTests.swift` for an actual iOS-targeted XCTest bundle.
+  - Fixed real Xcode/iOS build issues instead of relying on macOS typecheck evidence:
+    - changed `AskBridgeIntent.title` and `description` to immutable `static let` values so Swift 6 concurrency validation passes
+    - updated App Shortcut phrases to include `\\(.applicationName)` and removed the free-form `String` interpolation after `ExtractAppIntentsMetadata` rejected `prompt` as an invalid phrase parameter type
+  - Updated local development and Siri validation docs so they reflect the current machine state and the Apple platform limitation around inline `String` App Shortcut phrases.
+- Verification:
+  - `cd ios/VoiceBridge && xcodegen generate` -> passed
+  - `cd ios/VoiceBridge && xcodebuild -project VoiceBridge.xcodeproj -scheme VoiceBridge -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` -> passed
+  - `cd ios/VoiceBridge && xcodebuild -project VoiceBridge.xcodeproj -scheme VoiceBridge -destination 'platform=iOS Simulator,name=iPhone 16' CODE_SIGNING_ALLOWED=NO test` -> passed (`VoiceBridgeAppTests`: 2 passed)
+  - `cd ios/VoiceBridge && swift test` -> passed (`9` BridgeCore tests)
+  - `xcrun xcdevice list` -> now shows multiple iPhone/iPad simulator destinations, but no physical iPhone destination for Siri voice acceptance
+  - `bash init.sh` -> passed after the iOS subtree/Xcode project changes
+- Harness correction:
+  - Feature `#45` in `PLAN.json` had previously been marked complete too optimistically. Real Xcode metadata validation proved that a free-form inline App Shortcut phrase `问纳博特 {prompt}` is not shippable with a plain `String` parameter, so that feature must remain incomplete until a different Apple-supported approach is implemented.
+- Remaining blockers / follow-up:
+  - The build/test/toolchain blocker is closed, but a device blocker remains: v1 still needs a real iPhone Siri run.
+  - The current shippable Siri contract is `嘿 Siri，问纳博特` followed by Siri's spoken prompt. One-shot inline free-text invocation is not part of the current implementation contract.

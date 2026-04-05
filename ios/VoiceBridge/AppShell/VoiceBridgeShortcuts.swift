@@ -5,8 +5,7 @@ struct VoiceBridgeShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: AskBridgeIntent(),
             phrases: [
-                "问纳博特",
-                "问纳博特 \(\.$prompt)"
+                "问\(.applicationName)"
             ],
             shortTitle: "问纳博特",
             systemImageName: "waveform"
