@@ -93,3 +93,12 @@
 - Remaining blockers / follow-up:
   - The build/test/toolchain blocker is closed, but a device blocker remains: v1 still needs a real iPhone Siri run.
   - The current shippable Siri contract is `嘿 Siri，问纳博特` followed by Siri's spoken prompt. One-shot inline free-text invocation is not part of the current implementation contract.
+
+## Session update - 2026-04-05 (simulator launch smoke)
+- Additional simulator validation:
+  - Booted `iPhone 16` on the `iOS 18.6` simulator runtime with `xcrun simctl boot`.
+  - Installed the built app into the booted simulator with `xcrun simctl install booted .../VoiceBridge.app`.
+  - Launched the app with `xcrun simctl launch booted com.miau.voicebridge`, which returned a live process id instead of a launch failure.
+  - Captured a simulator screenshot after launch; the app opened to the SwiftUI settings screen and rendered the expected `Bridge Config` / `V1 Scope` sections.
+- Remaining limit:
+  - This confirms the simulator can install and open the app shell, but it still does not replace a physical iPhone Siri voice round-trip.
