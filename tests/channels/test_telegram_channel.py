@@ -33,9 +33,13 @@ class _FakeUpdater:
     def __init__(self, on_start_polling) -> None:
         self._on_start_polling = on_start_polling
         self.running = False
+        self.start_polling_kwargs = None
+        self._Updater__polling_task = None
 
     async def start_polling(self, **kwargs) -> None:
         self.running = True
+        self.start_polling_kwargs = kwargs
+        self._Updater__polling_task = asyncio.get_running_loop().create_future()
         self._on_start_polling()
 
     async def stop(self) -> None:
@@ -199,8 +203,13 @@ async def test_start_creates_separate_pools_with_proxy(monkeypatch) -> None:
     assert poll_req.kwargs["connection_pool_size"] == 4
     assert builder.request_value is api_req
     assert builder.get_updates_request_value is poll_req
+    assert callable(app.updater.start_polling_kwargs["error_callback"])
     assert any(cmd.command == "status" for cmd in app.bot.commands)
     assert channel.get_runtime_status()["effective_proxy"] == f"explicit:{config.proxy}"
+    assert any(cmd.command == "dream" for cmd in app.bot.commands)
+    assert any(cmd.command == "dream_log" for cmd in app.bot.commands)
+    assert any(cmd.command == "dream_restore" for cmd in app.bot.commands)
+    assert channel.get_runtime_status()["runtime_source"]
 
 
 @pytest.mark.asyncio
@@ -373,6 +382,26 @@ async def test_on_error_logs_network_issues_as_warning(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_on_error_summarizes_empty_network_error(monkeypatch) -> None:
+    from telegram.error import NetworkError
+
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    recorded: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "nanobot.channels.telegram.logger.warning",
+        lambda message, error: recorded.append(("warning", message.format(error))),
+    )
+
+    await channel._on_error(object(), SimpleNamespace(error=NetworkError("")))
+
+    assert recorded == [("warning", "Telegram network issue: NetworkError")]
+
+
+@pytest.mark.asyncio
 async def test_on_error_keeps_non_network_exceptions_as_error(monkeypatch) -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
@@ -501,6 +530,95 @@ async def test_watchdog_probe_failure_triggers_restart(monkeypatch) -> None:
     await channel._recover_if_needed("send")
 
     restart.assert_awaited_once_with("send-watchdog")
+
+
+@pytest.mark.asyncio
+async def test_watchdog_records_probe_success_timestamp(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+
+    ok = await channel._probe_connectivity()
+
+    assert ok is True
+    assert channel.get_runtime_status()["last_probe_ok_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_watchdog_loop_restarts_when_updater_not_running(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], watchdog_interval_s=0),
+        MessageBus(),
+    )
+    channel._running = True
+    channel._app = _FakeApp(lambda: None)
+    channel._app.running = True
+    channel._app.updater.running = False
+
+    async def _recover(*args, **kwargs):
+        channel._running = False
+
+    recover = AsyncMock(side_effect=_recover)
+    monkeypatch.setattr(channel, "_recover_if_needed", recover)
+    monkeypatch.setattr("nanobot.channels.telegram.asyncio.sleep", AsyncMock(return_value=None))
+
+    await channel._watchdog_loop()
+
+    recover.assert_awaited_once_with("updater-not-running", probe_before_restart=False)
+
+
+@pytest.mark.asyncio
+async def test_watchdog_loop_restarts_when_polling_task_is_done(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], watchdog_interval_s=0),
+        MessageBus(),
+    )
+    channel._running = True
+    channel._app = _FakeApp(lambda: None)
+    channel._app.running = True
+    channel._app.updater.running = True
+    done_task = asyncio.get_running_loop().create_future()
+    done_task.set_result(None)
+    channel._app.updater._Updater__polling_task = done_task
+
+    async def _recover(*args, **kwargs):
+        channel._running = False
+
+    recover = AsyncMock(side_effect=_recover)
+    monkeypatch.setattr(channel, "_recover_if_needed", recover)
+    monkeypatch.setattr("nanobot.channels.telegram.asyncio.sleep", AsyncMock(return_value=None))
+
+    await channel._watchdog_loop()
+
+    recover.assert_awaited_once_with("polling-task-dead", probe_before_restart=False)
+
+
+@pytest.mark.asyncio
+async def test_watchdog_exhaustion_requests_process_restart(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            watchdog_max_channel_restarts=1,
+        ),
+        MessageBus(),
+    )
+    channel._running = True
+    channel._runtime_status["consecutive_send_errors"] = 3
+    channel.restart_callback = AsyncMock()
+    probe = AsyncMock(return_value=False)
+    restart = AsyncMock(side_effect=RuntimeError("boom"))
+
+    monkeypatch.setattr(channel, "_probe_connectivity", probe)
+    monkeypatch.setattr(channel, "_restart_application", restart)
+    monkeypatch.setattr("nanobot.channels.telegram.asyncio.sleep", AsyncMock(return_value=None))
+
+    await channel._recover_if_needed("send")
+
+    channel.restart_callback.assert_awaited_once_with("telegram self-heal exhausted")
 
 
 @pytest.mark.asyncio
@@ -843,43 +961,56 @@ async def test_group_policy_open_accepts_plain_group_message() -> None:
     assert channel._app.bot.get_me_calls == 0
 
 
-def test_extract_reply_context_no_reply() -> None:
+@pytest.mark.asyncio
+async def test_extract_reply_context_no_reply() -> None:
     """When there is no reply_to_message, _extract_reply_context returns None."""
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc"), MessageBus())
     message = SimpleNamespace(reply_to_message=None)
-    assert TelegramChannel._extract_reply_context(message) is None
+    assert await channel._extract_reply_context(message) is None
 
 
-def test_extract_reply_context_with_text() -> None:
+@pytest.mark.asyncio
+async def test_extract_reply_context_with_text() -> None:
     """When reply has text, return prefixed string."""
-    reply = SimpleNamespace(text="Hello world", caption=None)
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc"), MessageBus())
+    channel._app = _FakeApp(lambda: None)
+    reply = SimpleNamespace(text="Hello world", caption=None, from_user=SimpleNamespace(id=2, username="testuser", first_name="Test"))
     message = SimpleNamespace(reply_to_message=reply)
-    assert TelegramChannel._extract_reply_context(message) == "[Reply to: Hello world]"
+    assert await channel._extract_reply_context(message) == "[Reply to @testuser: Hello world]"
 
 
-def test_extract_reply_context_with_caption_only() -> None:
+@pytest.mark.asyncio
+async def test_extract_reply_context_with_caption_only() -> None:
     """When reply has only caption (no text), caption is used."""
-    reply = SimpleNamespace(text=None, caption="Photo caption")
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc"), MessageBus())
+    channel._app = _FakeApp(lambda: None)
+    reply = SimpleNamespace(text=None, caption="Photo caption", from_user=SimpleNamespace(id=2, username=None, first_name="Test"))
     message = SimpleNamespace(reply_to_message=reply)
-    assert TelegramChannel._extract_reply_context(message) == "[Reply to: Photo caption]"
+    assert await channel._extract_reply_context(message) == "[Reply to Test: Photo caption]"
 
 
-def test_extract_reply_context_truncation() -> None:
+@pytest.mark.asyncio
+async def test_extract_reply_context_truncation() -> None:
     """Reply text is truncated at TELEGRAM_REPLY_CONTEXT_MAX_LEN."""
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc"), MessageBus())
+    channel._app = _FakeApp(lambda: None)
     long_text = "x" * (TELEGRAM_REPLY_CONTEXT_MAX_LEN + 100)
-    reply = SimpleNamespace(text=long_text, caption=None)
+    reply = SimpleNamespace(text=long_text, caption=None, from_user=SimpleNamespace(id=2, username=None, first_name=None))
     message = SimpleNamespace(reply_to_message=reply)
-    result = TelegramChannel._extract_reply_context(message)
+    result = await channel._extract_reply_context(message)
     assert result is not None
     assert result.startswith("[Reply to: ")
     assert result.endswith("...]")
     assert len(result) == len("[Reply to: ]") + TELEGRAM_REPLY_CONTEXT_MAX_LEN + len("...")
 
 
-def test_extract_reply_context_no_text_returns_none() -> None:
+@pytest.mark.asyncio
+async def test_extract_reply_context_no_text_returns_none() -> None:
     """When reply has no text/caption, _extract_reply_context returns None (media handled separately)."""
+    channel = TelegramChannel(TelegramConfig(enabled=True, token="123:abc"), MessageBus())
     reply = SimpleNamespace(text=None, caption=None)
     message = SimpleNamespace(reply_to_message=reply)
-    assert TelegramChannel._extract_reply_context(message) is None
+    assert await channel._extract_reply_context(message) is None
 
 
 @pytest.mark.asyncio
@@ -1146,6 +1277,48 @@ async def test_forward_command_does_not_inject_reply_context() -> None:
 
 
 @pytest.mark.asyncio
+async def test_forward_command_preserves_dream_log_args_and_strips_bot_suffix() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    update = _make_telegram_update(text="/dream-log@nanobot_test deadbeef", reply_to_message=None)
+
+    await channel._forward_command(update, None)
+
+    assert len(handled) == 1
+    assert handled[0]["content"] == "/dream-log deadbeef"
+
+
+@pytest.mark.asyncio
+async def test_forward_command_normalizes_telegram_safe_dream_aliases() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
+        MessageBus(),
+    )
+    channel._app = _FakeApp(lambda: None)
+    handled = []
+
+    async def capture_handle(**kwargs) -> None:
+        handled.append(kwargs)
+
+    channel._handle_message = capture_handle
+    update = _make_telegram_update(text="/dream_restore@nanobot_test deadbeef", reply_to_message=None)
+
+    await channel._forward_command(update, None)
+
+    assert len(handled) == 1
+    assert handled[0]["content"] == "/dream-restore deadbeef"
+
+
+@pytest.mark.asyncio
 async def test_on_help_includes_restart_command() -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"], group_policy="open"),
@@ -1162,6 +1335,9 @@ async def test_on_help_includes_restart_command() -> None:
     assert "/coding help" in help_text
     assert "/restart" in help_text
     assert "/status" in help_text
+    assert "/dream" in help_text
+    assert "/dream-log" in help_text
+    assert "/dream-restore" in help_text
 
 
 def test_bot_commands_include_coding_entry() -> None:

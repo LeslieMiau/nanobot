@@ -43,10 +43,6 @@ class ToolRegistry:
         """Check if a tool is registered."""
         return name in self._tools
 
-    # ------------------------------------------------------------------
-    # Plan mode: only expose read-only tools
-    # ------------------------------------------------------------------
-
     def set_plan_mode(self, enabled: bool) -> None:
         """Toggle plan mode.  When active, only read-only tools are visible."""
         self._plan_mode = enabled
@@ -60,14 +56,6 @@ class ToolRegistry:
         if not self._plan_mode:
             return self._tools
         return {n: t for n, t in self._tools.items() if t.is_read_only}
-
-    def get_definitions(self) -> list[dict[str, Any]]:
-        """Get tool definitions in OpenAI format (respects plan mode)."""
-        return [tool.to_schema() for tool in self._visible_tools().values()]
-
-    # ------------------------------------------------------------------
-    # Circuit breaker: disable tools after repeated failures
-    # ------------------------------------------------------------------
 
     def record_success(self, name: str) -> None:
         """Reset failure counter on successful execution."""
@@ -111,9 +99,32 @@ class ToolRegistry:
                 )
         return "\n".join(lines) if lines else None
 
-    # ------------------------------------------------------------------
-    # Execution
-    # ------------------------------------------------------------------
+    @staticmethod
+    def _schema_name(schema: dict[str, Any]) -> str:
+        """Extract a normalized tool name from either OpenAI or flat schemas."""
+        fn = schema.get("function")
+        if isinstance(fn, dict):
+            name = fn.get("name")
+            if isinstance(name, str):
+                return name
+        name = schema.get("name")
+        return name if isinstance(name, str) else ""
+
+    def get_definitions(self) -> list[dict[str, Any]]:
+        """Get tool definitions with stable ordering for cache-friendly prompts."""
+        definitions = [tool.to_schema() for tool in self._visible_tools().values()]
+        builtins: list[dict[str, Any]] = []
+        mcp_tools: list[dict[str, Any]] = []
+        for schema in definitions:
+            name = self._schema_name(schema)
+            if name.startswith("mcp_"):
+                mcp_tools.append(schema)
+            else:
+                builtins.append(schema)
+
+        builtins.sort(key=self._schema_name)
+        mcp_tools.sort(key=self._schema_name)
+        return builtins + mcp_tools
 
     def prepare_call(
         self,

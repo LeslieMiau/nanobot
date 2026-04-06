@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 import sys
@@ -794,6 +795,10 @@ def _patch_cli_command_runtime(
         "nanobot.cli.commands._make_provider",
         make_provider or (lambda _config: object()),
     )
+    monkeypatch.setattr(
+        "nanobot.cli.commands._validate_gateway_startup_invariants",
+        lambda **_kwargs: Path.cwd(),
+    )
 
     if message_bus is not None:
         monkeypatch.setattr(
@@ -826,7 +831,7 @@ def _patch_serve_runtime(monkeypatch, config: Config, seen: dict[str, object]) -
         async def close_mcp(self) -> None:
             return None
 
-    def _fake_create_app(agent_loop, model_name: str, request_timeout: float):
+    def _fake_create_app(agent_loop, model_name: str, request_timeout: float, **_kwargs):
         seen["agent_loop"] = agent_loop
         seen["model_name"] = model_name
         seen["request_timeout"] = request_timeout
@@ -1067,6 +1072,172 @@ def test_gateway_cli_port_overrides_configured_port(monkeypatch, tmp_path: Path)
 
     assert isinstance(result.exception, _StopGatewayError)
     assert "port 18792" in result.stdout
+
+
+def test_validate_gateway_startup_invariants_accepts_clean_runtime(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.cli.commands import _validate_gateway_startup_invariants
+
+    monkeypatch.setattr("nanobot.cli.commands._resolve_runtime_source_root", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.cli.commands._find_git_repo_root", lambda _path: tmp_path)
+    monkeypatch.setattr("nanobot.cli.commands._list_unmerged_paths", lambda _path: [])
+
+    assert _validate_gateway_startup_invariants(cwd=tmp_path) == tmp_path
+
+
+def test_validate_gateway_startup_invariants_fails_on_runtime_source_mismatch(monkeypatch, tmp_path: Path) -> None:
+    from click.exceptions import Exit
+
+    from nanobot.cli.commands import _validate_gateway_startup_invariants
+
+    runtime_root = tmp_path / "runtime"
+    launch_root = tmp_path / "worktree"
+    monkeypatch.setattr("nanobot.cli.commands._resolve_runtime_source_root", lambda: runtime_root)
+    monkeypatch.setattr("nanobot.cli.commands._find_git_repo_root", lambda _path: launch_root)
+    monkeypatch.setattr("nanobot.cli.commands._list_unmerged_paths", lambda _path: [])
+
+    with pytest.raises(Exit):
+        _validate_gateway_startup_invariants(cwd=launch_root)
+
+
+def test_validate_gateway_startup_invariants_fails_on_unmerged_paths(monkeypatch, tmp_path: Path) -> None:
+    from click.exceptions import Exit
+
+    from nanobot.cli.commands import _validate_gateway_startup_invariants
+
+    monkeypatch.setattr("nanobot.cli.commands._resolve_runtime_source_root", lambda: tmp_path)
+    monkeypatch.setattr("nanobot.cli.commands._find_git_repo_root", lambda _path: tmp_path)
+    monkeypatch.setattr(
+        "nanobot.cli.commands._list_unmerged_paths",
+        lambda _path: ["nanobot/channels/telegram.py", "nanobot/cli/commands.py"],
+    )
+
+    with pytest.raises(Exit):
+        _validate_gateway_startup_invariants(cwd=tmp_path)
+
+
+def test_gateway_execs_process_restart_when_channel_requests_it(monkeypatch, tmp_path: Path) -> None:
+    config_file = _write_instance_config(tmp_path)
+    workspace = tmp_path / "workspace"
+    config = Config.model_validate(
+        {
+            "agents": {"defaults": {"workspace": str(workspace)}},
+            "channels": {
+                "telegram": {
+                    "enabled": True,
+                    "token": "123:abc",
+                    "allowFrom": ["12345"],
+                    "watchdogNotifyAdmin": False,
+                }
+            },
+        }
+    )
+
+    _patch_cli_command_runtime(
+        monkeypatch,
+        config,
+        message_bus=lambda: object(),
+        session_manager=lambda _workspace: SimpleNamespace(list_sessions=lambda: []),
+    )
+
+    class _FakeCronService:
+        def __init__(self, _store_path: Path) -> None:
+            self.on_job = None
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+        def status(self) -> dict[str, int]:
+            return {"jobs": 0}
+
+        def register_system_job(self, _job) -> None:
+            return None
+
+    class _FakeHeartbeatService:
+        def __init__(self, **_kwargs) -> None:
+            pass
+
+        async def start(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeAgentLoop:
+        def __init__(self, **kwargs) -> None:
+            self.model = kwargs["model"]
+            self.tools = SimpleNamespace(get=lambda _name: None)
+            self.sessions = SimpleNamespace(
+                get_or_create=lambda _key: SimpleNamespace(retain_recent_legal_suffix=lambda _count: None),
+                save=lambda _session: None,
+            )
+            self.dream = SimpleNamespace(
+                model=kwargs["model"],
+                max_batch_size=0,
+                max_iterations=0,
+                run=AsyncMock(return_value=True),
+            )
+
+        async def run(self) -> None:
+            await asyncio.sleep(3600)
+
+        async def close_mcp(self) -> None:
+            return None
+
+        def stop(self) -> None:
+            return None
+
+    class _FakeChannelManager:
+        def __init__(self, _config, _bus, restart_callback=None) -> None:
+            self.enabled_channels = ["telegram"]
+            self._restart_callback = restart_callback
+
+        def get_status(self) -> dict[str, object]:
+            return {}
+
+        async def start_all(self) -> None:
+            if self._restart_callback is not None:
+                await self._restart_callback("telegram self-heal exhausted")
+
+        async def stop_all(self) -> None:
+            return None
+
+    fake_runtime = SimpleNamespace(
+        store=SimpleNamespace(list_tasks=lambda: []),
+        manager=SimpleNamespace(recoverable_tasks=lambda: []),
+        monitor=SimpleNamespace(
+            poll_task=AsyncMock(return_value=None),
+            build_task_report=lambda _task_id: None,
+        ),
+        recovery=SimpleNamespace(recover_tasks=lambda: None),
+        notifier=None,
+    )
+
+    execv_calls: list[tuple[str, list[str]]] = []
+    marker_reasons: list[str] = []
+
+    monkeypatch.setattr("nanobot.cron.service.CronService", _FakeCronService)
+    monkeypatch.setattr("nanobot.heartbeat.service.HeartbeatService", _FakeHeartbeatService)
+    monkeypatch.setattr("nanobot.agent.loop.AgentLoop", _FakeAgentLoop)
+    monkeypatch.setattr("nanobot.channels.manager.ChannelManager", _FakeChannelManager)
+    monkeypatch.setattr("nanobot.cli.commands._load_coding_task_runtime", lambda *_args, **_kwargs: fake_runtime)
+    monkeypatch.setattr("nanobot.cli.commands._notify_admin_restart_imminent", AsyncMock(return_value=None))
+    monkeypatch.setattr("nanobot.cli.commands._notify_admin_restart_recovered", AsyncMock(return_value=None))
+    monkeypatch.setattr("nanobot.cli.commands.read_and_clear_restart_marker", lambda: None)
+    monkeypatch.setattr("nanobot.cli.commands.write_restart_marker", lambda reason: marker_reasons.append(reason))
+    monkeypatch.setattr(
+        "nanobot.cli.commands.os.execv",
+        lambda executable, argv: execv_calls.append((executable, list(argv))),
+    )
+
+    result = runner.invoke(app, ["gateway", "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    assert marker_reasons == ["telegram self-heal exhausted"]
+    assert execv_calls
+    assert execv_calls[0][1][1:4] == ["-m", "nanobot", "gateway"]
 
 
 def test_coding_task_create_persists_task(monkeypatch, tmp_path: Path) -> None:

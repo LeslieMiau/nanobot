@@ -7,6 +7,7 @@ import fcntl
 import os
 import select
 import signal
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ if sys.platform == "win32":
             pass
 
 import typer
+from loguru import logger
 from prompt_toolkit import PromptSession, print_formatted_text
 from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.formatted_text import ANSI, HTML
@@ -38,6 +40,14 @@ from nanobot.cli.stream import StreamRenderer, ThinkingSpinner
 from nanobot.config.paths import get_workspace_path, is_default_workspace
 from nanobot.config.schema import Config
 from nanobot.utils.helpers import build_channel_status_lines, sync_workspace_templates
+from nanobot.utils.restart import (
+    consume_restart_notice_from_env,
+    format_restart_completed_message,
+    is_restart_in_cooldown,
+    read_and_clear_restart_marker,
+    should_show_cli_restart_notice,
+    write_restart_marker,
+)
 
 app = typer.Typer(
     name="nanobot",
@@ -78,6 +88,146 @@ class _GatewayInstanceLock:
             pass
         self._fh.close()
         self._fh = None
+
+
+def _canonical_gateway_command() -> str:
+    return "./.venv/bin/python -m nanobot gateway"
+
+
+def _resolve_runtime_source_root() -> Path:
+    import nanobot as nanobot_pkg
+
+    return Path(nanobot_pkg.__file__).resolve().parent.parent
+
+
+def _find_git_repo_root(start: Path) -> Path | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except Exception:
+        return None
+    root = result.stdout.strip()
+    return Path(root).resolve() if root else None
+
+
+def _list_unmerged_paths(repo_root: Path) -> list[str]:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "diff", "--name-only", "--diff-filter=U"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except Exception:
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _validate_gateway_startup_invariants(*, cwd: Path | None = None) -> Path:
+    launch_cwd = (cwd or Path.cwd()).resolve()
+    launch_root = _find_git_repo_root(launch_cwd) or launch_cwd
+    runtime_source = _resolve_runtime_source_root()
+
+    console.print(f"[dim]Gateway runtime source: {runtime_source}[/dim]")
+    console.print(f"[dim]Canonical launch: {_canonical_gateway_command()}[/dim]")
+
+    if launch_root != runtime_source:
+        console.print("[red]Error: gateway must be launched from the active runtime repo root.[/red]")
+        console.print(f"[yellow]Launch root:[/yellow] {launch_root}")
+        console.print(f"[yellow]Runtime source:[/yellow] {runtime_source}")
+        console.print(f"[yellow]Run from {runtime_source} with `{_canonical_gateway_command()}`.[/yellow]")
+        raise typer.Exit(1)
+
+    unmerged_paths = _list_unmerged_paths(runtime_source)
+    if unmerged_paths:
+        console.print("[red]Error: gateway runtime source has unresolved merge conflicts.[/red]")
+        for path in unmerged_paths[:5]:
+            console.print(f"  - {path}")
+        if len(unmerged_paths) > 5:
+            console.print(f"  ... and {len(unmerged_paths) - 5} more")
+        raise typer.Exit(1)
+
+    return runtime_source
+
+
+def _build_gateway_restart_argv(
+    *,
+    port: int | None,
+    workspace: str | None,
+    verbose: bool,
+    config_path: str | None,
+) -> list[str]:
+    argv = ["-m", "nanobot", "gateway"]
+    if port is not None:
+        argv.extend(["--port", str(port)])
+    if workspace:
+        argv.extend(["--workspace", workspace])
+    if verbose:
+        argv.append("--verbose")
+    if config_path:
+        argv.extend(["--config", str(Path(config_path).expanduser().resolve())])
+    return argv
+
+
+def _get_telegram_admin_target(config: Config) -> tuple[str, str] | None:
+    tg_cfg = getattr(config.channels, "telegram", None)
+    if tg_cfg is None:
+        return None
+    if isinstance(tg_cfg, dict):
+        token = tg_cfg.get("token", "")
+        allow_from = tg_cfg.get("allow_from", tg_cfg.get("allowFrom", []))
+        notify_admin = tg_cfg.get("watchdog_notify_admin", tg_cfg.get("watchdogNotifyAdmin", True))
+    else:
+        token = getattr(tg_cfg, "token", "")
+        allow_from = getattr(tg_cfg, "allow_from", [])
+        notify_admin = getattr(tg_cfg, "watchdog_notify_admin", True)
+    if not notify_admin or not token or not allow_from:
+        return None
+    admin_chat_id = str(allow_from[0]).split("|", 1)[0]
+    if not admin_chat_id:
+        return None
+    return token, admin_chat_id
+
+
+async def _send_telegram_direct(token: str, chat_id: str, text: str) -> bool:
+    try:
+        import httpx
+
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.post(
+                url,
+                json={"chat_id": int(chat_id), "text": text, "parse_mode": "HTML"},
+            )
+            return response.status_code == 200
+    except Exception:
+        return False
+
+
+async def _notify_admin_restart_imminent(config: Config, reason: str) -> None:
+    target = _get_telegram_admin_target(config)
+    if target is None:
+        return
+    await _send_telegram_direct(
+        target[0],
+        target[1],
+        f"⚠️ <b>nanobot restarting</b>\nReason: {reason}",
+    )
+
+
+async def _notify_admin_restart_recovered(config: Config, reason: str, started_at_raw: str) -> None:
+    target = _get_telegram_admin_target(config)
+    if target is None:
+        return
+    await _send_telegram_direct(
+        target[0],
+        target[1],
+        f"✅ <b>nanobot recovered</b>\nReason: {reason}\n{format_restart_completed_message(started_at_raw)}",
+    )
 
 # ---------------------------------------------------------------------------
 # CLI input: prompt_toolkit for editing, paste, history, and display
@@ -590,8 +740,7 @@ def serve(
         context_block_limit=runtime_config.agents.defaults.context_block_limit,
         max_tool_result_chars=runtime_config.agents.defaults.max_tool_result_chars,
         provider_retry_mode=runtime_config.agents.defaults.provider_retry_mode,
-        web_search_config=runtime_config.tools.web.search,
-        web_proxy=runtime_config.tools.web.proxy or None,
+        web_config=runtime_config.tools.web,
         exec_config=runtime_config.tools.exec,
         restrict_to_workspace=runtime_config.tools.restrict_to_workspace,
         session_manager=session_manager,
@@ -659,7 +808,7 @@ def gateway(
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
-    from nanobot.cron.types import CronJob
+    from nanobot.cron.types import CronJob, CronPayload
     from nanobot.heartbeat.service import HeartbeatService
     from nanobot.session.manager import SessionManager
 
@@ -667,6 +816,8 @@ def gateway(
         import logging
         logging.basicConfig(level=logging.DEBUG)
 
+    runtime_source = _validate_gateway_startup_invariants()
+    config_path_option = config
     config = _load_runtime_config(config, workspace)
     port = port if port is not None else config.gateway.port
     lock = _GatewayInstanceLock(config.workspace_path / "gateway.lock")
@@ -678,15 +829,23 @@ def gateway(
 
     try:
         console.print(f"{__logo__} Starting nanobot gateway version {__version__} on port {port}...")
+        console.print(f"[dim]Gateway runtime source confirmed: {runtime_source}[/dim]")
         sync_workspace_templates(config.workspace_path)
         bus = MessageBus()
         provider = _make_provider(config)
         session_manager = SessionManager(config.workspace_path)
-        channels = ChannelManager(config, bus)
+        restart_reason: str | None = None
+
+        async def request_process_restart(reason: str) -> None:
+            nonlocal restart_reason
+            if restart_reason is None:
+                restart_reason = reason
+                logger.warning("Gateway process restart requested: {}", reason)
+
+        channels = ChannelManager(config, bus, restart_callback=request_process_restart)
         coding_task_runtime = _load_coding_task_runtime(config, send_callback=bus.publish_outbound)
         coding_task_store = coding_task_runtime.store
         codex_workers = coding_task_runtime.manager
-        coding_task_launcher = coding_task_runtime.launcher
         coding_task_monitor = coding_task_runtime.monitor
         coding_task_recovery = coding_task_runtime.recovery
         coding_task_recovery.recover_tasks()
@@ -708,11 +867,10 @@ def gateway(
             model=config.agents.defaults.model,
             max_iterations=config.agents.defaults.max_tool_iterations,
             context_window_tokens=config.agents.defaults.context_window_tokens,
+            web_config=config.tools.web,
             context_block_limit=config.agents.defaults.context_block_limit,
             max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
             provider_retry_mode=config.agents.defaults.provider_retry_mode,
-            web_search_config=config.tools.web.search,
-            web_proxy=config.tools.web.proxy or None,
             exec_config=config.tools.exec,
             cron_service=cron,
             restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -728,6 +886,14 @@ def gateway(
         # Set cron callback (needs agent)
         async def on_cron_job(job: CronJob) -> str | None:
             """Execute a cron job through the agent."""
+            if job.name == "dream":
+                try:
+                    await agent.dream.run()
+                    logger.info("Dream cron job completed")
+                except Exception:
+                    logger.exception("Dream cron job failed")
+                return None
+
             from nanobot.agent.tools.cron import CronTool
             from nanobot.agent.tools.message import MessageTool
             from nanobot.utils.evaluator import evaluate_response
@@ -772,6 +938,20 @@ def gateway(
                     ))
             return response
         cron.on_job = on_cron_job
+
+        dream_cfg = config.agents.defaults.dream
+        if dream_cfg.model_override:
+            agent.dream.model = dream_cfg.model_override
+        agent.dream.max_batch_size = dream_cfg.max_batch_size
+        agent.dream.max_iterations = dream_cfg.max_iterations
+        cron.register_system_job(
+            CronJob(
+                id="dream",
+                name="dream",
+                schedule=dream_cfg.build_schedule(config.agents.defaults.timezone),
+                payload=CronPayload(kind="system_event"),
+            )
+        )
 
         def _pick_heartbeat_target() -> tuple[str, str]:
             """Pick a routable channel/chat target for heartbeat-triggered messages."""
@@ -841,6 +1021,7 @@ def gateway(
         cron_status = cron.status()
         if cron_status["jobs"] > 0:
             console.print(f"[green]✓[/green] Cron: {cron_status['jobs']} scheduled jobs")
+        console.print(f"[green]✓[/green] Dream: {dream_cfg.describe_schedule()}")
         tracked_coding_tasks = coding_task_store.list_tasks()
         recoverable_coding_tasks = codex_workers.recoverable_tasks()
         console.print(
@@ -865,14 +1046,49 @@ def gateway(
                 await asyncio.sleep(5)
 
         async def run():
+            agent_task: asyncio.Task | None = None
+            channels_task: asyncio.Task | None = None
+            coding_task_watch: asyncio.Task | None = None
             try:
                 await cron.start()
                 await heartbeat.start()
-                await asyncio.gather(
-                    agent.run(),
-                    channels.start_all(),
-                    watch_coding_tasks(),
-                )
+                marker = read_and_clear_restart_marker()
+                if marker is not None:
+                    await _notify_admin_restart_recovered(
+                        config,
+                        marker.reason,
+                        marker.started_at_raw,
+                    )
+
+                agent_task = asyncio.create_task(agent.run())
+                channels_task = asyncio.create_task(channels.start_all())
+                coding_task_watch = asyncio.create_task(watch_coding_tasks())
+
+                while True:
+                    if restart_reason is not None:
+                        write_restart_marker(restart_reason)
+                        await _notify_admin_restart_imminent(config, restart_reason)
+                        break
+
+                    done, _ = await asyncio.wait(
+                        {agent_task, channels_task, coding_task_watch},
+                        timeout=0.5,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    if not done:
+                        continue
+
+                    for task in done:
+                        if task.cancelled():
+                            continue
+                        exc = task.exception()
+                        if exc is not None:
+                            raise exc
+                    if restart_reason is not None:
+                        write_restart_marker(restart_reason)
+                        await _notify_admin_restart_imminent(config, restart_reason)
+                        break
+                    break
             except KeyboardInterrupt:
                 console.print("\nShutting down...")
             except Exception:
@@ -880,6 +1096,13 @@ def gateway(
                 console.print("\n[red]Error: Gateway crashed unexpectedly[/red]")
                 console.print(traceback.format_exc())
             finally:
+                for task in (agent_task, channels_task, coding_task_watch):
+                    if task is not None and not task.done():
+                        task.cancel()
+                await asyncio.gather(
+                    *(task for task in (agent_task, channels_task, coding_task_watch) if task is not None),
+                    return_exceptions=True,
+                )
                 await agent.close_mcp()
                 heartbeat.stop()
                 cron.stop()
@@ -887,6 +1110,30 @@ def gateway(
                 await channels.stop_all()
 
         asyncio.run(run())
+        if restart_reason is not None:
+            if is_restart_in_cooldown():
+                console.print(
+                    "[yellow]Warning: previous restart was too recent; "
+                    "entering degraded mode instead of restarting again.[/yellow]"
+                )
+                logger.warning(
+                    "Skipping process restart (cooldown active). Reason was: {}",
+                    restart_reason,
+                )
+            else:
+                lock.release()
+                os.execv(
+                    sys.executable,
+                    [
+                        sys.executable,
+                        *_build_gateway_restart_argv(
+                            port=port,
+                            workspace=workspace,
+                            verbose=verbose,
+                            config_path=config_path_option,
+                        ),
+                    ],
+                )
     finally:
         lock.release()
 
@@ -1135,11 +1382,10 @@ def agent(
         model=config.agents.defaults.model,
         max_iterations=config.agents.defaults.max_tool_iterations,
         context_window_tokens=config.agents.defaults.context_window_tokens,
+        web_config=config.tools.web,
         context_block_limit=config.agents.defaults.context_block_limit,
         max_tool_result_chars=config.agents.defaults.max_tool_result_chars,
         provider_retry_mode=config.agents.defaults.provider_retry_mode,
-        web_search_config=config.tools.web.search,
-        web_proxy=config.tools.web.proxy or None,
         exec_config=config.tools.exec,
         cron_service=cron,
         restrict_to_workspace=config.tools.restrict_to_workspace,
@@ -1147,6 +1393,12 @@ def agent(
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
     )
+    restart_notice = consume_restart_notice_from_env()
+    if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):
+        _print_agent_response(
+            format_restart_completed_message(restart_notice.started_at_raw),
+            render_markdown=False,
+        )
 
     # Shared reference for progress callbacks
     _thinking: ThinkingSpinner | None = None

@@ -4,24 +4,27 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import inspect
 import os
 import re
 import time
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 
 from loguru import logger
 from pydantic import Field
 from telegram import BotCommand, ReactionTypeEmoji, ReplyParameters, Update
-from telegram.error import BadRequest, TimedOut
+from telegram.error import BadRequest, NetworkError, TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
+from nanobot.command.builtin import build_help_text
 from nanobot.config.paths import get_media_dir
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_url_target
@@ -160,7 +163,9 @@ _SEND_MAX_RETRIES = 3
 _SEND_RETRY_BASE_DELAY = 0.5  # seconds, doubled each retry
 _WATCHDOG_INTERVAL_S = 30
 _WATCHDOG_ERROR_THRESHOLD = 3
-_WATCHDOG_RECONNECT_DELAYS = (5, 15, 30)
+_WATCHDOG_PROBE_TIMEOUT_S = 15.0
+_WATCHDOG_RESTART_BACKOFF_S = 5.0
+_WATCHDOG_MAX_CHANNEL_RESTARTS = 3
 
 
 @dataclass
@@ -186,6 +191,12 @@ class TelegramConfig(Base):
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
+    watchdog_interval_s: int = _WATCHDOG_INTERVAL_S
+    watchdog_probe_timeout_s: float = _WATCHDOG_PROBE_TIMEOUT_S
+    watchdog_error_threshold: int = Field(default=_WATCHDOG_ERROR_THRESHOLD, ge=1)
+    watchdog_restart_backoff_s: float = Field(default=_WATCHDOG_RESTART_BACKOFF_S, ge=0.0)
+    watchdog_max_channel_restarts: int = Field(default=_WATCHDOG_MAX_CHANNEL_RESTARTS, ge=1)
+    watchdog_notify_admin: bool = True
 
 
 class TelegramChannel(BaseChannel):
@@ -205,9 +216,12 @@ class TelegramChannel(BaseChannel):
         BotCommand("coding", "Start or manage coding tasks"),
         BotCommand("stop", "Stop the current task"),
         BotCommand("model", "List or switch models"),
-        BotCommand("help", "Show available commands"),
         BotCommand("restart", "Restart the bot"),
         BotCommand("status", "Show bot status"),
+        BotCommand("dream", "Run Dream memory consolidation now"),
+        BotCommand("dream_log", "Show the latest Dream memory change"),
+        BotCommand("dream_restore", "Restore Dream memory to an earlier version"),
+        BotCommand("help", "Show available commands"),
     ]
 
     @classmethod
@@ -232,9 +246,11 @@ class TelegramChannel(BaseChannel):
         self._stream_bufs: dict[str, _StreamBuf] = {}  # chat_id -> streaming state
         self._watchdog_task: asyncio.Task | None = None
         self._restart_lock = asyncio.Lock()
-        self._reconnect_backoff_index = 0
+        self._probe_failures = 0
+        self._watchdog_restart_failures = 0
         self._runtime_status = self._new_runtime_status()
         self._runtime_status["effective_proxy"] = self._resolve_proxy_settings()[2]
+        self._runtime_status["runtime_source"] = str(Path(__file__).resolve().parents[2])
 
     @staticmethod
     def _now_iso() -> str:
@@ -246,11 +262,18 @@ class TelegramChannel(BaseChannel):
             "reconnect_count": 0,
             "last_inbound_at": None,
             "last_outbound_at": None,
+            "last_probe_at": None,
+            "last_probe_ok_at": None,
+            "last_channel_restart_at": None,
             "last_poll_error_at": None,
             "last_send_error_at": None,
             "consecutive_poll_errors": 0,
             "consecutive_send_errors": 0,
+            "polling_task_alive": False,
+            "channel_restart_count": 0,
+            "watchdog_restart_failures": 0,
             "last_error_summary": None,
+            "runtime_source": "unknown",
             "running": False,
         }
 
@@ -300,8 +323,28 @@ class TelegramChannel(BaseChannel):
     def _clear_poll_errors(self) -> None:
         self._runtime_status["consecutive_poll_errors"] = 0
 
+    def _clear_send_errors(self) -> None:
+        self._runtime_status["consecutive_send_errors"] = 0
+
     def get_runtime_status(self) -> dict[str, Any]:
-        return dict(self._runtime_status)
+        status = dict(self._runtime_status)
+        status["polling_task_alive"] = self._is_polling_task_alive()
+        return status
+
+    def _get_polling_task(self) -> asyncio.Task | None:
+        updater = getattr(self._app, "updater", None)
+        if updater is None:
+            return None
+        task = getattr(updater, "_polling_task", None)
+        if task is None:
+            task = getattr(updater, "_Updater__polling_task", None)
+        return task
+
+    def _is_polling_task_alive(self) -> bool:
+        task = self._get_polling_task()
+        alive = bool(task) and not task.done()
+        self._runtime_status["polling_task_alive"] = alive
+        return alive
 
     def _build_application(self) -> Application:
         proxy, trust_env, effective_proxy = self._resolve_proxy_settings()
@@ -339,6 +382,13 @@ class TelegramChannel(BaseChannel):
         app.add_handler(CommandHandler("restart", self._forward_command))
         app.add_handler(CommandHandler("model", self._forward_command))
         app.add_handler(CommandHandler("status", self._forward_command))
+        app.add_handler(CommandHandler("dream", self._forward_command))
+        app.add_handler(
+            MessageHandler(
+                filters.Regex(r"^/(dream-log|dream_log|dream-restore|dream_restore)(?:@\w+)?(?:\s+.*)?$"),
+                self._forward_command,
+            )
+        )
         app.add_handler(CommandHandler("help", self._on_help))
         app.add_handler(
             MessageHandler(
@@ -374,7 +424,10 @@ class TelegramChannel(BaseChannel):
             error_callback=self._on_polling_error,
         )
         self._clear_poll_errors()
+        self._clear_send_errors()
+        self._probe_failures = 0
         self._runtime_status["running"] = True
+        self._runtime_status["polling_task_alive"] = self._is_polling_task_alive()
 
     async def _stop_application(self) -> None:
         app = self._app
@@ -395,13 +448,19 @@ class TelegramChannel(BaseChannel):
         self._app = None
         self._bot_user_id = None
         self._bot_username = None
+        self._runtime_status["polling_task_alive"] = False
         self._runtime_status["running"] = False
 
     async def _probe_connectivity(self) -> bool:
         if not self._app:
             return False
+        self._runtime_status["last_probe_at"] = self._now_iso()
         try:
-            await self._app.bot.get_me()
+            await asyncio.wait_for(
+                self._app.bot.get_me(),
+                timeout=self.config.watchdog_probe_timeout_s,
+            )
+            self._runtime_status["last_probe_ok_at"] = self._runtime_status["last_probe_at"]
             return True
         except Exception as exc:
             self._set_last_error_summary("probe", exc)
@@ -411,6 +470,8 @@ class TelegramChannel(BaseChannel):
         if not self._running:
             return
         logger.warning("Restarting Telegram application due to {}", reason)
+        self._runtime_status["channel_restart_count"] += 1
+        self._runtime_status["last_channel_restart_at"] = self._now_iso()
         await self._stop_application()
         self._app = self._build_application()
         try:
@@ -422,59 +483,106 @@ class TelegramChannel(BaseChannel):
         self._runtime_status["consecutive_poll_errors"] = 0
         self._runtime_status["consecutive_send_errors"] = 0
         self._runtime_status["last_error_summary"] = None
-        self._reconnect_backoff_index = 0
+        self._watchdog_restart_failures = 0
+        self._runtime_status["watchdog_restart_failures"] = 0
+        self._probe_failures = 0
 
-    async def _recover_if_needed(self, reason: str) -> None:
-        threshold_key = "consecutive_poll_errors" if reason == "poll" else "consecutive_send_errors"
-        if self._runtime_status[threshold_key] < _WATCHDOG_ERROR_THRESHOLD:
+    async def _request_process_restart(self, reason: str) -> None:
+        callback = self.restart_callback
+        if callback is None:
+            logger.error("Telegram requested process restart without a restart callback: {}", reason)
+            return
+        result = callback(reason)
+        if inspect.isawaitable(result):
+            await result
+
+    async def _escalate_process_restart(self, reason: str) -> None:
+        self._set_last_error_summary("watchdog", reason)
+        logger.error("Telegram watchdog exhausted channel self-heal; escalating to process restart")
+        await self._request_process_restart(reason)
+
+    async def _recover_if_needed(self, reason: str, *, probe_before_restart: bool = True) -> None:
+        threshold_map = {
+            "poll": "consecutive_poll_errors",
+            "send": "consecutive_send_errors",
+        }
+        threshold_key = threshold_map.get(reason)
+        if threshold_key and self._runtime_status[threshold_key] < self.config.watchdog_error_threshold:
+            return
+        if reason == "probe" and self._probe_failures < self.config.watchdog_error_threshold:
             return
         if not self._running:
             return
 
         async with self._restart_lock:
-            if self._runtime_status[threshold_key] < _WATCHDOG_ERROR_THRESHOLD or not self._running:
-                return
-
-            if await self._probe_connectivity():
-                self._runtime_status[threshold_key] = 0
-                return
-
-            delay = _WATCHDOG_RECONNECT_DELAYS[min(self._reconnect_backoff_index, len(_WATCHDOG_RECONNECT_DELAYS) - 1)]
-            logger.warning(
-                "Telegram watchdog triggered by {} errors (streak={}), reconnecting in {}s",
-                reason,
-                self._runtime_status[threshold_key],
-                delay,
-            )
-            await asyncio.sleep(delay)
             if not self._running:
                 return
+            if threshold_key and self._runtime_status[threshold_key] < self.config.watchdog_error_threshold:
+                return
+            if reason == "probe" and self._probe_failures < self.config.watchdog_error_threshold:
+                return
+
+            if probe_before_restart and await self._probe_connectivity():
+                self._probe_failures = 0
+                if threshold_key == "consecutive_poll_errors":
+                    self._clear_poll_errors()
+                elif threshold_key == "consecutive_send_errors":
+                    self._clear_send_errors()
+                return
+
+            delay = self.config.watchdog_restart_backoff_s * max(1, self._watchdog_restart_failures + 1)
+            logger.warning("Telegram watchdog restarting channel due to {} in {:.1f}s", reason, delay)
+            if delay > 0:
+                await asyncio.sleep(delay)
+            if not self._running:
+                return
+            restart_reason = {
+                "poll": "poll-watchdog",
+                "send": "send-watchdog",
+                "probe": "probe-watchdog",
+                "app-not-running": "app-not-running",
+                "updater-not-running": "updater-not-running",
+                "polling-task-dead": "polling-task-dead",
+            }.get(reason, reason)
             try:
-                await self._restart_application(f"{reason}-watchdog")
+                await self._restart_application(restart_reason)
             except Exception as exc:
+                self._watchdog_restart_failures += 1
+                self._runtime_status["watchdog_restart_failures"] = self._watchdog_restart_failures
                 self._record_poll_error(exc)
-                self._reconnect_backoff_index = min(
-                    self._reconnect_backoff_index + 1,
-                    len(_WATCHDOG_RECONNECT_DELAYS) - 1,
-                )
                 logger.warning("Telegram watchdog reconnect failed: {}", exc)
+                if self._watchdog_restart_failures >= self.config.watchdog_max_channel_restarts:
+                    await self._escalate_process_restart("telegram self-heal exhausted")
 
     async def _watchdog_loop(self) -> None:
         try:
             while self._running:
-                await asyncio.sleep(_WATCHDOG_INTERVAL_S)
+                await asyncio.sleep(self.config.watchdog_interval_s)
                 if not self._running:
                     return
-                if self._runtime_status["consecutive_poll_errors"] >= _WATCHDOG_ERROR_THRESHOLD:
+                if not self._app or not getattr(self._app, "running", False):
+                    await self._recover_if_needed("app-not-running", probe_before_restart=False)
+                    continue
+                updater = getattr(self._app, "updater", None)
+                if updater is None or not getattr(updater, "running", False):
+                    await self._recover_if_needed("updater-not-running", probe_before_restart=False)
+                    continue
+                if not self._is_polling_task_alive():
+                    await self._recover_if_needed("polling-task-dead", probe_before_restart=False)
+                    continue
+                if self._runtime_status["consecutive_poll_errors"] >= self.config.watchdog_error_threshold:
                     await self._recover_if_needed("poll")
-                elif self._runtime_status["consecutive_send_errors"] >= _WATCHDOG_ERROR_THRESHOLD:
+                    continue
+                if self._runtime_status["consecutive_send_errors"] >= self.config.watchdog_error_threshold:
                     await self._recover_if_needed("send")
+                    continue
+                if await self._probe_connectivity():
+                    self._probe_failures = 0
+                else:
+                    self._probe_failures += 1
+                    await self._recover_if_needed("probe", probe_before_restart=False)
         except asyncio.CancelledError:
             pass
-
-    def _on_polling_error(self, exc) -> None:
-        self._record_poll_error(exc)
-        logger.error("Telegram polling error: {}", exc)
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -494,6 +602,17 @@ class TelegramChannel(BaseChannel):
             return False
 
         return sid in allow_list or username in allow_list
+
+    @staticmethod
+    def _normalize_telegram_command(content: str) -> str:
+        """Map Telegram-safe command aliases back to canonical nanobot commands."""
+        if not content.startswith("/"):
+            return content
+        if content == "/dream_log" or content.startswith("/dream_log "):
+            return content.replace("/dream_log", "/dream-log", 1)
+        if content == "/dream_restore" or content.startswith("/dream_restore "):
+            return content.replace("/dream_restore", "/dream-restore", 1)
+        return content
 
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -561,9 +680,14 @@ class TelegramChannel(BaseChannel):
             self._record_send_error("Telegram bot not running")
             raise RuntimeError("Telegram bot not running")
 
-        # Only stop typing indicator for final responses
+        # Only stop typing indicator and remove reaction for final responses
         if not msg.metadata.get("_progress", False):
             self._stop_typing(msg.chat_id)
+            if reply_to_message_id := msg.metadata.get("message_id"):
+                try:
+                    await self._remove_reaction(msg.chat_id, int(reply_to_message_id))
+                except ValueError:
+                    pass
 
         try:
             chat_id = int(msg.chat_id)
@@ -641,7 +765,9 @@ class TelegramChannel(BaseChannel):
         self._record_outbound_success()
 
     async def _call_with_retry(self, fn, *args, **kwargs):
-        """Call an async Telegram API function with retry on pool/network timeout."""
+        """Call an async Telegram API function with retry on pool/network timeout and RetryAfter."""
+        from telegram.error import RetryAfter
+        
         for attempt in range(1, _SEND_MAX_RETRIES + 1):
             try:
                 return await fn(*args, **kwargs)
@@ -651,6 +777,15 @@ class TelegramChannel(BaseChannel):
                 delay = _SEND_RETRY_BASE_DELAY * (2 ** (attempt - 1))
                 logger.warning(
                     "Telegram timeout (attempt {}/{}), retrying in {:.1f}s",
+                    attempt, _SEND_MAX_RETRIES, delay,
+                )
+                await asyncio.sleep(delay)
+            except RetryAfter as e:
+                if attempt == _SEND_MAX_RETRIES:
+                    raise
+                delay = float(e.retry_after)
+                logger.warning(
+                    "Telegram Flood Control (attempt {}/{}), retrying in {:.1f}s",
                     attempt, _SEND_MAX_RETRIES, delay,
                 )
                 await asyncio.sleep(delay)
@@ -705,6 +840,11 @@ class TelegramChannel(BaseChannel):
             if stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id:
                 return
             self._stop_typing(chat_id)
+            if reply_to_message_id := meta.get("message_id"):
+                try:
+                    await self._remove_reaction(chat_id, int(reply_to_message_id))
+                except ValueError:
+                    pass
             try:
                 html = _markdown_to_telegram_html(buf.text)
                 await self._call_with_retry(
@@ -796,15 +936,7 @@ class TelegramChannel(BaseChannel):
         """Handle /help command, bypassing ACL so all users can access it."""
         if not update.message:
             return
-        await update.message.reply_text(
-            "🐈 nanobot commands:\n"
-            "/new — Start a new conversation\n"
-            "/coding — Start or manage coding tasks (`/coding help` for all subcommands)\n"
-            "/stop — Stop the current task\n"
-            "/restart — Restart the bot\n"
-            "/status — Show bot status\n"
-            "/help — Show available commands"
-        )
+        await update.message.reply_text(build_help_text())
 
     @staticmethod
     def _sender_id(user) -> str:
@@ -835,8 +967,7 @@ class TelegramChannel(BaseChannel):
             "reply_to_message_id": getattr(reply_to, "message_id", None) if reply_to else None,
         }
 
-    @staticmethod
-    def _extract_reply_context(message) -> str | None:
+    async def _extract_reply_context(self, message) -> str | None:
         """Extract text from the message being replied to, if any."""
         reply = getattr(message, "reply_to_message", None)
         if not reply:
@@ -844,7 +975,21 @@ class TelegramChannel(BaseChannel):
         text = getattr(reply, "text", None) or getattr(reply, "caption", None) or ""
         if len(text) > TELEGRAM_REPLY_CONTEXT_MAX_LEN:
             text = text[:TELEGRAM_REPLY_CONTEXT_MAX_LEN] + "..."
-        return f"[Reply to: {text}]" if text else None
+            
+        if not text:
+            return None
+            
+        bot_id, _ = await self._ensure_bot_identity()
+        reply_user = getattr(reply, "from_user", None)
+        
+        if bot_id and reply_user and getattr(reply_user, "id", None) == bot_id:
+            return f"[Reply to bot: {text}]"
+        elif reply_user and getattr(reply_user, "username", None):
+            return f"[Reply to @{reply_user.username}: {text}]"
+        elif reply_user and getattr(reply_user, "first_name", None):
+            return f"[Reply to {reply_user.first_name}: {text}]"
+        else:
+            return f"[Reply to: {text}]"
 
     async def _download_message_media(
         self, msg, *, add_failure_content: bool = False
@@ -981,10 +1126,16 @@ class TelegramChannel(BaseChannel):
         message = update.message
         user = update.effective_user
         self._remember_thread_context(message)
+        content = message.text or ""
+        if content.startswith("/") and "@" in content:
+            cmd_part, *rest = content.split(" ", 1)
+            cmd_part = cmd_part.split("@")[0]
+            content = f"{cmd_part} {rest[0]}" if rest else cmd_part
+        content = self._normalize_telegram_command(content)
         if await self._handle_message(
             sender_id=self._sender_id(user),
             chat_id=str(message.chat_id),
-            content=message.text or "",
+            content=content,
             metadata=self._build_message_metadata(message, user),
             session_key=self._derive_topic_session_key(message),
         ):
@@ -1029,7 +1180,7 @@ class TelegramChannel(BaseChannel):
         # Reply context: text and/or media from the replied-to message
         reply = getattr(message, "reply_to_message", None)
         if reply is not None:
-            reply_ctx = self._extract_reply_context(message)
+            reply_ctx = await self._extract_reply_context(message)
             reply_media, reply_media_parts = await self._download_message_media(reply)
             if reply_media:
                 media_paths = reply_media + media_paths
@@ -1122,6 +1273,19 @@ class TelegramChannel(BaseChannel):
         except Exception as e:
             logger.debug("Telegram reaction failed: {}", e)
 
+    async def _remove_reaction(self, chat_id: str, message_id: int) -> None:
+        """Remove emoji reaction from a message (best-effort, non-blocking)."""
+        if not self._app:
+            return
+        try:
+            await self._app.bot.set_message_reaction(
+                chat_id=int(chat_id),
+                message_id=message_id,
+                reaction=[],
+            )
+        except Exception as e:
+            logger.debug("Telegram reaction removal failed: {}", e)
+
     async def _typing_loop(self, chat_id: str) -> None:
         """Repeatedly send 'typing' action until cancelled."""
         try:
@@ -1133,16 +1297,39 @@ class TelegramChannel(BaseChannel):
         except Exception as e:
             logger.debug("Typing indicator stopped for {}: {}", chat_id, e)
 
+    @staticmethod
+    def _format_telegram_error(exc: Exception) -> str:
+        """Return a short, readable error summary for logs."""
+        text = str(exc).strip()
+        if text:
+            return text
+        if exc.__cause__ is not None:
+            cause = exc.__cause__
+            cause_text = str(cause).strip()
+            if cause_text:
+                return f"{exc.__class__.__name__} ({cause_text})"
+            return f"{exc.__class__.__name__} ({cause.__class__.__name__})"
+        return exc.__class__.__name__
+
+    def _on_polling_error(self, exc: Exception) -> None:
+        """Keep long-polling network failures to a single readable line."""
+        self._record_poll_error(exc)
+        summary = self._format_telegram_error(exc)
+        if isinstance(exc, (NetworkError, TimedOut)):
+            logger.warning("Telegram polling network issue: {}", summary)
+        else:
+            logger.error("Telegram polling error: {}", summary)
+
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
-        from telegram.error import NetworkError, TimedOut
+        summary = self._format_telegram_error(context.error)
 
         if isinstance(context.error, (NetworkError, TimedOut)):
             self._record_poll_error(context.error)
-            logger.warning("Telegram network issue: {}", str(context.error))
+            logger.warning("Telegram network issue: {}", summary)
         else:
             self._set_last_error_summary("handler", context.error)
-            logger.error("Telegram error: {}", context.error)
+            logger.error("Telegram error: {}", summary)
 
     def _get_extension(
         self,

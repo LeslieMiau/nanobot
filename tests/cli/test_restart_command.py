@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 import time
 from types import SimpleNamespace
@@ -39,14 +40,23 @@ class TestRestartCommand:
     async def test_restart_sends_message_and_calls_execv(self):
         from nanobot.command.builtin import cmd_restart
         from nanobot.command.router import CommandContext
+        from nanobot.utils.restart import (
+            RESTART_NOTIFY_CHANNEL_ENV,
+            RESTART_NOTIFY_CHAT_ID_ENV,
+            RESTART_STARTED_AT_ENV,
+        )
 
         loop, bus = _make_loop()
         msg = InboundMessage(channel="cli", sender_id="user", chat_id="direct", content="/restart")
         ctx = CommandContext(msg=msg, session=None, key=msg.session_key, raw="/restart", loop=loop)
 
-        with patch("nanobot.command.builtin.os.execv") as mock_execv:
+        with patch.dict(os.environ, {}, clear=False), \
+             patch("nanobot.command.builtin.os.execv") as mock_execv:
             out = await cmd_restart(ctx)
             assert "Restarting" in out.content
+            assert os.environ.get(RESTART_NOTIFY_CHANNEL_ENV) == "cli"
+            assert os.environ.get(RESTART_NOTIFY_CHAT_ID_ENV) == "direct"
+            assert os.environ.get(RESTART_STARTED_AT_ENV)
 
             await asyncio.sleep(1.5)
             mock_execv.assert_called_once()
@@ -130,7 +140,7 @@ class TestRestartCommand:
         loop.sessions.get_or_create.return_value = session
         loop._start_time = time.time() - 125
         loop._last_usage = {"prompt_tokens": 0, "completion_tokens": 0}
-        loop.memory_consolidator.estimate_session_prompt_tokens = MagicMock(
+        loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(20500, "tiktoken")
         )
 
@@ -169,7 +179,7 @@ class TestRestartCommand:
         session.get_history.return_value = [{"role": "user"}]
         loop.sessions.get_or_create.return_value = session
         loop._last_usage = {"prompt_tokens": 1200, "completion_tokens": 34}
-        loop.memory_consolidator.estimate_session_prompt_tokens = MagicMock(
+        loop.consolidator.estimate_session_prompt_tokens = MagicMock(
             return_value=(0, "none")
         )
 
@@ -196,11 +206,17 @@ class TestRestartCommand:
                     "reconnect_count": 2,
                     "last_inbound_at": "2026-04-03T08:10:00+08:00",
                     "last_outbound_at": "2026-04-03T08:10:03+08:00",
+                    "last_probe_at": "2026-04-03T08:10:04+08:00",
+                    "last_probe_ok_at": "2026-04-03T08:10:04+08:00",
+                    "last_channel_restart_at": "2026-04-03T08:00:00+08:00",
                     "last_poll_error_at": None,
                     "last_send_error_at": None,
                     "consecutive_poll_errors": 0,
                     "consecutive_send_errors": 0,
+                    "polling_task_alive": True,
+                    "channel_restart_count": 1,
                     "last_error_summary": None,
+                    "runtime_source": "/Users/miau/Documents/nanobot",
                     "running": True,
                 },
             }
@@ -213,6 +229,7 @@ class TestRestartCommand:
         assert response is not None
         assert "Telegram: running" in response.content
         assert "proxy=explicit:http://127.0.0.1:1082" in response.content
+        assert "source=/Users/miau/Documents/nanobot" in response.content
 
     @pytest.mark.asyncio
     async def test_process_direct_preserves_render_metadata(self):
@@ -261,11 +278,17 @@ def test_channels_status_shows_runtime_details(monkeypatch):
                         "reconnect_count": 1,
                         "last_inbound_at": "2026-04-03T08:10:00+08:00",
                         "last_outbound_at": "2026-04-03T08:10:02+08:00",
+                        "last_probe_at": "2026-04-03T08:10:05+08:00",
+                        "last_probe_ok_at": "2026-04-03T08:10:05+08:00",
+                        "last_channel_restart_at": "2026-04-03T08:00:00+08:00",
                         "last_poll_error_at": None,
                         "last_send_error_at": None,
                         "consecutive_poll_errors": 0,
                         "consecutive_send_errors": 0,
+                        "polling_task_alive": True,
+                        "channel_restart_count": 1,
                         "last_error_summary": None,
+                        "runtime_source": "/Users/miau/Documents/nanobot",
                         "running": True,
                     },
                 }
@@ -283,6 +306,7 @@ def test_channels_status_shows_runtime_details(monkeypatch):
     assert result.exit_code == 0
     assert "Telegram" in result.stdout
     assert "explicit:http://127.0.0.1:1082" in result.stdout
+    assert "/Users/miau/Documents/nanobot" in result.stdout
 
 
 def test_channels_status_honors_explicit_config_path(monkeypatch, tmp_path):
