@@ -334,3 +334,24 @@
   - A real-device spoken Siri run is still needed to confirm the new loop behaves correctly in Siri runtime and that spoken replies sound natural on-device.
 - Harness note:
   - `PLAN.json` was left unchanged again because this is user-directed follow-up scope beyond the original one-shot Voice Bridge v1 plan entries.
+
+## Session update - 2026-04-06 (iPhone Siri real-device install and automation gate)
+- Completed verification:
+  - Re-ran `bash ~/.codex/scripts/global-init.sh`; the repo-wide Python baseline still fails for the pre-existing `tests/test_coding_mode.py` import error (`CodingConfig`), not for VoiceBridge changes.
+  - `curl -sS http://127.0.0.1:8900/health` -> `{"status":"ok"}`.
+  - `cd ios/VoiceBridge && swift test` -> passed (`11` tests) after the multi-turn Siri changes.
+  - `xcodebuild -project ios/VoiceBridge/VoiceBridge.xcodeproj -scheme VoiceBridge -destination 'id=00008130-001924C20E98001C' -destination-timeout 180 -derivedDataPath /tmp/voicebridge-siri-multiturn-device -allowProvisioningUpdates DEVELOPMENT_TEAM=3G64PGKF3G build` -> passed on `Miau’s iPhone`.
+  - `xcrun devicectl device install app --device 22B58A79-B97A-556A-B2B2-3EDAA97877CD /tmp/voicebridge-siri-multiturn-device/Build/Products/Debug-iphoneos/VoiceBridge.app` -> installed the latest `com.miau.voicebridge` build on the physical iPhone.
+  - `xcrun devicectl device process launch --device 22B58A79-B97A-556A-B2B2-3EDAA97877CD com.miau.voicebridge` -> launched successfully, so the app has had one foreground run to refresh App Shortcut metadata.
+- New blocker:
+  - The physical-device UI smoke no longer reaches app interaction because XCTest now fails before test execution:
+    - `VOICEBRIDGE_TEST_BASE_URL='http://192.168.3.79:8900' xcodebuild ... test -only-testing:VoiceBridgeUITests/VoiceBridgeUITests/testManualSmokeFlowDisplaysBackendReply` -> failed with `Timed out while enabling automation mode.`
+  - The result bundle confirms this is a device automation initialization problem, not an app/backend regression:
+    - `testmanagerd.log` shows authorization for the runner pid succeeded.
+    - `Session-VoiceBridgeUITests-...log` shows the runner loaded the bundle and then stalled for 60 seconds at `enabling automation mode`.
+  - Device-side state at the time of failure was otherwise healthy:
+    - `xcrun devicectl device info lockState --device 00008130-001924C20E98001C` -> `passcodeRequired: false`, `unlockedSinceBoot: true`
+    - `xcrun devicectl device info details --device 00008130-001924C20E98001C` -> still paired, wired, and `developerModeStatus: enabled`
+- Remaining acceptance:
+  - The latest multi-turn Siri build is now installed on the phone, but final acceptance must come from a manual spoken Siri run on the physical iPhone rather than XCTest automation.
+  - The next useful signal is whether a manual Siri session now sends `/chat` requests with a non-empty `session_id` and reuses the same `session_id` across follow-up turns.
