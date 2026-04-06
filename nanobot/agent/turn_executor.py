@@ -178,6 +178,11 @@ class TurnExecutorController:
                         provider=consolidation_provider,
                         model=consolidation_model,
                     )
+            except Exception:
+                logger.exception(
+                    "Background consolidation failed for {}; skipping this round",
+                    session.key,
+                )
             finally:
                 self.loop._consolidating.discard(session.key)
                 task = asyncio.current_task()
