@@ -247,3 +247,20 @@
   - The original user-reported phrase `问纳博特` was indeed a poor Siri trigger because it reads like “ask a person named 纳博特”.
   - The phrase redesign is now shipped in the app metadata, so the next meaningful verification step is manual spoken Siri on the iPhone.
   - XCTest automation still cannot prove custom App Shortcut execution on this device, even though built-in Siri control continues to pass.
+
+## Session update - 2026-04-06 (manual Siri reply-path fix)
+- New finding from manual spoken validation:
+  - The user-triggered iPhone Siri run did reach nanobot successfully.
+  - `/tmp/nanobot-api.log` recorded a fresh request at `2026-04-06 16:40:11`:
+    - `Voice ask speaker=siri-iphone text=你好`
+    - followed by the normal backend reply `你好。`
+  - However Siri still told the user `出现错误，请重试`, which means the trigger path is now working but the intent return path is not.
+- Implemented fix:
+  - Updated `AskBridgeIntent.perform()` to return `some IntentResult & ProvidesDialog` instead of plain `some IntentResult`.
+  - This aligns the declared return type with the actual `.result(dialog: ...)` responses used by the intent.
+- Verification:
+  - `xcodebuild ... build` for the real iPhone destination -> passed after the `ProvidesDialog` change.
+  - Installed the rebuilt app to `Miau’s iPhone` with `xcrun devicectl device install app ... VoiceBridge.app`.
+  - Launched the updated app once on-device with `xcrun devicectl device process launch --device ... com.miau.voicebridge`.
+- Remaining step:
+  - Re-run the manual spoken Siri flow on the iPhone with the updated app bundle and confirm whether Siri now speaks the backend reply instead of ending with the generic error.

@@ -7,7 +7,7 @@ struct AskBridgeIntent: AppIntent {
     @Parameter(title: "Prompt", requestValueDialog: "你想问纳博特什么？")
     var prompt: String
 
-    func perform() async throws -> some IntentResult {
+    func perform() async throws -> some IntentResult & ProvidesDialog {
         do {
             let response = try await BridgeIntentExecutor.execute(prompt: prompt)
             BridgeIntentResultStore.saveSuccess(
