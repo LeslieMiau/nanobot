@@ -209,6 +209,7 @@ Internally, the coding-task orchestration now has a dedicated composition root:
 - [Configuration](#️-configuration)
 - [Multiple Instances](#-multiple-instances)
 - [Memory](#-memory)
+- [Knowledge Wiki](#-knowledge-wiki)
 - [CLI Reference](#-cli-reference)
 - [In-Chat Commands](#-in-chat-commands)
 - [Python SDK](#-python-sdk)
@@ -1740,6 +1741,19 @@ time.
 
 If you want the full design, see [docs/MEMORY.md](docs/MEMORY.md).
 
+## 📚 Knowledge Wiki
+
+nanobot now also supports a separate persistent knowledge wiki under `knowledge/` for
+source ingestion, structured topic/entity pages, and saved syntheses.
+
+- `knowledge/raw/` stores immutable captured sources
+- `knowledge/wiki/` stores source, topic, entity, and synthesis pages
+- `knowledge/index.md` is the catalog for query-time retrieval
+- `knowledge/log.md` records ingest, query, lint, and import runs
+
+Use `nanobot kb ...` commands to manage this wiki. The full workflow is documented in
+[docs/KNOWLEDGE.md](docs/KNOWLEDGE.md).
+
 ## 💻 CLI Reference
 
 | Command | Description |
@@ -1759,6 +1773,11 @@ If you want the full design, see [docs/MEMORY.md](docs/MEMORY.md).
 | `nanobot provider login openai-codex` | OAuth login for providers |
 | `nanobot channels login <channel>` | Authenticate a channel interactively |
 | `nanobot channels status` | Show channel status |
+| `nanobot kb status` | Show persistent knowledge wiki status |
+| `nanobot kb ingest <path-or-url>` | Ingest a local file or URL into the knowledge wiki |
+| `nanobot kb ask "<question>" [--save]` | Query the knowledge wiki and optionally file the answer |
+| `nanobot kb lint` | Lint the knowledge wiki for structural issues |
+| `nanobot kb import-memory` | Import `memory/MEMORY.md` project context into the wiki |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 

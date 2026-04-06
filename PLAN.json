@@ -36,7 +36,7 @@
         "Introduce knowledge.enabled, knowledge.dir, knowledge.searchBackend, knowledge.maxPagesPerQuery, knowledge.autoFileAnswers",
         "Keep existing memory config semantics unchanged"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F005",
@@ -45,7 +45,7 @@
         "Add package entrypoints under nanobot/knowledge",
         "Keep the implementation separate from memory and Dream"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F006",
@@ -54,7 +54,7 @@
         "Represent page metadata, source material, search hits, answer results, and lint findings",
         "Make page metadata compatible with YAML frontmatter"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F007",
@@ -63,7 +63,7 @@
         "Ensure knowledge/raw, knowledge/wiki/sources, knowledge/wiki/topics, knowledge/wiki/entities, knowledge/wiki/syntheses exist",
         "Initialize knowledge/index.md, knowledge/log.md, knowledge/SCHEMA.md when needed"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F008",
@@ -72,7 +72,7 @@
         "Create initial SCHEMA.md template",
         "Create initial index.md and log.md templates"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F009",
@@ -81,7 +81,7 @@
         "Write pages with type, title, aliases, source_ids, updated_at, links_out",
         "Parse the same frontmatter back into typed metadata"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F010",
@@ -90,7 +90,7 @@
         "Normalize titles into stable slugs",
         "Avoid collisions for repeated titles"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F011",
@@ -99,7 +99,7 @@
         "Persist ingested local files or fetched URL content under knowledge/raw",
         "Treat the stored raw payload as immutable after ingest"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F012",
@@ -108,7 +108,7 @@
         "Fetch readable text from http or https URLs",
         "Preserve source origin and final title for wiki compilation"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F013",
@@ -117,7 +117,7 @@
         "Read markdown, text, json, and similar file types safely",
         "Capture source title and content without mutating the original file"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F014",
@@ -126,7 +126,7 @@
         "Compile one source into summary, topics, entities, key claims, contradictions, and superseded source ids",
         "Parse model output into structured data"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F015",
@@ -135,7 +135,7 @@
         "Use tolerant JSON repair",
         "Validate missing or malformed fields with safe defaults"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F016",
@@ -144,7 +144,7 @@
         "Create pages under knowledge/wiki/sources",
         "Include summary, key claims, conflicts, and raw-source references"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F017",
@@ -153,7 +153,7 @@
         "Create or update topic pages under knowledge/wiki/topics",
         "Append new synthesized updates and related source ids"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F018",
@@ -162,7 +162,7 @@
         "Create or update entity pages under knowledge/wiki/entities",
         "Track aliases and related source ids"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F019",
@@ -171,7 +171,7 @@
         "Populate links_out in frontmatter",
         "Emit inline links between source, topic, and entity pages where possible"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F020",
@@ -180,7 +180,7 @@
         "List pages by category with one-line summaries",
         "Keep source, topic, entity, and synthesis sections current"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F021",
@@ -189,7 +189,7 @@
         "Record ingest timestamp, source id, and touched pages",
         "Keep the log append-only"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F022",
@@ -198,7 +198,7 @@
         "Search index and page content with a grep-style local strategy",
         "Return ranked hits capped by knowledge.maxPagesPerQuery"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F023",
@@ -207,7 +207,7 @@
         "Use index.md to shortlist candidate pages",
         "Read only the top relevant wiki pages for answering"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F024",
@@ -216,7 +216,7 @@
         "Construct provider input from question plus page excerpts",
         "Keep knowledge out of the normal agent system prompt"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F025",
@@ -225,7 +225,7 @@
         "Produce a final answer using retrieved wiki pages",
         "Return page-level and source-level citations in the answer"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F026",
@@ -234,7 +234,7 @@
         "Return a deterministic extractive response when model synthesis fails",
         "Still include citations to retrieved pages"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F027",
@@ -243,7 +243,7 @@
         "Record question text, selected pages, and whether an answer was filed",
         "Preserve append-only ordering"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F028",
@@ -252,7 +252,7 @@
         "Create pages under knowledge/wiki/syntheses when --save is used",
         "Record citations and supporting page ids in the saved answer"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F029",
@@ -261,7 +261,7 @@
         "Do not auto-file answers when the config flag is false",
         "Auto-file only when save is requested or the config flag is true"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F030",
@@ -270,7 +270,7 @@
         "Detect wiki pages with no inbound links",
         "Return machine-readable findings and human-readable summaries"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F031",
@@ -279,7 +279,7 @@
         "Detect one-way links that should have reciprocal references",
         "Report the page pair for follow-up"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F032",
@@ -288,7 +288,7 @@
         "Detect newer sources that supersede earlier source ids",
         "Warn when the older page is not explicitly marked as superseded"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F033",
@@ -297,7 +297,7 @@
         "Detect conflict markers in pages",
         "Report them so the operator can investigate"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F034",
@@ -306,7 +306,7 @@
         "Record lint timestamp and finding counts",
         "Keep lint history alongside ingest and query history"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F035",
@@ -315,7 +315,7 @@
         "Show whether knowledge is enabled",
         "Report source, page, synthesis, and lint counts"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F036",
@@ -324,7 +324,7 @@
         "Read memory/MEMORY.md without modifying it",
         "Create knowledge/wiki/topics/project-context.md from project context content"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F037",
@@ -333,7 +333,7 @@
         "Update the project-context topic page instead of duplicating it",
         "Append a single log entry for each import run"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F038",
@@ -342,7 +342,7 @@
         "Register nanobot kb ... under the main CLI",
         "Keep help text consistent with existing command groups"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F039",
@@ -351,7 +351,7 @@
         "Accept a path or URL argument",
         "Run the ingest workflow and print touched pages"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F040",
@@ -360,7 +360,7 @@
         "Accept a question plus optional --save",
         "Print the synthesized answer and cited pages"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F041",
@@ -369,7 +369,7 @@
         "Run lint checks",
         "Print findings and a success message when clean"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F042",
@@ -378,7 +378,7 @@
         "Show knowledge directory paths and counts",
         "Avoid mutating the workspace during status checks"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F043",
@@ -387,7 +387,7 @@
         "Expose the memory bridge operation",
         "Report the created or updated page path"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F044",
@@ -396,7 +396,7 @@
         "Do not add knowledge/wiki content to build_system_prompt",
         "Preserve the existing memory-only prompt behavior"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F045",
@@ -405,7 +405,7 @@
         "Delete or otherwise remove the unused nanobot/agent/dream.py path",
         "Leave the active Dream implementation in nanobot/agent/memory.py untouched"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F046",
@@ -414,7 +414,7 @@
         "Keep memory.memos optional for memory facts only",
         "Do not wire knowledge wiki behavior through MemOS"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F047",
@@ -423,7 +423,7 @@
         "Verify metadata fields round-trip correctly",
         "Verify links_out and source_ids survive reloads"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F048",
@@ -432,7 +432,7 @@
         "Verify raw source immutability and file creation",
         "Verify index and log updates after ingest"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F049",
@@ -441,7 +441,7 @@
         "Verify index-first retrieval behavior",
         "Verify citations are included in answers"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F050",
@@ -450,7 +450,7 @@
         "Verify orphan, backlink, superseded, and conflict findings",
         "Verify clean states return no findings"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F051",
@@ -459,7 +459,7 @@
         "Ingest complementary sources, ask a cross-source question, save the answer, then lint",
         "Verify the wiki stays coherent after the full flow"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F052",
@@ -468,7 +468,7 @@
         "Cover kb ingest, ask, lint, status, and import-memory",
         "Keep tests isolated with temporary workspaces"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F053",
@@ -477,7 +477,7 @@
         "Update README and/or dedicated docs to explain knowledge vs memory",
         "Document the kb commands and workspace structure"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F054",
@@ -486,7 +486,7 @@
         "Run knowledge tests and relevant CLI tests",
         "Re-check memory and Dream regressions that overlap the touched code"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F055",
@@ -495,7 +495,7 @@
         "Update PLAN.json passes and append PROGRESS.md entries",
         "Create delivery commits with the required Codex trailer"
       ],
-      "passes": false
+      "passes": true
     }
   ]
 }

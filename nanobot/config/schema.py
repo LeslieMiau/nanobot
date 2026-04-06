@@ -42,6 +42,16 @@ class MemoryConfig(Base):
     memos_top_k: int = 5                         # number of relevant facts to inject per query
 
 
+class KnowledgeConfig(Base):
+    """Persistent knowledge wiki configuration."""
+
+    enabled: bool = False
+    dir: str = "knowledge"
+    search_backend: Literal["grep"] = "grep"
+    max_pages_per_query: int = Field(default=8, ge=1, le=32)
+    auto_file_answers: bool = False
+
+
 class DreamConfig(Base):
     """Dream memory consolidation configuration."""
 
@@ -235,6 +245,7 @@ class Config(BaseSettings):
 
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     channels: ChannelsConfig = Field(default_factory=ChannelsConfig)
+    knowledge: KnowledgeConfig = Field(default_factory=KnowledgeConfig)
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     api: ApiConfig = Field(default_factory=ApiConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)

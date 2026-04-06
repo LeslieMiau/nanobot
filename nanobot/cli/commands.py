@@ -649,6 +649,14 @@ def _load_runtime_config(config: str | None = None, workspace: str | None = None
     return loaded
 
 
+def _maybe_make_provider(config: Config):
+    """Best-effort provider construction for commands with local fallbacks."""
+    try:
+        return _make_provider(config)
+    except typer.Exit:
+        return None
+
+
 def _warn_deprecated_config_keys(config_path: Path | None) -> None:
     """Hint users to remove obsolete keys from their config file."""
     import json
@@ -1331,6 +1339,136 @@ def coding_task_run(
     console.print(f"Log: {result.log_path}")
     if result.session_hint:
         console.print(f"Codex session: {result.session_hint}")
+
+
+kb_app = typer.Typer(help="Manage the persistent knowledge wiki")
+app.add_typer(kb_app, name="kb")
+
+
+def _load_knowledge_base(config: Config):
+    from nanobot.knowledge import KnowledgeBase
+
+    return KnowledgeBase(config.workspace_path, config.knowledge)
+
+
+def _print_knowledge_disabled_hint(config: Config) -> None:
+    if not config.knowledge.enabled:
+        console.print("[dim]knowledge.enabled is false; running the CLI command in one-off mode.[/dim]")
+
+
+@kb_app.command("status")
+def kb_status(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
+    """Show persistent knowledge wiki status."""
+    config_obj = _load_runtime_config(config, workspace)
+    kb = _load_knowledge_base(config_obj)
+    status = kb.status()
+
+    console.print(f"{__logo__} Knowledge Status\n")
+    console.print(f"Enabled: {'[green]yes[/green]' if status.enabled else '[dim]no[/dim]'}")
+    console.print(f"Root: {status.root}")
+    console.print(f"Raw sources: {status.raw_count}")
+    console.print(f"Source pages: {status.source_page_count}")
+    console.print(f"Topic pages: {status.topic_page_count}")
+    console.print(f"Entity pages: {status.entity_page_count}")
+    console.print(f"Synthesis pages: {status.synthesis_page_count}")
+    console.print(f"Total pages: {status.page_count}")
+
+
+@kb_app.command("ingest")
+def kb_ingest(
+    path_or_url: str = typer.Argument(..., help="Local file path or http(s) URL to ingest"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
+    """Ingest a source into the persistent knowledge wiki."""
+    config_obj = _load_runtime_config(config, workspace)
+    _print_knowledge_disabled_hint(config_obj)
+    kb = _load_knowledge_base(config_obj)
+    provider = _maybe_make_provider(config_obj)
+    if provider is None:
+        console.print("[dim]No LLM provider available; using heuristic wiki compilation.[/dim]")
+
+    result = asyncio.run(
+        kb.ingest(
+            path_or_url,
+            provider=provider,
+            model=config_obj.agents.defaults.model,
+        )
+    )
+
+    console.print(f"[green]✓[/green] Ingested source {result.source_id}")
+    console.print(f"Raw: {result.raw_path}")
+    console.print(f"Source page: {result.source_page}")
+    console.print("Touched pages:")
+    for path in result.touched_pages:
+        console.print(f"- {path}")
+
+
+@kb_app.command("ask")
+def kb_ask(
+    question: str = typer.Argument(..., help="Question to ask against the wiki"),
+    save: bool = typer.Option(False, "--save", help="Save the answer as a synthesis page"),
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
+    """Query the persistent knowledge wiki."""
+    config_obj = _load_runtime_config(config, workspace)
+    _print_knowledge_disabled_hint(config_obj)
+    kb = _load_knowledge_base(config_obj)
+    provider = _maybe_make_provider(config_obj)
+    if provider is None:
+        console.print("[dim]No LLM provider available; returning an extractive answer.[/dim]")
+
+    result = asyncio.run(
+        kb.ask(
+            question,
+            provider=provider,
+            model=config_obj.agents.defaults.model,
+            save=save,
+        )
+    )
+
+    console.print(result.answer)
+    if result.saved_path:
+        console.print(f"\n[green]Saved synthesis:[/green] {result.saved_path}")
+
+
+@kb_app.command("lint")
+def kb_lint(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
+    """Lint the persistent knowledge wiki."""
+    config_obj = _load_runtime_config(config, workspace)
+    kb = _load_knowledge_base(config_obj)
+    findings = kb.lint()
+
+    if not findings:
+        console.print("[green]✓[/green] Knowledge wiki is clean.")
+        return
+
+    console.print(f"[yellow]![/yellow] {len(findings)} knowledge finding(s)")
+    for finding in findings:
+        related = f" ({', '.join(finding.related)})" if finding.related else ""
+        page = f"{finding.page}: " if finding.page else ""
+        console.print(f"- [{finding.code}] {page}{finding.message}{related}", markup=False)
+    raise typer.Exit(1)
+
+
+@kb_app.command("import-memory")
+def kb_import_memory(
+    workspace: str | None = typer.Option(None, "--workspace", "-w", help="Workspace directory"),
+    config: str | None = typer.Option(None, "--config", "-c", help="Config file path"),
+):
+    """Import memory/MEMORY.md project context into the wiki."""
+    config_obj = _load_runtime_config(config, workspace)
+    _print_knowledge_disabled_hint(config_obj)
+    kb = _load_knowledge_base(config_obj)
+    page = kb.import_memory()
+    console.print(f"[green]✓[/green] Imported project context into {page}")
 
 
 

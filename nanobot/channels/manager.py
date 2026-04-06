@@ -47,6 +47,7 @@ class ChannelManager:
         from nanobot.channels.registry import discover_all
 
         groq_key = self.config.providers.groq.api_key
+        restart_callback = getattr(self, "_restart_callback", None)
 
         for name, cls in discover_all().items():
             section = getattr(self.config.channels, name, None)
@@ -62,7 +63,7 @@ class ChannelManager:
             try:
                 channel = cls(section, self.bus)
                 channel.transcription_api_key = groq_key
-                channel.restart_callback = self._restart_callback
+                channel.restart_callback = restart_callback
                 self.channels[name] = channel
                 logger.info("{} channel enabled", cls.display_name)
             except Exception as e:
