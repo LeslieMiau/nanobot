@@ -647,3 +647,30 @@
   - After switching to explicit `aicodewith + claude-sonnet-4-6` and restarting the existing tmux processes, the OpenAI-compatible `/chat` summon path is healthy again.
 - Harness note:
   - `PLAN.json` remains unchanged because this was an operational runtime repair on top of the completed AICodeWith follow-up, not a new repo feature.
+
+## Session update - 2026-04-06 (iPhone Siri multi-turn repair)
+- User-directed scope:
+  - The user reported that Siri multi-turn conversation was failing after the first reply and asked for a direct repair rather than more analysis.
+- Diagnosis:
+  - Re-ran `bash ~/.codex/scripts/global-init.sh`; it still completed with the same unrelated repository baseline failure in `tests/test_coding_mode.py` (`CodingConfig` import drift).
+  - Live `/tmp/nanobot-api.log` evidence showed the iPhone Siri path still hit the backend once with a per-run `session_id`, for example:
+    - `speaker=siri-iphone session_id=0E7D865B-BEEA-4688-AAEC-FCF09845DD90 text=你好`
+    - followed by a normal reply
+  - No second `/chat` request appeared for that Siri run, which ruled out backend session routing as the primary fault and pointed to the App Intent follow-up collection path.
+- Completed changes:
+  - Reworked `ios/VoiceBridge/AppShell/AskBridgeIntent.swift` so Siri no longer re-requests the same `prompt` parameter in a loop.
+  - Added dedicated follow-up turn slots (`followUp1` ... `followUp5`) and now collect them sequentially, while reusing the same `sessionId` across the entire Siri run.
+  - Added explicit local end handling for empty/cancelled follow-up collection and local exit phrases before calling the backend again.
+  - Added a bounded Siri conversation cap in `BridgeConversationControl`:
+    - `maxSiriTurnCount = 6`
+    - turn-limit dialog: `这轮先到这里。想继续的话，请再次说使用纳博特。`
+  - Updated Siri validation docs to record the current six-turn boundary.
+- Verification:
+  - `cd ios/VoiceBridge && swift test` -> passed (`12 tests passed`)
+  - `xcodebuild -project ios/VoiceBridge/VoiceBridge.xcodeproj -scheme VoiceBridge -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build` -> passed
+  - `xcodebuild -project ios/VoiceBridge/VoiceBridge.xcodeproj -scheme VoiceBridge -destination 'id=00008130-001924C20E98001C' -allowProvisioningUpdates DEVELOPMENT_TEAM=3G64PGKF3G build` -> passed
+  - `xcrun devicectl device install app --device '00008130-001924C20E98001C' .../VoiceBridge.app` -> installed updated app to `Miau’s iPhone`
+  - `xcrun devicectl device process launch --device '00008130-001924C20E98001C' --terminate-existing com.miau.voicebridge` -> launched app once to refresh App Shortcut metadata on-device
+- Remaining acceptance gap:
+  - XCTest still cannot prove custom Siri App Shortcut execution end-to-end on this device, so the final acceptance remains a manual spoken Siri run on the iPhone.
+  - The backend/session evidence says the previous failure happened before the second request left Siri; this repair specifically targets that follow-up collection path.

@@ -16,6 +16,7 @@ Only `iPhone Siri` is part of the v1 pass condition.
 - Successful replies should be spoken back to the user
 - After each reply, Siri should continue the same session by asking `还想继续问什么？想结束就说结束。`
 - The same Siri run should reuse one `session_id` for all turns until the user says a local exit phrase or the backend returns `end_conversation=true`
+- The current Siri implementation supports up to 6 turns per invocation; after the last supported turn it should say `这轮先到这里。想继续的话，请再次说使用纳博特。`
 - Missing config, auth failures, timeout, or offline states should produce actionable spoken errors
 
 ## Simulator findings

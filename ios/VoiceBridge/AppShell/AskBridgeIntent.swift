@@ -9,14 +9,45 @@ struct AskBridgeIntent: AppIntent {
     @Parameter(title: "Prompt")
     var prompt: String?
 
+    @Parameter(title: "Follow Up 1")
+    var followUp1: String?
+
+    @Parameter(title: "Follow Up 2")
+    var followUp2: String?
+
+    @Parameter(title: "Follow Up 3")
+    var followUp3: String?
+
+    @Parameter(title: "Follow Up 4")
+    var followUp4: String?
+
+    @Parameter(title: "Follow Up 5")
+    var followUp5: String?
+
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let sessionId = UUID().uuidString
 
         do {
-            var currentPrompt = try await resolveInitialPrompt()
+            var lastPrompt = ""
+            var lastSpokenText = ""
 
-            while true {
-                if BridgeConversationControl.isExitPrompt(currentPrompt) {
+            for turnIndex in 0 ..< BridgeConversationControl.maxSiriTurnCount {
+                let currentPrompt: String
+                do {
+                    currentPrompt = try await resolvePrompt(
+                        at: turnIndex,
+                        previousSpokenText: lastSpokenText
+                    )
+                } catch {
+                    BridgeIntentResultStore.saveSuccess(
+                        prompt: lastPrompt,
+                        spokenText: BridgeConversationControl.endedDialog
+                    )
+                    return .result(dialog: "\(BridgeConversationControl.endedDialog)")
+                }
+                lastPrompt = currentPrompt
+
+                if BridgeConversationControl.shouldEndLocally(currentPrompt) {
                     BridgeIntentResultStore.saveSuccess(
                         prompt: currentPrompt,
                         spokenText: BridgeConversationControl.endedDialog
@@ -28,27 +59,34 @@ struct AskBridgeIntent: AppIntent {
                     prompt: currentPrompt,
                     sessionId: sessionId
                 )
-                BridgeIntentResultStore.saveSuccess(
-                    prompt: currentPrompt,
-                    spokenText: response.spokenText
-                )
+                lastSpokenText = response.spokenText
 
                 if response.endConversation {
-                    return .result(dialog: "\(response.spokenText)")
-                }
-
-                do {
-                    currentPrompt = try await $prompt.requestValue(
-                        "\(BridgeConversationControl.followUpDialog(for: response.spokenText))"
-                    )
-                } catch {
                     BridgeIntentResultStore.saveSuccess(
                         prompt: currentPrompt,
                         spokenText: response.spokenText
                     )
-                    return .result(dialog: "\(BridgeConversationControl.endedDialog)")
+                    return .result(dialog: "\(response.spokenText)")
                 }
+
+                if turnIndex == BridgeConversationControl.maxSiriTurnCount - 1 {
+                    let finalDialog = BridgeConversationControl.turnLimitDialog(after: response.spokenText)
+                    BridgeIntentResultStore.saveSuccess(
+                        prompt: currentPrompt,
+                        spokenText: finalDialog
+                    )
+                    return .result(dialog: "\(finalDialog)")
+                }
+
+                BridgeIntentResultStore.saveSuccess(
+                    prompt: currentPrompt,
+                    spokenText: response.spokenText
+                )
             }
+
+            let fallbackDialog = BridgeConversationControl.turnLimitDialog(after: lastSpokenText)
+            BridgeIntentResultStore.saveSuccess(prompt: lastPrompt, spokenText: fallbackDialog)
+            return .result(dialog: "\(fallbackDialog)")
         } catch {
             let message = BridgeIntentExecutor.fallbackMessage(for: error)
             BridgeIntentResultStore.saveFailure(
@@ -59,10 +97,74 @@ struct AskBridgeIntent: AppIntent {
         }
     }
 
-    private func resolveInitialPrompt() async throws -> String {
-        if let prompt, !BridgeConversationControl.normalizePrompt(prompt).isEmpty {
-            return prompt
+    private func resolvePrompt(at turnIndex: Int, previousSpokenText: String) async throws -> String {
+        switch turnIndex {
+        case 0:
+            return try await resolveTurn(
+                existingValue: prompt,
+                dialog: BridgeConversationControl.initialPromptDialog
+            ) {
+                try await $prompt.requestValue("\(BridgeConversationControl.initialPromptDialog)")
+            }
+        case 1:
+            return try await resolveTurn(
+                existingValue: followUp1,
+                dialog: BridgeConversationControl.followUpDialog(for: previousSpokenText)
+            ) {
+                try await $followUp1.requestValue(
+                    "\(BridgeConversationControl.followUpDialog(for: previousSpokenText))"
+                )
+            }
+        case 2:
+            return try await resolveTurn(
+                existingValue: followUp2,
+                dialog: BridgeConversationControl.followUpDialog(for: previousSpokenText)
+            ) {
+                try await $followUp2.requestValue(
+                    "\(BridgeConversationControl.followUpDialog(for: previousSpokenText))"
+                )
+            }
+        case 3:
+            return try await resolveTurn(
+                existingValue: followUp3,
+                dialog: BridgeConversationControl.followUpDialog(for: previousSpokenText)
+            ) {
+                try await $followUp3.requestValue(
+                    "\(BridgeConversationControl.followUpDialog(for: previousSpokenText))"
+                )
+            }
+        case 4:
+            return try await resolveTurn(
+                existingValue: followUp4,
+                dialog: BridgeConversationControl.followUpDialog(for: previousSpokenText)
+            ) {
+                try await $followUp4.requestValue(
+                    "\(BridgeConversationControl.followUpDialog(for: previousSpokenText))"
+                )
+            }
+        default:
+            return try await resolveTurn(
+                existingValue: followUp5,
+                dialog: BridgeConversationControl.followUpDialog(for: previousSpokenText)
+            ) {
+                try await $followUp5.requestValue(
+                    "\(BridgeConversationControl.followUpDialog(for: previousSpokenText))"
+                )
+            }
         }
-        return try await $prompt.requestValue("\(BridgeConversationControl.initialPromptDialog)")
+    }
+
+    private func resolveTurn(
+        existingValue: String?,
+        dialog: String,
+        request: () async throws -> String
+    ) async throws -> String {
+        let normalizedExisting = BridgeConversationControl.normalizePrompt(existingValue ?? "")
+        if !normalizedExisting.isEmpty {
+            return normalizedExisting
+        }
+
+        let requestedValue = try await request()
+        return BridgeConversationControl.normalizePrompt(requestedValue)
     }
 }
