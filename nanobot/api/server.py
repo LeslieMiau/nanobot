@@ -101,6 +101,17 @@ def _strip_markdown(text: str) -> str:
     return text.strip()
 
 
+_PROVIDER_ERROR_MARKERS = ("quota exceeded", "rate limit", "error calling")
+
+
+def _voice_friendly_error(text: str) -> str:
+    """Replace raw provider errors with user-friendly Chinese messages."""
+    lower = text.lower()
+    if any(m in lower for m in _PROVIDER_ERROR_MARKERS):
+        return "抱歉，语言模型暂时无法使用，请稍后再试。"
+    return text
+
+
 # ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
@@ -226,6 +237,7 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
 
     agent_loop = request.app["agent_loop"]
     timeout_s: float = request.app.get("request_timeout", 120.0)
+    voice_timeout = min(timeout_s, 10.0)  # Siri kills intents after ~10s
     session_locks: dict[str, asyncio.Lock] = request.app["session_locks"]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
@@ -241,13 +253,13 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
                         channel="api",
                         chat_id=API_CHAT_ID,
                     ),
-                    timeout=timeout_s,
+                    timeout=voice_timeout,
                 )
                 response_text = _response_text(response)
                 if not response_text or not response_text.strip():
                     response_text = EMPTY_FINAL_RESPONSE_MESSAGE
             except asyncio.TimeoutError:
-                return _error_json(504, f"Request timed out after {timeout_s}s")
+                return _error_json(504, f"Request timed out after {voice_timeout}s")
             except Exception:
                 logger.exception("Error processing voice request for speaker {}", speaker)
                 return _error_json(500, "Internal server error", err_type="server_error")
@@ -255,6 +267,7 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
         logger.exception("Unexpected voice API lock error for speaker {}", speaker)
         return _error_json(500, "Internal server error", err_type="server_error")
 
+    response_text = _voice_friendly_error(response_text)
     plain_text = _strip_markdown(response_text)
 
     # Detect end-of-conversation signals in the response

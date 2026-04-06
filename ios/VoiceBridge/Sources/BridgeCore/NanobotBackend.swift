@@ -75,6 +75,7 @@ public struct NanobotBackend: BridgeBackend, Sendable {
         }
 
         var urlRequest = URLRequest(url: url)
+        urlRequest.timeoutInterval = 8  // Siri kills intents after ~10s
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("Bearer \(try config.validatedAPIKey())", forHTTPHeaderField: "Authorization")
