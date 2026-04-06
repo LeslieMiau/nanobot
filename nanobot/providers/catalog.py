@@ -25,12 +25,12 @@ class AvailableModel:
 _PROVIDER_MODEL_CATALOG: dict[str, tuple[str, ...]] = {
     "aicodewith": (
         "gpt-5.4",
-        "gpt-5.3-codex",
-        "gpt-5.2",
-        "anthropic/claude-sonnet-4-5",
-        "anthropic/claude-opus-4-5",
-        "gemini/gemini-2.5-pro",
-        "gemini/gemini-2.5-flash",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "gemini-3.1-pro-preview",
+        "glm-5",
+        "deepseek-v3.2",
+        "kimi-k2.5",
     ),
     "anthropic": (
         "anthropic/claude-opus-4-5",

@@ -20,11 +20,6 @@ _AICODEWITH_HOST_KEYWORDS = ("aicodewith.com", "with7.cn")
 _AICODEWITH_DEFAULT_ORIGIN = "https://api.aicodewith.com"
 _AICODEWITH_OPENAI_PATH = "/chatgpt/v1"
 _AICODEWITH_GEMINI_PATH = "/gemini_cli"
-_AICODEWITH_MODEL_FALLBACKS = (
-    "gpt-5.2",
-    "gpt-5.4",
-    "gpt-5.3-codex",
-)
 
 
 class CustomProvider(LLMProvider):
@@ -207,10 +202,8 @@ class CustomProvider(LLMProvider):
 
     @staticmethod
     def _candidate_models(requested_model: str) -> list[str]:
-        """Try requested model first, then fall back to known working models."""
-        candidates = [requested_model]
-        candidates.extend(m for m in _AICODEWITH_MODEL_FALLBACKS if m != requested_model)
-        return candidates
+        """AICodeWith should respect the requested model exactly."""
+        return [requested_model]
 
     @staticmethod
     def _try_parse_json(text: str) -> Any | None:

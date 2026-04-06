@@ -1148,7 +1148,7 @@ nanobot agent -m "Hello!"
 <details>
 <summary><b>AICodeWith</b></summary>
 
-Use one AICodeWith API key to route GPT/Codex, Claude, and Gemini-family models through nanobot.
+Use one AICodeWith API key to route GPT, Claude, Gemini, GLM, DeepSeek, and Kimi-family models through nanobot.
 
 **1. Add provider config** (partial — merge into `~/.nanobot/config.json`):
 ```json
@@ -1183,7 +1183,7 @@ Claude route:
   "agents": {
     "defaults": {
       "provider": "aicodewith",
-      "model": "anthropic/claude-sonnet-4-5"
+      "model": "claude-sonnet-4-6"
     }
   }
 }
@@ -1195,13 +1195,15 @@ Gemini route:
   "agents": {
     "defaults": {
       "provider": "aicodewith",
-      "model": "gemini/gemini-2.5-pro"
+      "model": "gemini-3.1-pro-preview"
     }
   }
 }
 ```
 
-You can also switch explicitly at runtime with provider-prefixed model names such as `aicodewith/gpt-5.4` or `aicodewith/anthropic/claude-sonnet-4-5`.
+The curated `/model list` entries currently include `gpt-5.4`, `claude-opus-4-6`, `claude-sonnet-4-6`, `gemini-3.1-pro-preview`, `glm-5`, `deepseek-v3.2`, and `kimi-k2.5`.
+
+You can also switch explicitly at runtime with provider-prefixed model names such as `aicodewith/gpt-5.4` or `aicodewith/claude-sonnet-4-6`.
 
 **3. Chat:**
 ```bash

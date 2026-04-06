@@ -53,20 +53,28 @@ def test_aicodewith_base_and_route_normalization() -> None:
     assert provider._openai_responses_base() == "https://api.aicodewith.com/chatgpt/v1"
     assert provider._anthropic_base() == "https://api.aicodewith.com"
     assert provider._gemini_base() == "https://api.aicodewith.com/gemini_cli"
-    assert provider._route_kind_for_model("anthropic/claude-sonnet-4-6") == "anthropic"
-    assert provider._route_kind_for_model("gemini/gemini-2.5-pro") == "gemini"
-    assert provider._route_kind_for_model("gpt-5.2") == "openai"
+    assert provider._route_kind_for_model("claude-sonnet-4-6") == "anthropic"
+    assert provider._route_kind_for_model("gemini-3.1-pro-preview") == "gemini"
+    assert provider._route_kind_for_model("glm-5") == "openai"
     assert provider._normalize_model_for_route("anthropic/claude-sonnet-4-6", "anthropic") == "claude-sonnet-4-6"
-    assert provider._normalize_model_for_route("google/gemini-2.5-pro", "gemini") == "gemini-2.5-pro"
+    assert provider._normalize_model_for_route("google/gemini-3.1-pro-preview", "gemini") == "gemini-3.1-pro-preview"
     assert provider._normalize_model_for_route("aicodewith/gpt-5.4", "openai") == "gpt-5.4"
+    assert provider._normalize_model_for_route("aicodewith/glm-5", "openai") == "glm-5"
+    assert provider._normalize_model_for_route("aicodewith/deepseek-v3.2", "openai") == "deepseek-v3.2"
+    assert provider._normalize_model_for_route("aicodewith/kimi-k2.5", "openai") == "kimi-k2.5"
     assert (
         provider._normalize_model_for_route("aicodewith/anthropic/claude-sonnet-4-6", "anthropic")
         == "claude-sonnet-4-6"
     )
     assert (
-        provider._normalize_model_for_route("aicodewith/google/gemini-2.5-pro", "gemini")
-        == "gemini-2.5-pro"
+        provider._normalize_model_for_route("aicodewith/google/gemini-3.1-pro-preview", "gemini")
+        == "gemini-3.1-pro-preview"
     )
+
+
+def test_aicodewith_candidate_models_do_not_cross_fallback() -> None:
+    assert CustomProvider._candidate_models("glm-5") == ["glm-5"]
+    assert CustomProvider._candidate_models("gpt-5.4") == ["gpt-5.4"]
 
 
 def test_parse_anthropic_payload_with_tool_use() -> None:

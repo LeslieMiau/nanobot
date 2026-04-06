@@ -234,12 +234,12 @@ def test_build_available_models_includes_verified_aicodewith_catalog_entries() -
     }
 
     assert aicodewith_catalog_models == {
-        "gpt-5.3-codex",
-        "gpt-5.2",
-        "anthropic/claude-sonnet-4-5",
-        "anthropic/claude-opus-4-5",
-        "gemini/gemini-2.5-pro",
-        "gemini/gemini-2.5-flash",
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "gemini-3.1-pro-preview",
+        "glm-5",
+        "deepseek-v3.2",
+        "kimi-k2.5",
     }
     assert any(model.model == "gpt-5.4" and model.provider_name == "aicodewith" for model in models)
 
@@ -347,6 +347,38 @@ async def test_model_command_index_selection_uses_listed_provider_binding(tmp_pa
     assert "deepseek/deepseek-chat" in switched.content
     assert "provider: `aicodewith`" in switched.content
     assert switch_calls == [("deepseek/deepseek-chat", "aicodewith")]
+
+
+@pytest.mark.asyncio
+async def test_model_command_exact_name_selection_uses_listed_provider_binding(tmp_path: Path) -> None:
+    switch_calls: list[tuple[str | None, str | None]] = []
+
+    def provider_switcher(requested_model: str | None, requested_provider_name: str | None = None):
+        switch_calls.append((requested_model, requested_provider_name))
+        if requested_model is None:
+            return _Provider("default"), "dummy", "custom"
+        return _Provider("switched"), requested_model, requested_provider_name or "custom"
+
+    def available_models_provider(_current_model: str | None, _current_provider: str | None):
+        return [
+            AvailableModel(model="claude-sonnet-4-6", provider_name="aicodewith"),
+        ]
+
+    loop, _ = _make_loop(
+        tmp_path,
+        provider_name="custom",
+        provider_switcher=provider_switcher,
+        available_models_provider=available_models_provider,
+    )
+
+    switched = await loop._process_message(
+        InboundMessage(channel="cli", sender_id="u1", chat_id="direct", content="/model claude-sonnet-4-6")
+    )
+
+    assert switched is not None
+    assert "claude-sonnet-4-6" in switched.content
+    assert "provider: `aicodewith`" in switched.content
+    assert switch_calls == [("claude-sonnet-4-6", "aicodewith")]
 
 
 @pytest.mark.asyncio

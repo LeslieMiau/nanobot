@@ -571,3 +571,48 @@
 - Remaining caveats:
   - The repository still contains `nanobot/providers/litellm_provider.py` and older litellm-oriented tests/files, but the active runtime factory path no longer instantiates that provider.
   - The unrelated repository baseline issue in `tests/test_coding_mode.py` (`CodingConfig` import failure) is still present and was not touched in this follow-up.
+
+## Session update - 2026-04-06 (AICodeWith catalog refresh follow-up)
+- New user-directed follow-up:
+  - The user requested a refreshed AICodeWith `/model list` set: keep `gpt-5.4`, replace the Claude entries with `claude-opus-4-6` and `claude-sonnet-4-6`, replace the Gemini entry with `gemini-3.1-pro-preview`, and add `glm-5`, `deepseek-v3.2`, and `kimi-k2.5`.
+  - The user also explicitly asked for both `nanobot gateway` and `nanobot serve` to be restarted after verification.
+- Baseline validation before code changes:
+  - Re-ran `bash ~/.codex/scripts/global-init.sh`; it completed with the same existing repository failure in `tests/test_coding_mode.py` (`ImportError: cannot import name 'CodingConfig' from nanobot.config.schema`).
+  - No new regression was observed before starting this follow-up.
+- Planned implementation notes:
+  - Refresh the AICodeWith curated catalog and README to use the requested bare model names directly in `/model list`.
+  - Make `/model <name>` reuse the currently listed provider binding on exact match so AICodeWith list entries resolve back to `provider: aicodewith`.
+  - Remove the stale cross-model AICodeWith fallback behavior so unsupported `glm` / `deepseek` / `kimi` requests do not silently downgrade to the old GPT models.
+
+## Session update - 2026-04-06 (AICodeWith catalog refresh complete)
+- Completed features:
+  - Updated the AICodeWith curated catalog in `nanobot/providers/catalog.py` to expose `gpt-5.4`, `claude-opus-4-6`, `claude-sonnet-4-6`, `gemini-3.1-pro-preview`, `glm-5`, `deepseek-v3.2`, and `kimi-k2.5`.
+  - Removed the older AICodeWith catalog entries for `gpt-5.3-codex`, `gpt-5.2`, `claude-*4-5`, and `gemini-2.5-*`.
+  - Updated `nanobot/agent/model_selection.py` so `/model <name>` first reuses the currently listed provider binding on exact match, which keeps bare AICodeWith names tied to `provider: aicodewith`.
+  - Tightened `nanobot/providers/custom_provider.py` so AICodeWith requests no longer fall back across model families; unsupported `glm` / `deepseek` / `kimi` requests now surface the real upstream error instead of silently downgrading to an older GPT model.
+  - Refreshed the AICodeWith README examples to use the new bare model names and describe the broader GPT / Claude / Gemini / GLM / DeepSeek / Kimi routing support.
+- Verification:
+  - `./.venv/bin/pytest -q tests/test_custom_provider.py tests/test_model_command.py -k 'not image_confirm'` -> passed (`25 passed, 1 deselected`).
+  - `./.venv/bin/nanobot agent -m '/model list' --no-markdown` -> listed the new AICodeWith entries as:
+    - `gpt-5.4`
+    - `claude-opus-4-6`
+    - `claude-sonnet-4-6`
+    - `gemini-3.1-pro-preview`
+    - `glm-5`
+    - `deepseek-v3.2`
+    - `kimi-k2.5`
+  - `./.venv/bin/nanobot agent -s verify-aicodewith-claude -m '/model claude-sonnet-4-6' --no-markdown` -> switched to `claude-sonnet-4-6` on provider `aicodewith`.
+  - `./.venv/bin/nanobot agent -s verify-aicodewith-glm -m '/model glm-5' --no-markdown` -> switched to `glm-5` on provider `aicodewith`.
+  - Live AICodeWith API checks with the configured local key returned:
+    - `gpt-5.4` -> success (`OK`)
+    - `claude-opus-4-6` -> success (`OK`)
+    - `claude-sonnet-4-6` -> success (`OK`)
+    - `gemini-3.1-pro-preview` -> success (`OK`)
+    - `glm-5` -> `Error: HTTP 400: Settlement blocked`
+    - `deepseek-v3.2` -> `Error: HTTP 400: Settlement blocked`
+    - `kimi-k2.5` -> `Error: HTTP 400: Settlement blocked`
+  - Restarted the live `nanobot:1.0` tmux gateway in place and confirmed startup logs again reached `Telegram bot @kimmydoomyBot connected`.
+  - Restarted the live `nanobot:2.0` serve process in place with the current repo command and revalidated `curl -fsS http://127.0.0.1:8900/health` -> `{"status": "ok"}`.
+- Remaining caveats:
+  - The repository-wide baseline still contains the unrelated `tests/test_coding_mode.py` import failure for missing `CodingConfig`; this follow-up did not touch that separate schema drift.
+  - `glm-5`, `deepseek-v3.2`, and `kimi-k2.5` are now selectable in nanobot and route through AICodeWith correctly, but the current AICodeWith account returns `Settlement blocked` for those three models during live use.

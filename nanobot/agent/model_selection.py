@@ -183,10 +183,13 @@ class ModelSelectionController:
 
     def resolve_model_selection_argument(self, session: Session, arg: str) -> tuple[str, str | None]:
         normalized = arg.strip()
+        options = self.available_models_for_session(session) if self.loop._available_models_provider else []
         if not normalized.isdigit():
+            for option in options:
+                if option.model == normalized:
+                    return option.model, option.provider_name
             return normalized, None
         index = int(normalized)
-        options = self.available_models_for_session(session)
         if index < 1 or index > len(options):
             raise ValueError(f"Model index {index} is out of range. Use `/model list` to inspect available models.")
         option = options[index - 1]

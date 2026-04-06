@@ -2,44 +2,44 @@
   {
     "id": 1,
     "category": "baseline",
-    "description": "Re-anchor the harness from the completed `/model` runtime repair to the follow-up task of removing the remaining LiteLLM runtime fallback.",
+    "description": "Re-anchor the harness from the LiteLLM-removal checkpoint to the follow-up task of refreshing the AICodeWith model catalog and runtime bindings.",
     "steps": [
-      "Record in `PROGRESS.md` that the user explicitly requested the runtime path not use LiteLLM because of the reported vulnerability concern.",
-      "Replace `PLAN.json` so the active follow-up tracks native provider construction rather than the already-completed `/model list` fix.",
-      "Preserve the unrelated `tests/test_coding_mode.py` import failure as an existing repository caveat rather than a new blocker from this provider refactor."
+      "Record in `PROGRESS.md` that the user requested a new AICodeWith model set for `/model list` and post-verification restarts of both `gateway` and `serve`.",
+      "Replace `PLAN.json` so the active follow-up tracks the model-catalog refresh instead of the already-completed LiteLLM removal.",
+      "Preserve the unrelated `tests/test_coding_mode.py` `CodingConfig` import failure as an existing repository caveat during this follow-up."
     ],
     "passes": true
   },
   {
     "id": 2,
-    "category": "providers",
-    "description": "Runtime provider creation and model switching no longer rely on `LiteLLMProvider` for openai-compatible backends.",
+    "category": "catalog",
+    "description": "AICodeWith exposes the requested curated model list in `/model list` using the exact user-facing names.",
     "steps": [
-      "Update `nanobot/providers/factory.py` so the generic fallback constructs native providers instead of `LiteLLMProvider`.",
-      "Keep the existing special cases for `aicodewith`, `custom`, `azure_openai`, `anthropic`, `github_copilot`, `openai_oauth`, and `openai_codex`.",
-      "Preserve current provider selection semantics while removing the LiteLLM instantiation path."
+      "Update `nanobot/providers/catalog.py` so AICodeWith lists `gpt-5.4`, `claude-opus-4-6`, `claude-sonnet-4-6`, `gemini-3.1-pro-preview`, `glm-5`, `deepseek-v3.2`, and `kimi-k2.5`.",
+      "Remove the older `gpt-5.3-codex`, `gpt-5.2`, `claude-*4-5`, and `gemini-2.5-*` AICodeWith catalog entries.",
+      "Refresh the README AICodeWith examples and wording to match the new bare model names."
     ],
     "passes": true
   },
   {
     "id": 3,
-    "category": "tests",
-    "description": "Focused regression coverage proves the runtime factory now uses native providers on the no-LiteLLM path.",
+    "category": "runtime",
+    "description": "Runtime model switching honors the refreshed AICodeWith list without cross-family fallback surprises.",
     "steps": [
-      "Add or update provider-factory tests to assert openai-compatible providers instantiate `OpenAICompatProvider` rather than LiteLLM.",
-      "Keep the existing AICodeWith runtime-provider coverage intact.",
-      "Avoid relying on stale schema fields while updating the targeted tests."
+      "Make `/model <name>` prefer the current available-model binding on exact match so AICodeWith list entries resolve back to `provider: aicodewith`.",
+      "Tighten `nanobot/providers/custom_provider.py` so AICodeWith openai-route requests do not silently fall back from `glm`/`deepseek`/`kimi` to legacy GPT models.",
+      "Keep Claude and Gemini route detection working with the new bare model names."
     ],
     "passes": true
   },
   {
     "id": 4,
     "category": "verification",
-    "description": "The no-LiteLLM follow-up is verified with focused tests and a real runtime switch check.",
+    "description": "The refreshed AICodeWith model set is covered by focused tests, live smoke checks, and service restarts.",
     "steps": [
-      "Run the focused pytest commands that cover the updated factory path.",
-      "Verify a real runtime model switch still routes AICodeWith models correctly after the factory change.",
-      "Record the verification results in `PROGRESS.md` before checkpointing."
+      "Update and run the targeted pytest coverage for catalog, command routing, and custom-provider behavior.",
+      "Use the configured AICodeWith key to live-check the requested models through the current runtime path.",
+      "Restart both `nanobot gateway` and `nanobot serve` after verification and record the evidence in `PROGRESS.md`."
     ],
     "passes": true
   }
