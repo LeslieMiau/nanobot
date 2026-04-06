@@ -329,9 +329,14 @@ class TelegramChannel(BaseChannel):
     def get_runtime_status(self) -> dict[str, Any]:
         status = dict(self._runtime_status)
         status["polling_task_alive"] = self._is_polling_task_alive()
+        status["probe_failures"] = self._probe_failures
         return status
 
     def _get_polling_task(self) -> asyncio.Task | None:
+        # NOTE: Accesses private python-telegram-bot internals.  The attribute
+        # name may change across library versions (_polling_task or the
+        # name-mangled _Updater__polling_task).  Pin the PTB version and
+        # re-check after upgrades.
         updater = getattr(self._app, "updater", None)
         if updater is None:
             return None
@@ -491,7 +496,8 @@ class TelegramChannel(BaseChannel):
         callback = self.restart_callback
         if callback is None:
             logger.error("Telegram requested process restart without a restart callback: {}", reason)
-            return
+            logger.error("No restart callback available; forcing exit so supervisor can restart the process")
+            os._exit(1)
         result = callback(reason)
         if inspect.isawaitable(result):
             await result

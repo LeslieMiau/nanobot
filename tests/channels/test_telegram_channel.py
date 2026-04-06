@@ -622,6 +622,35 @@ async def test_watchdog_exhaustion_requests_process_restart(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
+async def test_watchdog_probe_failures_accumulate_and_trigger_restart(monkeypatch) -> None:
+    """Probe failure counter reaches threshold and triggers channel restart."""
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            watchdog_error_threshold=3,
+        ),
+        MessageBus(),
+    )
+    channel._running = True
+    restart = AsyncMock()
+
+    monkeypatch.setattr(channel, "_restart_application", restart)
+    monkeypatch.setattr("nanobot.channels.telegram.asyncio.sleep", AsyncMock(return_value=None))
+
+    # Accumulate probe failures below threshold — should not restart
+    channel._probe_failures = 2
+    await channel._recover_if_needed("probe", probe_before_restart=False)
+    restart.assert_not_awaited()
+
+    # Hit the threshold — should restart
+    channel._probe_failures = 3
+    await channel._recover_if_needed("probe", probe_before_restart=False)
+    restart.assert_awaited_once_with("probe-watchdog")
+
+
+@pytest.mark.asyncio
 async def test_stop_is_idempotent() -> None:
     channel = TelegramChannel(
         TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),

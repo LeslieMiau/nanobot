@@ -67,13 +67,22 @@ class _GatewayInstanceLock:
         self.path = path
         self._fh = None
 
-    def acquire(self) -> None:
+    def acquire(self, retries: int = 2, retry_delay: float = 0.5) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._fh = self.path.open("a+", encoding="utf-8")
-        try:
-            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise RuntimeError("gateway lock is already held") from exc
+        last_exc: BlockingIOError | None = None
+        for attempt in range(1 + retries):
+            try:
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                last_exc = None
+                break
+            except BlockingIOError as exc:
+                last_exc = exc
+                if attempt < retries:
+                    import time
+                    time.sleep(retry_delay)
+        if last_exc is not None:
+            raise RuntimeError("gateway lock is already held") from last_exc
         self._fh.seek(0)
         self._fh.truncate()
         self._fh.write(str(os.getpid()))
