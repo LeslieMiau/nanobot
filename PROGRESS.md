@@ -159,3 +159,25 @@
 - Remaining blockers / follow-up:
   - The next action is not code work; Xcode on this Mac needs an Apple ID/team so automatic signing can create a development identity and provisioning profile.
   - Once Xcode has a usable team, rerun the device build with `-allowProvisioningUpdates`, then continue with app install, manual `/chat`, and Siri acceptance.
+
+## Session update - 2026-04-06 (real-device smoke routing and ATS fix)
+- Completed verification:
+  - Xcode account and personal team are now usable enough for command-line signing when `DEVELOPMENT_TEAM=3G64PGKF3G` is passed explicitly.
+  - A direct device build succeeded earlier with automatic provisioning, so the main real-device blocker is no longer project signing setup.
+  - The developer certificate trust gate on the iPhone was cleared; the previous `xctrunner` launch denial was resolved at the device trust level.
+  - Direct backend probes confirmed `/chat` is reachable from the Mac on both `http://127.0.0.1:8900` and `http://192.168.3.79:8900` with the configured API key.
+- New findings:
+  - The original real-device UI smoke test was incorrectly seeding `VOICEBRIDGE_UI_TEST_BASE_URL` to `http://127.0.0.1:8900`. That works in the simulator, but on a physical iPhone it points back to the phone itself rather than the Mac running nanobot.
+  - The app target had no explicit `NSAppTransportSecurity` allowance, so even after switching the test to a LAN host (`http://192.168.3.79:8900`), the device path had a likely ATS cleartext-HTTP blocker.
+  - `ios/VoiceBridge/XcodeUITests/VoiceBridgeUITests.swift` now reads the host-side `VOICEBRIDGE_TEST_BASE_URL` environment variable so device runs can inject a Mac-reachable backend URL instead of hard-coding loopback.
+  - `ios/VoiceBridge/project.yml` now adds `INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: YES` so the v1 self-hosted bridge can reach the local nanobot HTTP endpoint during device testing.
+  - `ios/VoiceBridge/Docs/siri-validation.md` now documents the real-device smoke requirement: never use `127.0.0.1` for a physical iPhone, and inject the workstation-reachable host instead.
+- Verification:
+  - `cd ios/VoiceBridge && xcodegen generate` -> passed after the ATS/project updates.
+  - `curl -X POST http://127.0.0.1:8900/chat ...` -> returned a live nanobot reply.
+  - `curl -X POST http://192.168.3.79:8900/chat ...` -> returned a live nanobot reply.
+- Remaining blockers / follow-up:
+  - The physical iPhone temporarily disappeared from `xcodebuild -showdestinations` during the re-run, so the updated real-device smoke test could not be completed in this round.
+  - The next step is to reconnect the iPhone, confirm it appears again as an available destination, and rerun:
+    - `VOICEBRIDGE_TEST_BASE_URL='http://192.168.3.79:8900' xcodebuild ... test -only-testing:VoiceBridgeUITests/testManualSmokeFlowDisplaysBackendReply`
+  - After that manual `/chat` smoke passes on-device, rerun the Siri/App Intent device acceptance path.

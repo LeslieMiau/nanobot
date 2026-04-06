@@ -15,14 +15,15 @@
     "passed": false
   },
   "started_at": "2026-04-05T13:56:28+08:00",
-  "last_updated": "2026-04-05T18:36:30+08:00",
+  "last_updated": "2026-04-06T14:27:00+08:00",
   "planner_done": true,
   "user_confirmed": true,
   "latest_round_passed_contract": true,
   "blocking_issues": [
     "Free-form String inline phrases such as '问纳博特 {prompt}' fail real App Shortcuts metadata validation; v1 currently supports only the follow-up Siri phrase.",
     "Simulator Siri can execute built-in commands such as 'Open Safari', but the supported custom Voice Bridge phrase still does not trigger AskBridgeIntent in UI tests; simulator Siri cannot replace real-device Siri acceptance.",
-    "A physical iPhone destination is now visible and paired, but Xcode on this Mac has no logged-in developer account, code-signing identity, or provisioning profiles, so real-device builds fail before install.",
-    "End-to-end Siri speech acceptance is blocked until Xcode can select a development team and automatic signing can create the required app identity/profile."
+    "The real-device UI smoke test originally hard-coded 127.0.0.1 as the backend URL; device runs now require a host-provided LAN base URL such as http://192.168.3.79:8900.",
+    "The iOS app now needs ATS allowance for the self-hosted HTTP nanobot endpoint; this was patched, regenerated, and still needs final real-device rerun.",
+    "The physical iPhone disappeared from Xcode destinations during the latest rerun, so end-to-end device smoke and Siri acceptance remain blocked on reconnecting the device to this Mac."
   ]
 }

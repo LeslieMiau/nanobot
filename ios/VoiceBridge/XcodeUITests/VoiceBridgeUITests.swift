@@ -3,9 +3,14 @@ import XCTest
 @MainActor
 final class VoiceBridgeUITests: XCTestCase {
     private let apiKey = "nb-3b7d4b91132c9bb850c2646f92860dc8"
+    private let defaultBaseURL = "http://127.0.0.1:8900"
 
     override func setUpWithError() throws {
         continueAfterFailure = false
+    }
+
+    private var configuredBaseURL: String {
+        ProcessInfo.processInfo.environment["VOICEBRIDGE_TEST_BASE_URL"] ?? defaultBaseURL
     }
 
     func testManualSmokeFlowDisplaysBackendReply() {
@@ -13,7 +18,7 @@ final class VoiceBridgeUITests: XCTestCase {
         app.launchEnvironment["VOICEBRIDGE_UI_TEST_MODE"] = "1"
         app.launchEnvironment["VOICEBRIDGE_UI_TEST_RESET_CONFIG"] = "1"
         app.launchEnvironment["VOICEBRIDGE_UI_TEST_RESET_INTENT_RESULT"] = "1"
-        app.launchEnvironment["VOICEBRIDGE_UI_TEST_BASE_URL"] = "http://127.0.0.1:8900"
+        app.launchEnvironment["VOICEBRIDGE_UI_TEST_BASE_URL"] = configuredBaseURL
         app.launchEnvironment["VOICEBRIDGE_UI_TEST_API_KEY"] = apiKey
         app.launch()
 
@@ -42,7 +47,7 @@ final class VoiceBridgeUITests: XCTestCase {
         app.launchEnvironment["VOICEBRIDGE_UI_TEST_MODE"] = "1"
         app.launchEnvironment["VOICEBRIDGE_UI_TEST_RESET_CONFIG"] = "1"
         app.launchEnvironment["VOICEBRIDGE_UI_TEST_RESET_INTENT_RESULT"] = "1"
-        app.launchEnvironment["VOICEBRIDGE_UI_TEST_BASE_URL"] = "http://127.0.0.1:8900"
+        app.launchEnvironment["VOICEBRIDGE_UI_TEST_BASE_URL"] = configuredBaseURL
         app.launchEnvironment["VOICEBRIDGE_UI_TEST_API_KEY"] = apiKey
         app.launch()
 
