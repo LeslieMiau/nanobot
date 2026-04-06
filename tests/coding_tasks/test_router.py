@@ -1,8 +1,12 @@
 from pathlib import Path
 
+from nanobot.coding_tasks.manager import CodexWorkerManager
+from nanobot.coding_tasks.policy import CodingTaskPolicy
 from nanobot.coding_tasks.repo_resolver import RepoRefResolver
 from nanobot.coding_tasks.router import (
     ParsedCodingTaskRequest,
+    _format_task_list,
+    _format_task_status,
     detect_coding_task_intent,
     extract_coding_task_slots,
     is_explicit_coding_entry,
@@ -11,6 +15,7 @@ from nanobot.coding_tasks.router import (
     resolve_repo_ref,
     validate_repo_path,
 )
+from nanobot.coding_tasks.store import CodingTaskStore
 
 
 def test_parse_start_coding_request_with_inline_path_and_goal() -> None:
@@ -132,3 +137,81 @@ def test_detect_coding_task_intent_accepts_structured_fields_with_alias_resolver
         "开始编程\n仓库: codex-remote\n目标: 设置 icon 换一个",
         repo_resolver=resolver,
     ) is True
+
+
+def test_format_task_list_shows_plan_progress_tags(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    policy = CodingTaskPolicy(manager)
+
+    repo_running = tmp_path / "repo-running"
+    repo_running.mkdir()
+    (repo_running / "PLAN.json").write_text(
+        '[{"id": 1, "passes": true}, {"id": 2, "passes": true}, {"id": 3, "passes": false}, {"id": 4, "passes": false}]',
+        encoding="utf-8",
+    )
+    task_running = manager.create_task(
+        repo_path=str(repo_running),
+        goal="Make status clearer for Telegram users",
+        metadata={"origin_channel": "telegram", "origin_chat_id": "chat-1"},
+    )
+    manager.mark_starting(task_running.id, summary="Boot")
+    manager.mark_running(task_running.id, summary="Working")
+
+    repo_done = tmp_path / "repo-done"
+    repo_done.mkdir()
+    (repo_done / "PLAN.json").write_text(
+        '[{"id": 1, "passes": true}, {"id": 2, "passes": true}]',
+        encoding="utf-8",
+    )
+    task_done = manager.create_task(
+        repo_path=str(repo_done),
+        goal="Finish progress copy cleanup",
+        metadata={"origin_channel": "telegram", "origin_chat_id": "chat-1"},
+    )
+    manager.mark_starting(task_done.id, summary="Boot")
+    manager.mark_waiting_user(task_done.id, summary="Review ready")
+
+    content = _format_task_list(policy, "telegram", "chat-1", manager)
+
+    assert "**当前编程任务列表**" in content
+    assert "`repo-running`" in content
+    assert "[███░░░] 2/4" in content
+    assert "`repo-done`" in content
+    assert "✅ 完成" in content
+
+
+def test_format_task_status_shows_plan_features_and_overflow_note(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    task = manager.create_task(repo_path=str(repo), goal="Improve coding task visibility")
+    task = manager.mark_starting(task.id, summary="Boot")
+    task = manager.mark_running(task.id, summary="Working")
+
+    plan_features = [
+        {
+            "id": index + 1,
+            "description": f"Feature {index + 1} improves the coding task report output",
+            "passes": index < 4,
+        }
+        for index in range(16)
+    ]
+
+    content = _format_task_status(
+        task,
+        report_summary="Updated task summaries and plan visibility",
+        plan_features=plan_features,
+    )
+
+    assert "**当前编程任务状态** · `repo`" in content
+    assert "**PLAN 进度**: " in content
+    assert "4/16 项" in content
+    assert "✅ 1. Feature 1 improves the coding task report output" in content
+    assert "⬜ 10. Feature 10 improves the coding task report output" in content
+    assert "Feature 11 improves the coding task report output" not in content
+    assert "... 及其他 6 项" in content

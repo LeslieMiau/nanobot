@@ -145,9 +145,9 @@ def build_waiting_user_report(task: CodingTask) -> str:
 
 
 def _base_task_report(title: str, task: CodingTask) -> list[str]:
+    repo_name = repo_display_name(task)
     lines = [
-        title,
-        f"**仓库**: `{repo_display_name(task)}`",
+        f"{title} · `{repo_name}`",
         f"**目标**: {task.goal}",
     ]
     if task.branch_name:

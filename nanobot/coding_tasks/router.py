@@ -11,7 +11,7 @@ from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.coding_tasks.harness import detect_repo_harness
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.policy import CodingTaskPolicy
-from nanobot.coding_tasks.progress import CodexProgressMonitor
+from nanobot.coding_tasks.progress import CodexProgressMonitor, summarize_plan_progress
 from nanobot.coding_tasks.repo_resolver import RepoRefResolver
 from nanobot.coding_tasks.reporting import (
     build_completion_report,
@@ -422,7 +422,7 @@ def _make_control_handler(
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=_format_task_list(policy, msg.channel, msg.chat_id, manager),
+                content=_format_task_list(policy, msg.channel, msg.chat_id, manager, monitor=monitor),
             )
 
         indexed_task = None
@@ -462,6 +462,7 @@ def _make_control_handler(
                 content = _format_task_status(
                     task,
                     report_summary=report.summary if report else "",
+                    plan_features=report.plan_features if report else None,
                     recoverable=task.id in {item.id for item in manager.recoverable_tasks()},
                 )
             return OutboundMessage(
@@ -626,7 +627,14 @@ def _make_control_handler(
     return _handle_control
 
 
-def _format_task_list(policy: CodingTaskPolicy, channel: str, chat_id: str, manager: CodexWorkerManager) -> str:
+def _format_task_list(
+    policy: CodingTaskPolicy,
+    channel: str,
+    chat_id: str,
+    manager: CodexWorkerManager,
+    *,
+    monitor: CodexProgressMonitor | None = None,
+) -> str:
     tasks = policy.tasks_for_origin(channel, chat_id)
     if not tasks:
         return (
@@ -636,18 +644,35 @@ def _format_task_list(policy: CodingTaskPolicy, channel: str, chat_id: str, mana
     lines = ["**当前编程任务列表**"]
     for index, task in enumerate(tasks, start=1):
         repo_name = repo_display_name(task)
-        goal = _truncate_line(task.goal, limit=28)
-        lines.append(
-            f"{index}. **{task.status}** · `{repo_name}` · {goal}"
-        )
+        goal = _truncate_line(task.goal, limit=40)
+        pp = summarize_plan_progress(task.repo_path) if task.repo_path else None
+        if pp and pp.total:
+            if pp.is_complete:
+                progress_tag = "✅ 完成"
+            else:
+                bar = _progress_bar(pp.completed, pp.total)
+                progress_tag = f"[{bar}] {pp.completed}/{pp.total}"
+        else:
+            progress_tag = ""
+        entry = f"{index}. **{task.status}** · `{repo_name}` · {goal}"
+        if progress_tag:
+            entry += f" · {progress_tag}"
+        lines.append(entry)
     lines.append("使用 `/coding status 2`、`/coding pause 2`、`/coding resume 2`、`/coding stop 2` 操作指定任务。")
     return "\n".join(lines)
 
 
-def _format_task_status(task, *, report_summary: str = "", note: str = "当前编程任务状态", recoverable: bool | None = None) -> str:
+def _format_task_status(
+    task,
+    *,
+    report_summary: str = "",
+    note: str = "当前编程任务状态",
+    recoverable: bool | None = None,
+    plan_features: list[dict] | None = None,
+) -> str:
+    repo_name = repo_display_name(task)
     lines = [
-        f"**{note}**",
-        f"**仓库**: `{repo_display_name(task)}`",
+        f"**{note}** · `{repo_name}`",
         f"**状态**: {task.status}",
         f"**目标**: {task.goal}",
     ]
@@ -657,9 +682,22 @@ def _format_task_status(task, *, report_summary: str = "", note: str = "当前�
         lines.append(f"**最近提交**: {recent_commit}")
     if latest_note := task.metadata.get("latest_note"):
         lines.append(f"**最近记录**: {latest_note}")
-    progress = _truncate_line(task.last_progress_summary or report_summary, limit=160)
+    progress = _truncate_line(task.last_progress_summary or report_summary, limit=300)
     if progress:
         lines.append(f"**最近进展**: {progress}")
+    if plan_features:
+        completed = sum(1 for f in plan_features if f.get("passes"))
+        total = len(plan_features)
+        bar = _progress_bar(completed, total)
+        lines.append(f"**PLAN 进度**: {bar} {completed}/{total} 项")
+        max_display = 10 if total > 15 else total
+        for i, feat in enumerate(plan_features[:max_display]):
+            icon = "✅" if feat.get("passes") else "⬜"
+            label = feat.get("description") or f"Feature {feat.get('id', i + 1)}"
+            label = _truncate_line(label, limit=60)
+            lines.append(f"{icon} {i + 1}. {label}")
+        if total > max_display:
+            lines.append(f"... 及其他 {total - max_display} 项")
     if recoverable:
         lines.append("**可恢复**: 是")
     return "\n".join(lines)
@@ -685,6 +723,13 @@ def _format_simple_action_response(title: str, task) -> str:
             f"**目标**: {task.goal}",
         ]
     )
+
+
+def _progress_bar(completed: int, total: int, *, width: int = 6) -> str:
+    if total <= 0:
+        return "░" * width
+    filled = round(completed / total * width)
+    return "█" * filled + "░" * (width - filled)
 
 
 def _truncate_line(text: str, *, limit: int) -> str:

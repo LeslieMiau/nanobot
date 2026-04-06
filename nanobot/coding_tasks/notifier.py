@@ -25,10 +25,12 @@ class CodingTaskNotifier:
         send_callback: Callable[[OutboundMessage], Awaitable[None]],
         *,
         throttle_s: int = 30,
+        running_throttle_s: int = 120,
     ) -> None:
         self.manager = manager
         self.send_callback = send_callback
         self.throttle_s = throttle_s
+        self.running_throttle_s = running_throttle_s
         self._last_sent_at: dict[str, float] = {}
         self._last_sent_signature: dict[str, tuple[str, str]] = {}
 
@@ -49,7 +51,8 @@ class CodingTaskNotifier:
         last_at = self._last_sent_at.get(task_id, 0.0)
         if last_signature == signature:
             return False
-        if last_at and now - last_at < self.throttle_s:
+        effective_throttle = self.running_throttle_s if task.status == "running" else self.throttle_s
+        if last_at and now - last_at < effective_throttle:
             return False
 
         await self.send_callback(
@@ -69,7 +72,7 @@ class CodingTaskNotifier:
         if task.status == "starting":
             return self._build_start_notification(task)
         if task.status == "running":
-            return ""
+            return self._build_running_notification(task, report)
         return ""
 
     def _build_start_notification(self, task) -> str:
@@ -81,6 +84,28 @@ class CodingTaskNotifier:
                 f"**目标**: {goal}",
             ]
         )
+
+    def _build_running_notification(self, task, report: TaskProgressReport) -> str:
+        repo_name = repo_display_name(task)
+        lines = [f"**编程进行中** · `{repo_name}`"]
+        if report.plan_progress.total:
+            pp = report.plan_progress
+            bar = _progress_bar(pp.completed, pp.total)
+            lines.append(f"**进度**: {bar} {pp.completed}/{pp.total} 项")
+        detail = report.latest_note or report.live_output or ""
+        if detail:
+            lines.append(f"**最近**: {_truncate_line(detail, limit=200)}")
+        if not report.plan_progress.total and not detail:
+            return ""
+        return "\n".join(lines)
+
+
+def _progress_bar(completed: int, total: int, *, width: int = 6) -> str:
+    if total <= 0:
+        return "░" * width
+    filled = round(completed / total * width)
+    return "█" * filled + "░" * (width - filled)
+
 
 def _truncate_line(text: str, *, limit: int) -> str:
     compact = " ".join(text.split())

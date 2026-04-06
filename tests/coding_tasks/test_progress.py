@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import subprocess
 
@@ -121,6 +122,29 @@ def test_build_task_progress_report_combines_harness_and_pane_output(tmp_path: P
     assert "已完成 2/3 项，剩余 1 项" in report.summary
     assert "最近记录: Fixed second thing" in report.summary
     assert "当前输出: Running pytest tests/coding_tasks" in report.summary
+
+
+def test_build_task_progress_report_includes_raw_plan_features(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "PROGRESS.md").write_text(
+        "## Session update - 1\n- Added task detail\n",
+        encoding="utf-8",
+    )
+    features = [
+        {"id": 1, "description": "Show progress in list", "passes": True},
+        {"id": 2, "description": "Expand plan details in status", "passes": False},
+    ]
+    (repo / "PLAN.json").write_text(
+        json.dumps(features, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    report = build_task_progress_report(repo, "Running pytest\n")
+
+    assert report.plan_features == features
+    assert report.plan_features[0]["description"] == "Show progress in list"
+    assert report.plan_features[1]["passes"] is False
 
 
 def test_build_task_progress_report_summarizes_codex_json_events(tmp_path: Path) -> None:
