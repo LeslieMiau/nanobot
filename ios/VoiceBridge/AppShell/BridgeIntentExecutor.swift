@@ -15,8 +15,14 @@ public struct BridgeIntentExecutor {
         session: siriSession
     )
 
-    public static func execute(prompt: String) async throws -> BridgeResponse {
-        try await runtime.send(prompt: prompt)
+    public static func execute(prompt: String, sessionId: String) async throws -> BridgeResponse {
+        try await runtime.send(
+            prompt: prompt,
+            speaker: "siri-iphone",
+            sourcePlatform: .siri,
+            sourceDeviceType: .phone,
+            sessionId: sessionId
+        )
     }
 
     public static func fallbackMessage(for error: Error) -> String {

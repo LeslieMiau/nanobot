@@ -7,6 +7,13 @@ public struct NanobotBackend: BridgeBackend, Sendable {
     private struct ChatPayload: Codable {
         let text: String
         let speaker: String
+        let sessionId: String
+
+        enum CodingKeys: String, CodingKey {
+            case text
+            case speaker
+            case sessionId = "session_id"
+        }
     }
 
     private struct ChatResponse: Decodable {
@@ -79,7 +86,13 @@ public struct NanobotBackend: BridgeBackend, Sendable {
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         urlRequest.setValue("Bearer \(try config.validatedAPIKey())", forHTTPHeaderField: "Authorization")
-        urlRequest.httpBody = try jsonEncoder.encode(ChatPayload(text: request.prompt, speaker: request.speaker))
+        urlRequest.httpBody = try jsonEncoder.encode(
+            ChatPayload(
+                text: request.prompt,
+                speaker: request.speaker,
+                sessionId: request.sessionId
+            )
+        )
         return urlRequest
     }
 }

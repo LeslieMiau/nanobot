@@ -18,7 +18,7 @@ final class MockURLSession: URLSessioning, @unchecked Sendable {
 
 struct NanobotBackendTests {
     @Test
-    func encodesChatRequestWithSpeakerAndBearerToken() async throws {
+    func encodesChatRequestWithSpeakerSessionAndBearerToken() async throws {
         let session = MockURLSession(
             nextResult: .success((
                 Data(#"{"reply":"你好。","end_conversation":false}"#.utf8),
@@ -58,6 +58,7 @@ struct NanobotBackendTests {
         ) as? [String: String]
         #expect(payload?["text"] == "你好")
         #expect(payload?["speaker"] == "siri-iphone")
+        #expect(payload?["session_id"] == "session-1")
     }
 
     @Test

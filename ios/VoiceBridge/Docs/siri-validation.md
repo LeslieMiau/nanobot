@@ -14,6 +14,8 @@ Only `iPhone Siri` is part of the v1 pass condition.
 
 - Missing prompt should trigger a spoken follow-up question: `你想问纳博特什么？`
 - Successful replies should be spoken back to the user
+- After each reply, Siri should continue the same session by asking `还想继续问什么？想结束就说结束。`
+- The same Siri run should reuse one `session_id` for all turns until the user says a local exit phrase or the backend returns `end_conversation=true`
 - Missing config, auth failures, timeout, or offline states should produce actionable spoken errors
 
 ## Simulator findings

@@ -306,3 +306,31 @@
 - Harness note:
   - `PLAN.json` was intentionally left unchanged in this session.
   - The current remaining plan item is the older iPhone Siri App Intent one-shot phrase task, while this session was a user-directed HomePod + Shortcuts delivery pass with explicitly different scope.
+
+## Session update - 2026-04-06 (iPhone Siri multi-turn voice loop)
+- User-directed scope:
+  - The user explicitly re-opened the iPhone Siri route and asked for two outcomes:
+    - keep the same Siri run alive for multi-turn conversation
+    - make Siri actually read the backend reply aloud
+- Implemented changes:
+  - Updated `ios/VoiceBridge/AppShell/AskBridgeIntent.swift` so the Siri intent now:
+    - runs with `openAppWhenRun = false`
+    - accepts an optional prompt
+    - requests the first question interactively when the invocation phrase has no inline text
+    - loops inside a single `perform()` call using `requestValue(...)`
+    - speaks each backend reply and then asks `还想继续问什么？想结束就说结束。`
+    - exits cleanly on local exit phrases such as `结束` / `退出` / `再见` / `不用了`
+  - Updated `ios/VoiceBridge/AppShell/BridgeIntentExecutor.swift` so the Siri path can pass a caller-owned `sessionId` into the shared bridge runtime.
+  - Updated `ios/VoiceBridge/Sources/BridgeCore/NanobotBackend.swift` so Voice Bridge now sends `session_id` to `/chat` in addition to `text` and `speaker`.
+  - Added `BridgeConversationControl` helpers in `ios/VoiceBridge/Sources/BridgeCore/BridgeResponse.swift` for prompt normalization, exit phrase detection, and follow-up dialog generation.
+  - Updated `ios/VoiceBridge/Docs/siri-validation.md` to document the new iPhone Siri multi-turn expectation and the single-run `session_id` reuse contract.
+- Verification:
+  - `cd ios/VoiceBridge && swift test` -> passed (`11` tests), including:
+    - `BridgeConversationControlTests`
+    - updated `NanobotBackendTests` asserting `session_id` is encoded into `/chat`
+  - `xcodebuild -project ios/VoiceBridge/VoiceBridge.xcodeproj -scheme VoiceBridge -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build` -> passed
+- Notes / remaining validation:
+  - This session verified the App Intent multi-turn path at compile/build level, not on a physical iPhone.
+  - A real-device spoken Siri run is still needed to confirm the new loop behaves correctly in Siri runtime and that spoken replies sound natural on-device.
+- Harness note:
+  - `PLAN.json` was left unchanged again because this is user-directed follow-up scope beyond the original one-shot Voice Bridge v1 plan entries.
