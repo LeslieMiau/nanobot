@@ -9,7 +9,7 @@
         "Confirm current repo status and test baseline",
         "Record initial implementation scope and constraints"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F002",
@@ -18,7 +18,7 @@
         "Reproduce tests/agent/test_git_store.py::TestInit::test_init_creates_git_dir",
         "Make GitStore work without assuming dulwich is installed"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F003",
@@ -27,7 +27,7 @@
         "Run tests/agent/test_git_store.py",
         "Confirm init, log, diff, and revert behaviors still pass"
       ],
-      "passes": false
+      "passes": true
     },
     {
       "id": "F004",

@@ -1,9 +1,8 @@
-"""Git-backed version control for memory files, using dulwich."""
+"""Git-backed version control for memory files."""
 
 from __future__ import annotations
 
-import io
-import time
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +26,9 @@ class CommitInfo:
 class GitStore:
     """Git-backed version control for memory files."""
 
+    _AUTHOR_NAME = "nanobot"
+    _AUTHOR_EMAIL = "nanobot@dream"
+
     def __init__(self, workspace: Path, tracked_files: list[str]):
         self._workspace = workspace
         self._tracked_files = tracked_files
@@ -47,30 +49,19 @@ class GitStore:
             return False
 
         try:
-            from dulwich import porcelain
+            self._run_git("init")
 
-            porcelain.init(str(self._workspace))
-
-            # Write .gitignore
             gitignore = self._workspace / ".gitignore"
             gitignore.write_text(self._build_gitignore(), encoding="utf-8")
 
-            # Ensure tracked files exist (touch them if missing) so the initial
-            # commit has something to track.
             for rel in self._tracked_files:
                 p = self._workspace / rel
                 p.parent.mkdir(parents=True, exist_ok=True)
                 if not p.exists():
                     p.write_text("", encoding="utf-8")
 
-            # Initial commit
-            porcelain.add(str(self._workspace), paths=[".gitignore"] + self._tracked_files)
-            porcelain.commit(
-                str(self._workspace),
-                message=b"init: nanobot memory store",
-                author=b"nanobot <nanobot@dream>",
-                committer=b"nanobot <nanobot@dream>",
-            )
+            self._run_git("add", "--", ".gitignore", *self._tracked_files)
+            self._commit_tracked("init: nanobot memory store")
             logger.info("Git store initialized at {}", self._workspace)
             return True
         except Exception:
@@ -88,25 +79,12 @@ class GitStore:
             return None
 
         try:
-            from dulwich import porcelain
-
-            # .gitignore excludes everything except tracked files,
-            # so any staged/unstaged change must be in our files.
-            st = porcelain.status(str(self._workspace))
-            if not st.unstaged and not any(st.staged.values()):
+            if not self._has_tracked_changes():
                 return None
 
-            msg_bytes = message.encode("utf-8") if isinstance(message, str) else message
-            porcelain.add(str(self._workspace), paths=self._tracked_files)
-            sha_bytes = porcelain.commit(
-                str(self._workspace),
-                message=msg_bytes,
-                author=b"nanobot <nanobot@dream>",
-                committer=b"nanobot <nanobot@dream>",
-            )
-            if sha_bytes is None:
-                return None
-            sha = sha_bytes.hex()[:8]
+            self._run_git("add", "--", *self._tracked_files)
+            self._commit_tracked(message)
+            sha = self._current_short_sha()
             logger.debug("Git auto-commit: {} ({})", sha, message)
             return sha
         except Exception:
@@ -118,22 +96,9 @@ class GitStore:
     def _resolve_sha(self, short_sha: str) -> bytes | None:
         """Resolve a short SHA prefix to the full SHA bytes."""
         try:
-            from dulwich.repo import Repo
-
-            with Repo(str(self._workspace)) as repo:
-                try:
-                    sha = repo.refs[b"HEAD"]
-                except KeyError:
-                    return None
-
-                while sha:
-                    if sha.hex().startswith(short_sha):
-                        return sha
-                    commit = repo[sha]
-                    if commit.type_name != b"commit":
-                        break
-                    sha = commit.parents[0] if commit.parents else None
-            return None
+            result = self._run_git("rev-parse", f"{short_sha}^{{commit}}")
+            resolved = result.stdout.strip()
+            return bytes.fromhex(resolved) if resolved else None
         except Exception:
             return None
 
@@ -160,32 +125,24 @@ class GitStore:
             return []
 
         try:
-            from dulwich.repo import Repo
-
             entries: list[CommitInfo] = []
-            with Repo(str(self._workspace)) as repo:
-                try:
-                    head = repo.refs[b"HEAD"]
-                except KeyError:
-                    return []
-
-                sha = head
-                while sha and len(entries) < max_entries:
-                    commit = repo[sha]
-                    if commit.type_name != b"commit":
-                        break
-                    ts = time.strftime(
-                        "%Y-%m-%d %H:%M",
-                        time.localtime(commit.commit_time),
-                    )
-                    msg = commit.message.decode("utf-8", errors="replace").strip()
-                    entries.append(CommitInfo(
-                        sha=sha.hex()[:8],
-                        message=msg,
-                        timestamp=ts,
-                    ))
-                    sha = commit.parents[0] if commit.parents else None
-
+            result = self._run_git(
+                "log",
+                f"-n{max_entries}",
+                "--date=format:%Y-%m-%d %H:%M",
+                "--pretty=format:%H%x1f%s%x1f%ad",
+                "--",
+                *self._tracked_files,
+            )
+            for line in result.stdout.splitlines():
+                if not line.strip():
+                    continue
+                sha, msg, ts = line.split("\x1f")
+                entries.append(CommitInfo(
+                    sha=sha[:8],
+                    message=msg.strip(),
+                    timestamp=ts.strip(),
+                ))
             return entries
         except Exception:
             logger.warning("Git log failed")
@@ -197,21 +154,16 @@ class GitStore:
             return ""
 
         try:
-            from dulwich import porcelain
-
-            full1 = self._resolve_sha(sha1)
-            full2 = self._resolve_sha(sha2)
-            if not full1 or not full2:
+            if not self._resolve_sha(sha1) or not self._resolve_sha(sha2):
                 return ""
-
-            out = io.BytesIO()
-            porcelain.diff(
-                str(self._workspace),
-                commit=full1,
-                commit2=full2,
-                outstream=out,
+            result = self._run_git(
+                "diff",
+                sha1,
+                sha2,
+                "--",
+                *self._tracked_files,
             )
-            return out.getvalue().decode("utf-8", errors="replace")
+            return result.stdout
         except Exception:
             logger.warning("Git diff_commits failed")
             return ""
@@ -249,59 +201,75 @@ class GitStore:
             return None
 
         try:
-            from dulwich.repo import Repo
-
-            full_sha = self._resolve_sha(commit)
-            if not full_sha:
+            if not self._resolve_sha(commit):
                 logger.warning("Git revert: SHA not found: {}", commit)
                 return None
+            parent = self._parent_of(commit)
+            if not parent:
+                logger.warning("Git revert: cannot revert root commit {}", commit)
+                return None
 
-            with Repo(str(self._workspace)) as repo:
-                commit_obj = repo[full_sha]
-                if commit_obj.type_name != b"commit":
-                    return None
-
-                if not commit_obj.parents:
-                    logger.warning("Git revert: cannot revert root commit {}", commit)
-                    return None
-
-                # Use the parent's tree — this undoes the commit's changes
-                parent_obj = repo[commit_obj.parents[0]]
-                tree = repo[parent_obj.tree]
-
-                restored: list[str] = []
-                for filepath in self._tracked_files:
-                    content = self._read_blob_from_tree(repo, tree, filepath)
-                    if content is not None:
-                        dest = self._workspace / filepath
-                        dest.write_text(content, encoding="utf-8")
-                        restored.append(filepath)
+            restored = False
+            for filepath in self._tracked_files:
+                content = self._show_file_at_commit(parent, filepath)
+                dest = self._workspace / filepath
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                if content is None:
+                    if dest.exists():
+                        dest.unlink()
+                        restored = True
+                    continue
+                dest.write_text(content, encoding="utf-8")
+                restored = True
 
             if not restored:
                 return None
 
-            # Commit the restored state
-            msg = f"revert: undo {commit}"
-            return self.auto_commit(msg)
+            return self.auto_commit(f"revert: undo {commit}")
         except Exception:
             logger.warning("Git revert failed for {}", commit)
             return None
 
-    @staticmethod
-    def _read_blob_from_tree(repo, tree, filepath: str) -> str | None:
-        """Read a blob's content from a tree object by walking path parts."""
-        parts = Path(filepath).parts
-        current = tree
-        for part in parts:
-            try:
-                entry = current[part.encode()]
-            except KeyError:
-                return None
-            obj = repo[entry[1]]
-            if obj.type_name == b"blob":
-                return obj.data.decode("utf-8", errors="replace")
-            if obj.type_name == b"tree":
-                current = obj
-            else:
-                return None
-        return None
+    def _run_git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=self._workspace,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def _commit_tracked(self, message: str) -> None:
+        self._run_git(
+            "-c",
+            f"user.name={self._AUTHOR_NAME}",
+            "-c",
+            f"user.email={self._AUTHOR_EMAIL}",
+            "commit",
+            "--author",
+            f"{self._AUTHOR_NAME} <{self._AUTHOR_EMAIL}>",
+            "-m",
+            message,
+        )
+
+    def _current_short_sha(self) -> str:
+        result = self._run_git("rev-parse", "--short=8", "HEAD")
+        return result.stdout.strip()
+
+    def _has_tracked_changes(self) -> bool:
+        result = self._run_git("status", "--porcelain", "--", *self._tracked_files)
+        return bool(result.stdout.strip())
+
+    def _parent_of(self, short_sha: str) -> str | None:
+        result = self._run_git("rev-list", "--parents", "-n", "1", short_sha)
+        parts = result.stdout.strip().split()
+        if len(parts) < 2:
+            return None
+        return parts[1]
+
+    def _show_file_at_commit(self, commit: str, filepath: str) -> str | None:
+        try:
+            result = self._run_git("show", f"{commit}:{filepath}")
+            return result.stdout
+        except Exception:
+            return None
