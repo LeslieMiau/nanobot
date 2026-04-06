@@ -23,7 +23,7 @@ public enum BridgeConversationControl {
     public static let initialPromptDialog = "你想问纳博特什么？"
     public static let followUpPromptSuffix = "还想继续问什么？想结束就说结束。"
     public static let maxSiriTurnCount = 6
-    public static let turnLimitSuffix = "这轮先到这里。想继续的话，请再次说使用纳博特。"
+    public static let turnLimitSuffix = "这轮先到这里。想继续的话，请再次说让纳博特回答。"
     public static let localExitPhrases: Set<String> = [
         "结束",
         "退出",

@@ -6,9 +6,9 @@ Only `iPhone Siri` is part of the v1 pass condition.
 
 ## Supported phrases
 
-- `嘿 Siri，使用纳博特`
 - `嘿 Siri，在纳博特中提问`
 - `嘿 Siri，让纳博特回答`
+- `嘿 Siri，和纳博特对话`
 
 ## Expected behavior
 
@@ -16,14 +16,15 @@ Only `iPhone Siri` is part of the v1 pass condition.
 - Successful replies should be spoken back to the user
 - After each reply, Siri should continue the same session by asking `还想继续问什么？想结束就说结束。`
 - The same Siri run should reuse one `session_id` for all turns until the user says a local exit phrase or the backend returns `end_conversation=true`
-- The current Siri implementation supports up to 6 turns per invocation; after the last supported turn it should say `这轮先到这里。想继续的话，请再次说使用纳博特。`
+- The current Siri implementation supports up to 6 turns per invocation; after the last supported turn it should say `这轮先到这里。想继续的话，请再次说让纳博特回答。`
 - Missing config, auth failures, timeout, or offline states should produce actionable spoken errors
 
 ## Simulator findings
 
 - `XCUISiriService` on the iOS 18.6 simulator can trigger built-in Siri actions. A control probe using `Open Safari` reliably brought Safari to the foreground.
 - The simulator also still passes the manual app smoke path: the Voice Bridge app can launch, send a manual prompt to `/chat`, and render a live backend reply.
-- The supported two-step Siri phrase `使用纳博特` followed by `你好` did not execute `AskBridgeIntent` in simulator UI tests. The app's persisted intent-result probe stayed at `No Siri intent recorded`.
+- The earlier trigger phrase `使用纳博特` is no longer shipped because Siri can interpret it as a generic app-launch utterance instead of executing the shortcut.
+- The supported two-step Siri phrase still cannot be proven in simulator UI tests. The app's persisted intent-result probe stayed at `No Siri intent recorded`.
 - Treat the simulator as useful for Siri control probes and manual `/chat` smoke only. It is not a substitute for real-device Siri acceptance of the custom Voice Bridge invocation.
 
 ## Real-device UI smoke note
@@ -41,7 +42,7 @@ Only `iPhone Siri` is part of the v1 pass condition.
 - A real-device manual smoke test now passes end-to-end: the installed app can call `nanobot /chat` and render the reply on the connected iPhone.
 - A real-device Siri control probe using the built-in phrase `Open Safari` also passes under `XCUISiriService`, so XCTest still has working Siri automation on the physical device.
 - The custom Voice Bridge Siri phrase still does **not** execute `AskBridgeIntent` under XCTest automation on the physical device:
-  - `使用纳博特` followed by `你好` leaves `settings.lastIntentOutcome` at `No Siri intent recorded`
+  - `让纳博特回答` followed by `你好` leaves `settings.lastIntentOutcome` at `No Siri intent recorded`
   - no new Voice Bridge-triggered `/chat` request is observed for that automated run
 - Waiting after app launch, refreshing App Shortcut parameters on startup, and moving the app to the background before the Siri step did not change that result.
 - Treat this as an XCTest automation boundary, not a proof that the product is broken on-device. The remaining acceptance step is a manual spoken Siri run on the physical iPhone.

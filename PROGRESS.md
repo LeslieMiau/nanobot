@@ -674,3 +674,26 @@
 - Remaining acceptance gap:
   - XCTest still cannot prove custom Siri App Shortcut execution end-to-end on this device, so the final acceptance remains a manual spoken Siri run on the iPhone.
   - The backend/session evidence says the previous failure happened before the second request left Siri; this repair specifically targets that follow-up collection path.
+
+## Session update - 2026-04-06 (Siri trigger phrase ambiguity repair)
+- User-reported regression:
+  - The spoken phrase `嘿 Siri，使用纳博特` was opening the app directly instead of executing the App Shortcut intent.
+- Diagnosis:
+  - The installed metadata still exported a valid `AskBridgeIntent` shortcut, but the phrase family centered on `使用${applicationName}` is too close to a generic app-launch utterance.
+  - The app bundle display name is confirmed as `纳博特`, so this was not a display-name mismatch.
+  - App Intents metadata export also confirmed the framework requires every shortcut phrase to include `${applicationName}`; fully literal phrases are rejected.
+- Completed changes:
+  - Updated `ios/VoiceBridge/AppShell/VoiceBridgeShortcuts.swift` to remove the ambiguous `使用${applicationName}` phrase.
+  - The shipped phrases are now:
+    - `在纳博特中提问`
+    - `让纳博特回答`
+    - `和纳博特对话`
+  - Updated the Siri turn-limit spoken guidance to say `请再次说让纳博特回答` so it matches the shipped shortcut.
+  - Updated `ios/VoiceBridge/Docs/siri-validation.md` to record that `使用纳博特` is no longer shipped because Siri can interpret it as an app-launch request.
+- Verification:
+  - `cd ios/VoiceBridge && swift test` -> passed
+  - `xcodebuild -project ios/VoiceBridge/VoiceBridge.xcodeproj -scheme VoiceBridge -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build` -> passed
+  - `xcodebuild -project ios/VoiceBridge/VoiceBridge.xcodeproj -scheme VoiceBridge -destination 'id=00008130-001924C20E98001C' -allowProvisioningUpdates DEVELOPMENT_TEAM=3G64PGKF3G build` -> passed
+  - `xcrun devicectl device install app --device '00008130-001924C20E98001C' .../VoiceBridge.app` -> installed updated app
+- Device note:
+  - A post-install foreground launch attempt was blocked because the iPhone was locked, so the final metadata refresh still requires the device to be unlocked once after install.

@@ -29,7 +29,7 @@ struct BridgeConversationControlTests {
         #expect(!BridgeConversationControl.shouldEndLocally("继续说这个问题"))
         #expect(
             BridgeConversationControl.turnLimitDialog(after: "你好。")
-                == "你好 这轮先到这里。想继续的话，请再次说使用纳博特。"
+                == "你好 这轮先到这里。想继续的话，请再次说让纳博特回答。"
         )
         #expect(
             BridgeConversationControl.turnLimitDialog(after: " ")
