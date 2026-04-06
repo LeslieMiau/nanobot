@@ -40,6 +40,19 @@ def create_provider(config: Config, model: str | None = None, provider_name: str
             response_verbosity=config.agents.defaults.response_verbosity,
         )
 
+    if provider_name == "aicodewith":
+        from nanobot.providers.custom_provider import CustomProvider
+
+        if not p or not p.api_key:
+            raise ProviderConfigError(
+                f"Provider `{provider_name}` is not configured for model `{model}`."
+            )
+        return CustomProvider(
+            api_key=p.api_key,
+            api_base=config.get_api_base(model) or "https://api.aicodewith.com",
+            default_model=model,
+        )
+
     if provider_name == "custom":
         from nanobot.providers.custom_provider import CustomProvider
 

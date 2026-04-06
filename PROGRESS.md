@@ -415,3 +415,34 @@
   - Therefore the screenshot and the backend error can both be true at the same time if the ChatGPT UI is showing a different quota surface/window than the backend codex/responses route nanobot is calling.
 - Harness note:
   - `PLAN.json` remains unchanged because this was a runtime diagnosis step, not product implementation work.
+
+## Session update - 2026-04-06 (AICodeWith provider integration re-anchor)
+- User-directed scope:
+  - The user explicitly redirected the repository away from the prior Voice Bridge harness and asked for `AICodeWith` to be integrated as a usable API-key-based provider in nanobot.
+  - The requested outcome is provider/runtime integration inside nanobot itself, not a setup skill for configuring external Codex installs.
+- Harness re-anchor:
+  - Replaced `PLAN.json` so the active harness now tracks the AICodeWith provider-integration goal instead of the earlier Voice Bridge feature list.
+  - Preserved the older Voice Bridge and OAuth diagnosis history in `PROGRESS.md`; this file remains append-only even though the active plan changed.
+- Baseline before implementation:
+  - Re-ran the standard startup recovery steps for the repo.
+  - `bash ~/.codex/scripts/global-init.sh` still reports the pre-existing unrelated pytest collection failure:
+    - `tests/test_coding_mode.py` -> `ImportError: cannot import name 'CodingConfig' from 'nanobot.config.schema'`
+  - This baseline issue predates the new AICodeWith work and will be tracked as a repository caveat rather than treated as a regression from the provider changes.
+
+## Session update - 2026-04-06 (AICodeWith provider integration complete)
+- Completed features:
+  - Routed named provider `aicodewith` through `CustomProvider` in all three runtime entry points:
+    - CLI startup in `nanobot/cli/commands.py`
+    - SDK/runtime startup in `nanobot/nanobot.py`
+    - provider factory/model switching in `nanobot/providers/factory.py`
+  - Added explicit missing-API-key validation for `aicodewith` in the CLI, SDK, and factory paths so the provider fails clearly instead of silently binding to the wrong backend.
+  - Fixed `nanobot/providers/custom_provider.py` to use the current `nanobot.providers.openai_responses` conversion helpers instead of stale `_convert_messages` / `_convert_tools` imports from `openai_codex_provider`.
+  - Extended AICodeWith model normalization so explicit selections like `aicodewith/gpt-5.4`, `aicodewith/anthropic/claude-sonnet-4-6`, and `aicodewith/google/gemini-2.5-pro` strip the gateway prefix before route dispatch.
+  - Updated `README.md` so AICodeWith is documented as a single-key gateway for GPT/Codex, Claude, and Gemini routes, with nanobot config examples that match the actual implementation.
+  - Added focused tests for CLI provider creation, SDK provider creation, factory creation, AICodeWith prefix normalization, and the existing AICodeWith model-list behavior.
+- Verification:
+  - `.venv/bin/python -m compileall nanobot/cli/commands.py nanobot/nanobot.py nanobot/providers/custom_provider.py nanobot/providers/factory.py nanobot/providers/registry.py` -> passed.
+  - `.venv/bin/pytest -q tests/cli/test_commands.py::test_make_provider_uses_aicodewith_custom_backend tests/test_nanobot_facade.py::test_sdk_make_provider_uses_aicodewith_custom_backend tests/test_provider_factory.py::test_create_provider_uses_custom_provider_for_aicodewith tests/test_custom_provider.py::test_aicodewith_base_and_route_normalization tests/test_model_command.py::test_build_available_models_skips_speculative_gateway_catalog_entries` -> passed (`5 passed`).
+- Remaining caveats:
+  - The repo-wide baseline still has the unrelated collection error in `tests/test_coding_mode.py` for missing `CodingConfig`, so I did not claim a full-suite clean pass.
+  - The AICodeWith work itself now has targeted runtime coverage and no known failing tests in the touched path set.

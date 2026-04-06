@@ -146,6 +146,33 @@ def test_sdk_make_provider_uses_github_copilot_backend():
     assert provider.__class__.__name__ == "GitHubCopilotProvider"
 
 
+def test_sdk_make_provider_uses_aicodewith_custom_backend():
+    from nanobot.config.schema import Config
+    from nanobot.nanobot import _make_provider
+
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "aicodewith",
+                    "model": "gpt-5.4",
+                }
+            },
+            "providers": {
+                "aicodewith": {
+                    "apiKey": "sk-acw-test",
+                }
+            },
+        }
+    )
+
+    with patch("nanobot.providers.custom_provider.AsyncOpenAI"):
+        provider = _make_provider(config)
+
+    assert provider.__class__.__name__ == "CustomProvider"
+    assert provider.get_default_model() == "gpt-5.4"
+
+
 @pytest.mark.asyncio
 async def test_run_custom_session_key(tmp_path):
     from nanobot.bus.events import OutboundMessage

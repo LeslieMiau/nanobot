@@ -124,7 +124,7 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         default_api_base="https://aihubmix.com/v1",
         strip_model_prefix=True,
     ),
-    # AICodewith: Anthropic-compatible gateway, keys start with "sk-acw-"
+    # AICodewith: multi-route gateway (GPT/Codex, Claude, Gemini), keys start with "sk-acw-"
     ProviderSpec(
         name="aicodewith",
         keywords=("aicodewith",),

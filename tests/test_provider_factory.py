@@ -2,6 +2,7 @@ import pytest
 
 from nanobot.config.schema import Config
 from nanobot.providers.catalog import build_available_models
+from nanobot.providers.custom_provider import CustomProvider
 from nanobot.providers.factory import ProviderConfigError, create_provider, resolve_switch_selection
 from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
@@ -70,6 +71,33 @@ def test_create_provider_uses_openai_codex_for_default_config() -> None:
     assert isinstance(provider, OpenAICodexProvider)
     assert provider.get_default_model() == "gpt-5.1"
     assert provider.response_verbosity == "low"
+
+
+def test_create_provider_uses_custom_provider_for_aicodewith() -> None:
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "aicodewith",
+                    "model": "gpt-5.4",
+                }
+            },
+            "providers": {
+                "aicodewith": {
+                    "apiKey": "sk-acw-test",
+                }
+            },
+        }
+    )
+
+    provider = create_provider(
+        config,
+        model="gpt-5.4",
+        provider_name="aicodewith",
+    )
+
+    assert isinstance(provider, CustomProvider)
+    assert provider.get_default_model() == "gpt-5.4"
 
 
 def test_build_available_models_uses_openai_codex_for_default_entry() -> None:

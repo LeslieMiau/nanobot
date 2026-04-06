@@ -221,7 +221,7 @@ def test_build_available_models_skips_speculative_gateway_catalog_entries() -> N
         config,
         default_model=config.agents.defaults.model,
         default_provider_name="aicodewith",
-        coding_config=config.agents.defaults.coding,
+        coding_config=getattr(config.agents.defaults, "coding", None),
     )
 
     assert any(model.model == "gpt-5.4" and model.provider_name == "aicodewith" for model in models)

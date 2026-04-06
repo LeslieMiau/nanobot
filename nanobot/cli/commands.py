@@ -580,7 +580,12 @@ def _make_provider(config: Config):
     backend = spec.backend if spec else "openai_compat"
 
     # --- validation ---
-    if backend == "azure_openai":
+    if provider_name == "aicodewith":
+        if not p or not p.api_key:
+            console.print("[red]Error: No API key configured for provider `aicodewith`.[/red]")
+            console.print("Set one in ~/.nanobot/config.json under providers.aicodewith")
+            raise typer.Exit(1)
+    elif backend == "azure_openai":
         if not p or not p.api_key or not p.api_base:
             console.print("[red]Error: Azure OpenAI requires api_key and api_base.[/red]")
             console.print("Set them in ~/.nanobot/config.json under providers.azure_openai section")
@@ -601,6 +606,14 @@ def _make_provider(config: Config):
     elif backend == "openai_codex":
         from nanobot.providers.openai_codex_provider import OpenAICodexProvider
         provider = OpenAICodexProvider(default_model=model)
+    elif provider_name == "aicodewith":
+        from nanobot.providers.custom_provider import CustomProvider
+
+        provider = CustomProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model) or "https://api.aicodewith.com",
+            default_model=model,
+        )
     elif backend == "azure_openai":
         from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
         provider = AzureOpenAIProvider(

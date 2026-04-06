@@ -58,6 +58,15 @@ def test_aicodewith_base_and_route_normalization() -> None:
     assert provider._route_kind_for_model("gpt-5.2") == "openai"
     assert provider._normalize_model_for_route("anthropic/claude-sonnet-4-6", "anthropic") == "claude-sonnet-4-6"
     assert provider._normalize_model_for_route("google/gemini-2.5-pro", "gemini") == "gemini-2.5-pro"
+    assert provider._normalize_model_for_route("aicodewith/gpt-5.4", "openai") == "gpt-5.4"
+    assert (
+        provider._normalize_model_for_route("aicodewith/anthropic/claude-sonnet-4-6", "anthropic")
+        == "claude-sonnet-4-6"
+    )
+    assert (
+        provider._normalize_model_for_route("aicodewith/google/gemini-2.5-pro", "gemini")
+        == "gemini-2.5-pro"
+    )
 
 
 def test_parse_anthropic_payload_with_tool_use() -> None:

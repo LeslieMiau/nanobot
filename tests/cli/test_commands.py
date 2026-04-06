@@ -370,6 +370,30 @@ def test_make_provider_uses_github_copilot_backend():
     assert provider.__class__.__name__ == "GitHubCopilotProvider"
 
 
+def test_make_provider_uses_aicodewith_custom_backend():
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "aicodewith",
+                    "model": "gpt-5.4",
+                }
+            },
+            "providers": {
+                "aicodewith": {
+                    "apiKey": "sk-acw-test",
+                }
+            },
+        }
+    )
+
+    with patch("nanobot.providers.custom_provider.AsyncOpenAI"):
+        provider = _make_provider(config)
+
+    assert provider.__class__.__name__ == "CustomProvider"
+    assert provider.get_default_model() == "gpt-5.4"
+
+
 def test_github_copilot_provider_strips_prefixed_model_name():
     from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
 

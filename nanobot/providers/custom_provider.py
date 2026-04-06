@@ -14,7 +14,7 @@ import json_repair
 from openai import AsyncOpenAI
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
-from nanobot.providers.openai_codex_provider import _convert_messages, _convert_tools
+from nanobot.providers.openai_responses import convert_messages, convert_tools
 
 _AICODEWITH_HOST_KEYWORDS = ("aicodewith.com", "with7.cn")
 _AICODEWITH_DEFAULT_ORIGIN = "https://api.aicodewith.com"
@@ -153,17 +153,24 @@ class CustomProvider(LLMProvider):
 
     @staticmethod
     def _normalize_model_for_route(model: str, route: str) -> str:
-        if "/" not in model:
-            return model
-        prefix, rest = model.split("/", 1)
-        normalized_prefix = prefix.lower().replace("-", "_")
-        if route == "anthropic" and normalized_prefix in {"anthropic", "claude"}:
-            return rest
-        if route == "gemini" and normalized_prefix in {"gemini", "google"}:
-            return rest
-        if route == "openai" and normalized_prefix in {"openai", "chatgpt"}:
-            return rest
-        return model
+        normalized = model
+        while "/" in normalized:
+            prefix, rest = normalized.split("/", 1)
+            normalized_prefix = prefix.lower().replace("-", "_")
+            if normalized_prefix == "aicodewith":
+                normalized = rest
+                continue
+            if route == "anthropic" and normalized_prefix in {"anthropic", "claude"}:
+                normalized = rest
+                continue
+            if route == "gemini" and normalized_prefix in {"gemini", "google"}:
+                normalized = rest
+                continue
+            if route == "openai" and normalized_prefix in {"openai", "chatgpt"}:
+                normalized = rest
+                continue
+            break
+        return normalized
 
     def _base_origin(self) -> str:
         base = (self.api_base or "").rstrip("/")
@@ -333,7 +340,7 @@ class CustomProvider(LLMProvider):
         if not self.api_base:
             raise RuntimeError("Responses API requires api_base.")
 
-        system_prompt, input_items = _convert_messages(self._sanitize_empty_content(messages))
+        system_prompt, input_items = convert_messages(self._sanitize_empty_content(messages))
         body: dict[str, Any] = {
             "model": model,
             "store": False,
@@ -345,7 +352,7 @@ class CustomProvider(LLMProvider):
         if reasoning_effort:
             body["reasoning"] = {"effort": reasoning_effort}
         if tools:
-            body["tools"] = _convert_tools(tools)
+            body["tools"] = convert_tools(tools)
             body["tool_choice"] = "auto"
             body["parallel_tool_calls"] = True
 

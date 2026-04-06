@@ -1002,6 +1002,7 @@ Config file: `~/.nanobot/config.json`
 | `minimax` | LLM (MiniMax direct) | [platform.minimaxi.com](https://platform.minimaxi.com) |
 | `gemini` | LLM (Gemini direct) | [aistudio.google.com](https://aistudio.google.com) |
 | `aihubmix` | LLM (API gateway, access to all models) | [aihubmix.com](https://aihubmix.com) |
+| `aicodewith` | LLM gateway (GPT/Codex, Claude, Gemini via one key) | [docs.aicodewith.com](https://docs.aicodewith.com/) |
 | `siliconflow` | LLM (SiliconFlow/硅基流动) | [siliconflow.cn](https://siliconflow.cn) |
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
@@ -1141,6 +1142,71 @@ nanobot agent -m "Hello!"
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
+
+</details>
+
+<details>
+<summary><b>AICodeWith</b></summary>
+
+Use one AICodeWith API key to route GPT/Codex, Claude, and Gemini-family models through nanobot.
+
+**1. Add provider config** (partial — merge into `~/.nanobot/config.json`):
+```json
+{
+  "providers": {
+    "aicodewith": {
+      "apiKey": "sk-acw-..."
+    }
+  }
+}
+```
+
+`apiBase` is optional; if omitted nanobot uses `https://api.aicodewith.com`.
+
+**2. Pick a default model**:
+
+GPT / Codex-style route:
+```json
+{
+  "agents": {
+    "defaults": {
+      "provider": "aicodewith",
+      "model": "gpt-5.4"
+    }
+  }
+}
+```
+
+Claude route:
+```json
+{
+  "agents": {
+    "defaults": {
+      "provider": "aicodewith",
+      "model": "anthropic/claude-sonnet-4-5"
+    }
+  }
+}
+```
+
+Gemini route:
+```json
+{
+  "agents": {
+    "defaults": {
+      "provider": "aicodewith",
+      "model": "gemini/gemini-2.5-pro"
+    }
+  }
+}
+```
+
+You can also switch explicitly at runtime with provider-prefixed model names such as `aicodewith/gpt-5.4` or `aicodewith/anthropic/claude-sonnet-4-5`.
+
+**3. Chat:**
+```bash
+nanobot agent -m "Hello!"
+```
 
 </details>
 
