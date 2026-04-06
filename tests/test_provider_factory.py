@@ -4,6 +4,7 @@ from nanobot.config.schema import Config
 from nanobot.providers.catalog import build_available_models
 from nanobot.providers.custom_provider import CustomProvider
 from nanobot.providers.factory import ProviderConfigError, create_provider, resolve_switch_selection
+from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.openai_codex_provider import OpenAICodexProvider
 
 
@@ -98,6 +99,81 @@ def test_create_provider_uses_custom_provider_for_aicodewith() -> None:
 
     assert isinstance(provider, CustomProvider)
     assert provider.get_default_model() == "gpt-5.4"
+
+
+def test_create_provider_uses_native_openai_compat_provider_for_openrouter() -> None:
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "openrouter",
+                    "model": "openai/gpt-4.1",
+                }
+            },
+            "providers": {
+                "openrouter": {
+                    "apiKey": "sk-or-test",
+                }
+            },
+        }
+    )
+
+    provider = create_provider(
+        config,
+        model="openai/gpt-4.1",
+        provider_name="openrouter",
+    )
+
+    assert isinstance(provider, OpenAICompatProvider)
+    assert provider.get_default_model() == "openai/gpt-4.1"
+
+
+def test_create_provider_uses_openai_oauth_provider() -> None:
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "openai-oauth",
+                    "model": "openai-oauth/gpt-5.4",
+                }
+            }
+        }
+    )
+
+    provider = create_provider(
+        config,
+        model="openai-oauth/gpt-5.4",
+        provider_name="openai_oauth",
+    )
+
+    assert provider.__class__.__name__ == "OpenAIOAuthProvider"
+    assert provider.get_default_model() == "openai-oauth/gpt-5.4"
+
+
+def test_create_provider_uses_github_copilot_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = Config.model_validate(
+        {
+            "agents": {
+                "defaults": {
+                    "provider": "github-copilot",
+                    "model": "github-copilot/gpt-4.1",
+                }
+            }
+        }
+    )
+    monkeypatch.setattr(
+        "nanobot.providers.factory._github_copilot_is_authenticated",
+        lambda: True,
+    )
+
+    provider = create_provider(
+        config,
+        model="github-copilot/gpt-4.1",
+        provider_name="github_copilot",
+    )
+
+    assert provider.__class__.__name__ == "GitHubCopilotProvider"
+    assert provider.get_default_model() == "github-copilot/gpt-4.1"
 
 
 def test_build_available_models_uses_openai_codex_for_default_entry() -> None:

@@ -2,55 +2,44 @@
   {
     "id": 1,
     "category": "baseline",
-    "description": "Re-anchor the harness to the live `/model list` runtime regression reported after the AICodeWith catalog landed.",
+    "description": "Re-anchor the harness from the completed `/model` runtime repair to the follow-up task of removing the remaining LiteLLM runtime fallback.",
     "steps": [
-      "Record in `PROGRESS.md` that the running gateway treated `/model list` as a model switch instead of a listing request.",
-      "Replace `PLAN.json` so the active follow-up tracks the runtime `/model` repair rather than the already-completed catalog exposure work.",
-      "Preserve the unrelated `tests/test_coding_mode.py` import failure as an existing repository caveat rather than a new blocker introduced by this fix."
+      "Record in `PROGRESS.md` that the user explicitly requested the runtime path not use LiteLLM because of the reported vulnerability concern.",
+      "Replace `PLAN.json` so the active follow-up tracks native provider construction rather than the already-completed `/model list` fix.",
+      "Preserve the unrelated `tests/test_coding_mode.py` import failure as an existing repository caveat rather than a new blocker from this provider refactor."
     ],
     "passes": true
   },
   {
     "id": 2,
-    "category": "runtime",
-    "description": "The active AgentLoop runtime exposes session-scoped model-selection state instead of relying on the stale config-writing `/model` command.",
+    "category": "providers",
+    "description": "Runtime provider creation and model switching no longer rely on `LiteLLMProvider` for openai-compatible backends.",
     "steps": [
-      "Add the missing model-selection runtime fields and helper methods needed by the current slash-command path.",
-      "Restore per-session model/provider persistence and reset behavior without writing `list` or `reset` into the global config.",
-      "Ensure system-message and session-key-override flows reuse the stored session selection."
+      "Update `nanobot/providers/factory.py` so the generic fallback constructs native providers instead of `LiteLLMProvider`.",
+      "Keep the existing special cases for `aicodewith`, `custom`, `azure_openai`, `anthropic`, `github_copilot`, `openai_oauth`, and `openai_codex`.",
+      "Preserve current provider selection semantics while removing the LiteLLM instantiation path."
     ],
     "passes": true
   },
   {
     "id": 3,
-    "category": "commands",
-    "description": "The builtin `/model` command supports listing, index selection, reset, and provider-aware switching on the runtime path used by `nanobot gateway`.",
+    "category": "tests",
+    "description": "Focused regression coverage proves the runtime factory now uses native providers on the no-LiteLLM path.",
     "steps": [
-      "Replace the old builtin `/model` implementation that blindly wrote `ctx.args` into `config.agents.defaults.model`.",
-      "Return a formatted available-model list for `/model list` and support `/model <number>` resolution against the listed entries.",
-      "Keep natural-language model switch aliases aligned with the restored runtime model-selection helpers where practical."
+      "Add or update provider-factory tests to assert openai-compatible providers instantiate `OpenAICompatProvider` rather than LiteLLM.",
+      "Keep the existing AICodeWith runtime-provider coverage intact.",
+      "Avoid relying on stale schema fields while updating the targeted tests."
     ],
     "passes": true
   },
   {
     "id": 4,
-    "category": "runtime",
-    "description": "The live runtime entrypoints actually provide provider-switch and available-model callbacks to AgentLoop.",
-    "steps": [
-      "Wire `nanobot gateway`, `nanobot serve`, `nanobot agent`, and the SDK facade through the shared provider-switcher helper.",
-      "Make the available-model callback tolerant of missing optional config fields in the current schema.",
-      "Confirm the runtime list still shows the verified AICodeWith catalog entries."
-    ],
-    "passes": true
-  },
-  {
-    "id": 5,
     "category": "verification",
-    "description": "The `/model` regression fix is validated with focused tests and a live tmux gateway check.",
+    "description": "The no-LiteLLM follow-up is verified with focused tests and a real runtime switch check.",
     "steps": [
-      "Run focused pytest coverage for the restored `/model` behavior and runtime provider-switch wiring.",
-      "Repair the user's polluted `~/.nanobot/config.json` default model after the command-path fix lands.",
-      "Restart the existing tmux gateway and verify a real `/model list` request now shows selectable models instead of switching to model `list`."
+      "Run the focused pytest commands that cover the updated factory path.",
+      "Verify a real runtime model switch still routes AICodeWith models correctly after the factory change.",
+      "Record the verification results in `PROGRESS.md` before checkpointing."
     ],
     "passes": true
   }

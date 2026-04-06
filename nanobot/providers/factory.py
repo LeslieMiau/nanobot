@@ -12,6 +12,7 @@ from nanobot.config.schema import Config
 from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 from nanobot.providers.base import LLMProvider
 from nanobot.providers.openai_codex_provider import OpenAICodexProvider
+from nanobot.providers.openai_compat_provider import OpenAICompatProvider
 from nanobot.providers.registry import PROVIDERS, find_by_name
 
 
@@ -37,7 +38,14 @@ def create_provider(config: Config, model: str | None = None, provider_name: str
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
         return OpenAICodexProvider(
             default_model=model,
-            response_verbosity=config.agents.defaults.response_verbosity,
+        )
+
+    if provider_name == "openai_oauth":
+        from nanobot.providers.openai_oauth_provider import OpenAIOAuthProvider
+
+        return OpenAIOAuthProvider(
+            default_model=model,
+            api_base=config.get_api_base(model),
         )
 
     if provider_name == "aicodewith":
@@ -73,20 +81,33 @@ def create_provider(config: Config, model: str | None = None, provider_name: str
             default_model=model,
         )
 
-    from nanobot.providers.litellm_provider import LiteLLMProvider
-
     spec = find_by_name(provider_name) if provider_name else None
     if provider_name and not model.startswith("bedrock/") and not (p and p.api_key) and not (spec and spec.is_oauth):
         raise ProviderConfigError(
             f"Provider `{provider_name}` is not configured for model `{model}`."
         )
 
-    return LiteLLMProvider(
+    if provider_name == "github_copilot":
+        from nanobot.providers.github_copilot_provider import GitHubCopilotProvider
+
+        return GitHubCopilotProvider(default_model=model)
+
+    if spec and spec.backend == "anthropic":
+        from nanobot.providers.anthropic_provider import AnthropicProvider
+
+        return AnthropicProvider(
+            api_key=p.api_key if p else None,
+            api_base=config.get_api_base(model),
+            default_model=model,
+            extra_headers=p.extra_headers if p else None,
+        )
+
+    return OpenAICompatProvider(
         api_key=p.api_key if p else None,
         api_base=config.get_api_base(model),
         default_model=model,
         extra_headers=p.extra_headers if p else None,
-        provider_name=provider_name,
+        spec=spec,
     )
 
 

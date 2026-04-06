@@ -541,3 +541,33 @@
 - Remaining caveats:
   - The repository-wide baseline still contains the unrelated `tests/test_coding_mode.py` import failure for missing `CodingConfig`; this fix did not attempt to resolve that separate schema drift.
   - `agents.defaults.provider` remains `auto`, and the user's config still has `providers.custom` pointing at the same AICodeWith endpoint, so the default `gpt-5.4` entry still labels as provider `custom` while the catalog-only entries remain labeled `aicodewith`.
+
+## Session update - 2026-04-06 (remove LiteLLM runtime fallback)
+- New user-directed follow-up:
+  - After the `/model` runtime fix landed, the user asked to continue and explicitly rejected using `LiteLLM` because of the reported vulnerability concern.
+  - The remaining scoped target is the runtime provider factory path, not the already-fixed `/model` command behavior.
+- Diagnosis before code changes:
+  - The current AICodeWith default startup path already uses native providers in `nanobot/cli/commands.py` and `nanobot/nanobot.py`.
+  - The remaining `LiteLLMProvider` instantiation path is in `nanobot/providers/factory.py`, which is used for runtime model switching and provider resolution.
+  - The active plan for this follow-up is to replace that fallback with native provider construction while preserving the existing `aicodewith` and other special-case provider routes.
+
+## Session update - 2026-04-06 (remove LiteLLM runtime fallback complete)
+- Completed features:
+  - Replaced the remaining `LiteLLMProvider` fallback in `nanobot/providers/factory.py` with native provider construction.
+  - The runtime factory now explicitly handles:
+    - `openai_codex` via `OpenAICodexProvider`
+    - `openai_oauth` via `OpenAIOAuthProvider`
+    - `aicodewith` and `custom` via `CustomProvider`
+    - `azure_openai` via `AzureOpenAIProvider`
+    - `github_copilot` via `GitHubCopilotProvider`
+    - Anthropic backends via `AnthropicProvider`
+    - all remaining openai-compatible providers via `OpenAICompatProvider`
+  - This keeps the actual runtime model-switch path aligned with the already-native CLI and SDK startup path and removes the last live `LiteLLMProvider` construction point from the provider factory.
+  - Added focused provider-factory regression tests proving the runtime path now instantiates native providers for `openrouter`, `openai_oauth`, and `github_copilot`, while keeping the existing AICodeWith custom-provider assertion intact.
+- Verification:
+  - `.venv/bin/pytest -q tests/test_provider_factory.py::test_create_provider_uses_custom_provider_for_aicodewith tests/test_provider_factory.py::test_create_provider_uses_native_openai_compat_provider_for_openrouter tests/test_provider_factory.py::test_create_provider_uses_openai_oauth_provider tests/test_provider_factory.py::test_create_provider_uses_github_copilot_provider` -> passed (`4 passed`)
+  - `./.venv/bin/nanobot agent -s verify-no-litellm -m '/model 2' --no-markdown` -> switched to `gpt-5.3-codex` on provider `aicodewith`
+  - `./.venv/bin/nanobot agent -s verify-no-litellm -m '/model' --no-markdown` -> confirmed the session-scoped runtime selection persisted as `gpt-5.3-codex` / `aicodewith` after the factory change
+- Remaining caveats:
+  - The repository still contains `nanobot/providers/litellm_provider.py` and older litellm-oriented tests/files, but the active runtime factory path no longer instantiates that provider.
+  - The unrelated repository baseline issue in `tests/test_coding_mode.py` (`CodingConfig` import failure) is still present and was not touched in this follow-up.
