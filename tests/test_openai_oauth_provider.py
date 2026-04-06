@@ -3,6 +3,7 @@ from unittest.mock import patch
 import pytest
 from oauth_cli_kit import OAuthToken
 
+import nanobot.providers.openai_oauth_provider as oauth_provider
 from nanobot.providers.openai_oauth_provider import OpenAIOAuthProvider, _strip_model_prefix
 
 
@@ -15,7 +16,8 @@ def test_strip_model_prefix_supports_hyphen_and_underscore():
 @pytest.mark.asyncio
 async def test_openai_oauth_provider_uses_oauth_token_for_responses_api(monkeypatch):
     monkeypatch.setattr(
-        "nanobot.providers.openai_oauth_provider.get_token",
+        oauth_provider,
+        "get_token",
         lambda provider=None: OAuthToken(
             access="access-token",
             refresh="refresh-token",
@@ -33,7 +35,7 @@ async def test_openai_oauth_provider_uses_oauth_token_for_responses_api(monkeypa
         captured["verify"] = verify
         return "hello from oauth", [], "stop"
 
-    with patch("nanobot.providers.openai_oauth_provider._request_codex", side_effect=fake_request_codex):
+    with patch.object(oauth_provider, "_request_codex", side_effect=fake_request_codex):
         provider = OpenAIOAuthProvider(default_model="openai-oauth/gpt-5.4")
 
         response = await provider.chat(

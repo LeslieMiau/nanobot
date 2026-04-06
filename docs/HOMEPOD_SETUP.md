@@ -5,11 +5,32 @@
 ## 架构
 
 ```
-HomePod → Siri → iPhone 快捷指令 → HTTP POST /v1/voice/ask → Nanobot
+HomePod → Siri → iPhone 快捷指令 → HTTP POST /chat → Nanobot
                                   ← {"reply": "...", "end_conversation": false}
                                   → Speak Text → HomePod 播放
                                   → 循环：继续对话直到 end_conversation=true
 ```
+
+## ClawPod 兼容模式
+
+如果你想沿用 [clawpod](https://github.com/algal/clawpod) 的 Shortcut 结构，nanobot 现在也提供兼容的 `POST /chat`：
+
+```bash
+curl -X POST http://192.168.x.x:8900/chat \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer 你的密钥" \
+  -d '{"text": "你好", "speaker": "Alexis"}'
+# → {"reply": "...", "end_conversation": false}
+```
+
+兼容范围：
+- 请求体：`{"text": "...", "speaker": "..."}`
+- 响应体：`{"reply": "...", "end_conversation": false}`
+- 会话隔离：按 `speaker` 维持会话，与 `clawpod` 习惯一致
+
+重要限制：
+- 这个兼容模式解决的是服务端 bridge 形态，不改变 HomePod 上二次语音输入动作本身的稳定性
+- 如果你照 `clawpod` 文档在快捷指令里继续使用 `Ask for Input` / 循环对话，是否稳定仍取决于 HomePod + iPhone 上的 Shortcut 运行时
 
 ## 第一步：启动 API 服务
 
@@ -41,14 +62,50 @@ tmux new-session -d -s nanobot-api '.venv/bin/nanobot serve -v'
 curl http://192.168.x.x:8900/health
 # → {"status": "ok"}
 
-curl -X POST http://192.168.x.x:8900/v1/voice/ask \
+curl -X POST http://192.168.x.x:8900/chat \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer 你的密钥" \
-  -d '{"text": "你好", "speaker": "test"}'
+  -d '{"text": "你好", "speaker": "Alexis"}'
 # → {"reply": "...", "end_conversation": false}
 ```
 
-## 第二步：在 iPhone 上创建快捷指令
+如果你想按固定节点逐段排查，仓库里也提供了自动诊断脚本：
+
+```bash
+python3 scripts/verify_homepod_e2e.py
+```
+
+它会自动验证：
+- API 监听与 `/health`
+- `/chat` 返回 `reply`
+- `shortcuts run '测试助手'` 是否真正打到服务端
+- 当前库中的 `测试助手` / `纳博特` 是否还是预期动作数
+
+设备侧排查时，可以单独开一个日志观察窗口：
+
+```bash
+python3 scripts/verify_homepod_e2e.py watch --speaker homepod
+```
+
+## 第二步：导入快捷指令
+
+推荐直接使用仓库里已经生成好的快捷指令文件：
+
+- [测试助手](../测试助手.shortcut)：先验证 API 是否可达
+- [纳博特](../纳博特.shortcut)：日常对话入口，使用“口述文本”动作，优先兼容 Siri / HomePod
+- 如果你更想自己搭动作，继续阅读下面的手工步骤
+
+建议顺序：
+
+1. 在 iPhone 上打开仓库页面，先导入 [测试助手](../测试助手.shortcut)
+2. 运行一次，确认会先弹出 reply 文本并朗读返回结果
+3. 删除或重命名旧的交互快捷指令，例如 `问机器人`、`嘿助手`
+4. 再导入 [纳博特](../纳博特.shortcut)
+5. 对 HomePod 说：`嘿 Siri, 运行纳博特`
+
+如果你想完全手工搭建，继续看下面的动作拆解。
+
+## 第三步：在 iPhone 上手工创建快捷指令
 
 > 必须在 **iPhone** 上创建，不是 Mac。HomePod 通过 iPhone 运行快捷指令。
 
@@ -64,25 +121,24 @@ http://192.168.x.x:8900
 
 长按这个动作 → 「重新命名」→ 改名为 `服务器地址`
 
-### 动作 2：要求输入
+### 动作 2：口述文本
 
-搜索「要求输入」，添加。设置：
-- 提示语：`你想问什么？`
-- 输入类型：`文本`
+搜索「口述文本」或「听写文本」，添加。
+如果你的系统里显示英文动作名，则是 `Dictate Text`。
 
 ### 动作 3：获取 URL 内容
 
 搜索「获取 URL 内容」，添加。设置：
 
-- URL 栏：点击输入框 → 选择变量 `服务器地址` → 然后手动追加 `/v1/voice/ask`
-  - 最终显示为：`[服务器地址]/v1/voice/ask`
+- URL 栏：点击输入框 → 选择变量 `服务器地址` → 然后手动追加 `/chat`
+  - 最终显示为：`[服务器地址]/chat`
 - 点击「显示更多」：
   - 方法：`POST`
   - 头部：添加 2 个
     - `Content-Type` → `application/json`
     - `Authorization` → `Bearer 你的密钥`
   - 请求体：`JSON`
-    - 添加字段 `text`（文本）→ 值选择变量 `要求输入的结果`
+    - 添加字段 `text`（文本）→ 值选择变量 `口述文本`
     - 添加字段 `speaker`（文本）→ 值填 `homepod`
 
 ### 动作 4：获取字典值
@@ -97,16 +153,16 @@ http://192.168.x.x:8900
 
 ### 保存
 
-- 快捷指令名称：`问机器人`（纯中文，不含英文）
+- 快捷指令名称：`纳博特`（使用像专有名词的名字，避免 `嘿...`、`问...`、`助手`、`机器人` 这类高冲突词）
 - 点完成
 
 ### 测试
 
-直接点击运行按钮测试。输入"你好"，应该能听到 Nanobot 的回答被朗读出来。
+直接点击运行按钮测试。输入"你好"，应该先看到 reply 弹窗，再听到 Nanobot 的回答被朗读出来。
 
-## 第三步：绑定 HomePod
+## 第四步：绑定 HomePod
 
-### 3.1 启用 Personal Content
+### 4.1 启用 Personal Content
 
 在 iPhone 上：
 1. 打开「家庭」App
@@ -115,13 +171,13 @@ http://192.168.x.x:8900
 4. 启用「个人请求」/ Personal Requests
 5. 选择你的 iPhone 作为设备
 
-### 3.2 对 HomePod 说
+### 4.2 对 HomePod 说
 
 ```
-"嘿 Siri, 运行问机器人"
+"嘿 Siri, 运行纳博特"
 ```
 
-Siri 会问「你想问什么？」，说出你的问题，等待回答。
+Siri 运行快捷指令后，直接按系统的口述流程说出你的问题，等待回答。
 
 ## 进阶：多轮对话版本
 
@@ -137,8 +193,8 @@ Siri 会问「你想问什么？」，说出你的问题，等待回答。
 
 | 问题 | 解决方案 |
 |------|----------|
-| Siri 自己回答了 | 加"运行"前缀："嘿 Siri, **运行**问机器人" |
-| 快捷指令没反应 | 先在 iPhone 上手动运行测试 |
+| Siri 自己回答了 | 删除或重命名旧条目，只保留 `纳博特`，并说："嘿 Siri, **运行**纳博特" |
+| HomePod 只说“好的” | 说明快捷指令已启动，但二次语音输入没传到后续动作；重新导入当前 `纳博特.shortcut`，确保它使用的是“口述文本 / Dictate Text”而不是“要求输入” |
 | 网络请求失败 | 确认 iPhone 和服务器在同一局域网，无 AP 隔离 |
 | HomePod 不触发 | 检查「家庭」App → 个人请求是否已开启 |
 | 401 错误 | 检查 Authorization header 中的 API key |
@@ -146,7 +202,7 @@ Siri 会问「你想问什么？」，说出你的问题，等待回答。
 
 ## API 参考
 
-### POST /v1/voice/ask
+### POST /chat
 
 请求：
 ```json
@@ -157,6 +213,10 @@ Siri 会问「你想问什么？」，说出你的问题，等待回答。
 ```json
 {"reply": "纯文本回答", "end_conversation": false}
 ```
+
+### POST /v1/voice/ask
+
+兼容旧入口，仍可用；快捷指令默认已切到 `/chat`。
 
 ### POST /v1/audio/speech
 

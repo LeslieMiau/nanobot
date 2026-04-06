@@ -1,0 +1,74 @@
+name: VoiceBridge
+options:
+  bundleIdPrefix: com.miau
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: 6.0
+    CURRENT_PROJECT_VERSION: 1
+    MARKETING_VERSION: 0.1.0
+    DEVELOPMENT_ASSET_PATHS: "\"\""
+    VOICEBRIDGE_TEST_BASE_URL: http://127.0.0.1:8900
+targets:
+  BridgeCore:
+    type: framework
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: Sources/BridgeCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.miau.voicebridge.bridgecore
+        GENERATE_INFOPLIST_FILE: YES
+  VoiceBridge:
+    type: application
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: AppShell
+    dependencies:
+      - target: BridgeCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.miau.voicebridge
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: 纳博特
+        INFOPLIST_KEY_NSAppTransportSecurity_NSAllowsArbitraryLoads: YES
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: 用于连接本地 nanobot bridge 服务。
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        CODE_SIGN_STYLE: Automatic
+    scheme:
+      testTargets:
+        - VoiceBridgeTests
+        - VoiceBridgeUITests
+  VoiceBridgeTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: XcodeTests
+    dependencies:
+      - target: BridgeCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.miau.voicebridge.tests
+        GENERATE_INFOPLIST_FILE: YES
+  VoiceBridgeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "18.0"
+    sources:
+      - path: XcodeUITests
+    dependencies:
+      - target: VoiceBridge
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.miau.voicebridge.uitests
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Config/VoiceBridgeUITests-Info.plist

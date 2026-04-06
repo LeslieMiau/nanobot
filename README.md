@@ -364,6 +364,7 @@ Connect nanobot to your favorite chat platform. Want to build your own? See the 
 | **QQ** | App ID + App Secret |
 | **Wecom** | Bot ID + Bot Secret |
 | **Mochat** | Claw token (auto-setup available) |
+| **HomePod + Siri** | iPhone 快捷指令 + Personal Requests ([Setup Guide](./docs/HOMEPOD_SETUP.md)) |
 
 <details>
 <summary><b>Telegram</b> (Recommended)</summary>
@@ -453,6 +454,29 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 
 
 </details>
+
+</details>
+
+<details>
+<summary><b>HomePod + Siri</b></summary>
+
+Use HomePod as a voice entrypoint for nanobot through Siri Shortcuts.
+
+The bundled shortcuts now use the ClawPod-compatible `POST /chat` bridge by default.
+
+Quick links:
+
+- [Setup guide](./docs/HOMEPOD_SETUP.md)
+- [测试助手.shortcut](./测试助手.shortcut) for connectivity checks
+- [纳博特.shortcut](./纳博特.shortcut) as the recommended Siri-facing shortcut
+
+Recommended voice command:
+
+```text
+嘿 Siri, 运行纳博特
+```
+
+Import `测试助手.shortcut` first, confirm it shows the reply on screen and reads it aloud, then delete or rename old interactive shortcuts such as `问机器人` and `嘿助手`, and import `纳博特.shortcut` for daily use.
 
 </details>
 

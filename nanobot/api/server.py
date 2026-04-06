@@ -1,6 +1,6 @@
 """OpenAI-compatible HTTP API server for a fixed nanobot session.
 
-Provides /v1/chat/completions, /v1/models, /v1/voice/ask, and /v1/audio/speech endpoints.
+Provides /v1/chat/completions, /v1/models, /v1/voice/ask, /chat, and /v1/audio/speech endpoints.
 All requests route to a single persistent API session.
 """
 
@@ -267,6 +267,17 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
     })
 
 
+async def handle_clawpod_chat(request: web.Request) -> web.Response:
+    """POST /chat — ClawPod-compatible chat bridge.
+
+    Accepts the same payload shape as ClawPod's Shortcut:
+    {"text": "...", "speaker": "..."}
+
+    Returns {"reply": "...", "end_conversation": false}.
+    """
+    return await handle_voice_ask(request)
+
+
 async def handle_audio_speech(request: web.Request) -> web.Response:
     """POST /v1/audio/speech — text-to-speech endpoint.
 
@@ -357,6 +368,7 @@ def create_app(
     app["session_locks"] = {}  # per-user locks, keyed by session_key
 
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
+    app.router.add_post("/chat", handle_clawpod_chat)
     app.router.add_post("/v1/voice/ask", handle_voice_ask)
     app.router.add_get("/v1/voice/ask", handle_voice_ask)
     app.router.add_post("/v1/audio/speech", handle_audio_speech)

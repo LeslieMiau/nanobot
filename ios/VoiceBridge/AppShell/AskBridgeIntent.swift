@@ -1,0 +1,27 @@
+import AppIntents
+
+struct AskBridgeIntent: AppIntent {
+    static let title: LocalizedStringResource = "使用纳博特"
+    static let description = IntentDescription("通过 Voice Bridge 使用纳博特。")
+
+    @Parameter(title: "Prompt", requestValueDialog: "你想问纳博特什么？")
+    var prompt: String
+
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        do {
+            let response = try await BridgeIntentExecutor.execute(prompt: prompt)
+            BridgeIntentResultStore.saveSuccess(
+                prompt: prompt,
+                spokenText: response.spokenText
+            )
+            return .result(dialog: "\(response.spokenText)")
+        } catch {
+            let message = BridgeIntentExecutor.fallbackMessage(for: error)
+            BridgeIntentResultStore.saveFailure(
+                prompt: prompt,
+                message: message
+            )
+            return .result(dialog: "\(message)")
+        }
+    }
+}

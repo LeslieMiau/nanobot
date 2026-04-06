@@ -6,10 +6,14 @@
 
 实际方案: 生成两个版本 —
   1. 固定问题版（验证 API 连通性）
-  2. 交互版（用 ask + URL 变量拼接）
+  2. 交互版（按 Apple 官方 Web API 模式使用 POST JSON）
+
+两者默认都走 ClawPod 兼容的 `POST /chat`。
 """
 
 import plistlib
+import shutil
+import subprocess
 import uuid
 from pathlib import Path
 
@@ -18,9 +22,10 @@ NANOBOT_HOST = "192.168.3.79"
 NANOBOT_PORT = 8900
 API_KEY = "nb-3b7d4b91132c9bb850c2646f92860dc8"
 SPEAKER = "homepod"
+INTERACTIVE_SHORTCUT_NAME = "纳博特"
 # ============================================================
 
-ENDPOINT = f"http://{NANOBOT_HOST}:{NANOBOT_PORT}/v1/voice/ask"
+ENDPOINT = f"http://{NANOBOT_HOST}:{NANOBOT_PORT}/chat"
 
 
 def _uuid():
@@ -46,12 +51,54 @@ def _simple_text(s):
     return {"Value": {"string": s}, "WFSerializationType": "WFTextTokenString"}
 
 
+def _show_result_action(output_id, output_name):
+    """在屏幕上展示返回文本，避免“执行了但没反应”的假象。"""
+    return {
+        "WFWorkflowActionIdentifier": "is.workflow.actions.showresult",
+        "WFWorkflowActionParameters": {
+            "Text": _text({"0,1": _ref(output_id, output_name)}, "\uFFFC"),
+        },
+    }
+
+
+def _sign_shortcut_file(path: Path) -> bool:
+    """Use macOS shortcuts CLI to produce an importable signed file when available."""
+    shortcuts_cli = shutil.which("shortcuts")
+    if not shortcuts_cli:
+        return False
+
+    signed_path = path.with_name(f"{path.stem}.signed{path.suffix}")
+    try:
+        subprocess.run(
+            [
+                shortcuts_cli,
+                "sign",
+                "--mode",
+                "anyone",
+                "--input",
+                str(path),
+                "--output",
+                str(signed_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.strip()
+        if stderr:
+            print(f"[warn] 签名失败 {path.name}: {stderr}")
+        return False
+
+    path.write_bytes(signed_path.read_bytes())
+    signed_path.unlink(missing_ok=True)
+    return True
+
+
 def build_test_shortcut():
     """固定问题版 — 验证 API 连通性。"""
     url_id = _uuid()
     dict_id = _uuid()
-
-    test_url = f"{ENDPOINT}?text=%E4%BD%A0%E5%A5%BD&speaker={SPEAKER}&key={API_KEY}"
 
     return "测试助手", {
         "WFWorkflowMinimumClientVersion": 900,
@@ -64,12 +111,47 @@ def build_test_shortcut():
         "WFWorkflowOutputContentItemClasses": [],
         "WFWorkflowHasOutputFallback": False,
         "WFWorkflowActions": [
-            # 1. 获取 URL — 纯字符串，零变量
+            # 1. 获取 URL 内容（ClawPod-compatible POST + JSON body）
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
                 "WFWorkflowActionParameters": {
-                    "WFURL": test_url,
-                    "WFHTTPMethod": "GET",
+                    "WFURL": ENDPOINT,
+                    "WFHTTPMethod": "POST",
+                    "WFHTTPBodyType": "JSON",
+                    "WFHTTPHeaders": {
+                        "Value": {
+                            "WFDictionaryFieldValueItems": [
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("Content-Type"),
+                                    "WFValue": _simple_text("application/json"),
+                                },
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("Authorization"),
+                                    "WFValue": _simple_text(f"Bearer {API_KEY}"),
+                                },
+                            ]
+                        },
+                        "WFSerializationType": "WFDictionaryFieldValue",
+                    },
+                    "WFJSONValues": {
+                        "Value": {
+                            "WFDictionaryFieldValueItems": [
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("text"),
+                                    "WFValue": _simple_text("你好"),
+                                },
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("speaker"),
+                                    "WFValue": _simple_text(SPEAKER),
+                                },
+                            ]
+                        },
+                        "WFSerializationType": "WFDictionaryFieldValue",
+                    },
                     "UUID": url_id,
                     "CustomOutputName": "回复",
                 },
@@ -84,7 +166,9 @@ def build_test_shortcut():
                     "CustomOutputName": "回答",
                 },
             },
-            # 3. 朗读
+            # 3. 显示结果，便于人工确认
+            _show_result_action(dict_id, "回答"),
+            # 4. 朗读
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.speaktext",
                 "WFWorkflowActionParameters": {
@@ -102,16 +186,12 @@ def build_test_shortcut():
 
 
 def build_interactive_shortcut():
-    """交互版 — 要求输入 + URL 编码 + GET 请求。"""
+    """交互版 — Dictate Text + POST JSON + 显示结果 + 朗读 reply。"""
     ask_id = _uuid()
-    encode_id = _uuid()
-    text_id = _uuid()
     url_id = _uuid()
     dict_id = _uuid()
 
-    base_url = f"{ENDPOINT}?speaker={SPEAKER}&key={API_KEY}&text="
-
-    return "呼叫助手", {
+    return INTERACTIVE_SHORTCUT_NAME, {
         "WFWorkflowMinimumClientVersion": 900,
         "WFWorkflowMinimumClientVersionString": "900",
         "WFWorkflowIcon": {
@@ -122,48 +202,60 @@ def build_interactive_shortcut():
         "WFWorkflowOutputContentItemClasses": [],
         "WFWorkflowHasOutputFallback": False,
         "WFWorkflowActions": [
-            # 1. 要求输入
+            # 1. 口述文本，更适合 Siri / HomePod 语音路径
             {
-                "WFWorkflowActionIdentifier": "is.workflow.actions.ask",
+                "WFWorkflowActionIdentifier": "is.workflow.actions.dictatetext",
                 "WFWorkflowActionParameters": {
-                    "WFAskActionPrompt": "你想问什么？",
-                    "WFInputType": "Text",
                     "UUID": ask_id,
                     "CustomOutputName": "问题",
                 },
             },
-            # 2. URL 编码用户输入
-            {
-                "WFWorkflowActionIdentifier": "is.workflow.actions.urlencode",
-                "WFWorkflowActionParameters": {
-                    "WFInput": _text({"0,1": _ref(ask_id, "问题")}, "\uFFFC"),
-                    "UUID": encode_id,
-                    "CustomOutputName": "编码问题",
-                },
-            },
-            # 3. 文本：拼接 base_url + 编码后的问题
-            {
-                "WFWorkflowActionIdentifier": "is.workflow.actions.gettext",
-                "WFWorkflowActionParameters": {
-                    "WFTextActionText": _text(
-                        {f"{len(base_url)},1": _ref(encode_id, "编码问题")},
-                        base_url + "\uFFFC",
-                    ),
-                    "UUID": text_id,
-                    "CustomOutputName": "完整地址",
-                },
-            },
-            # 4. 获取 URL 内容
+            # 2. 获取 URL 内容（Apple 官方 Web API 模式：POST + JSON body）
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
                 "WFWorkflowActionParameters": {
-                    "WFURL": _text({"0,1": _ref(text_id, "完整地址")}, "\uFFFC"),
-                    "WFHTTPMethod": "GET",
+                    "WFURL": ENDPOINT,
+                    "WFHTTPMethod": "POST",
+                    "WFHTTPBodyType": "JSON",
+                    "WFHTTPHeaders": {
+                        "Value": {
+                            "WFDictionaryFieldValueItems": [
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("Content-Type"),
+                                    "WFValue": _simple_text("application/json"),
+                                },
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("Authorization"),
+                                    "WFValue": _simple_text(f"Bearer {API_KEY}"),
+                                },
+                            ]
+                        },
+                        "WFSerializationType": "WFDictionaryFieldValue",
+                    },
+                    "WFJSONValues": {
+                        "Value": {
+                            "WFDictionaryFieldValueItems": [
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("text"),
+                                    "WFValue": _text({"0,1": _ref(ask_id, "问题")}, "\uFFFC"),
+                                },
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("speaker"),
+                                    "WFValue": _simple_text(SPEAKER),
+                                },
+                            ]
+                        },
+                        "WFSerializationType": "WFDictionaryFieldValue",
+                    },
                     "UUID": url_id,
                     "CustomOutputName": "回复",
                 },
             },
-            # 5. 取字典值
+            # 3. 取字典值
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
                 "WFWorkflowActionParameters": {
@@ -173,7 +265,9 @@ def build_interactive_shortcut():
                     "CustomOutputName": "回答",
                 },
             },
-            # 6. 朗读
+            # 4. 显示结果，便于人工确认
+            _show_result_action(dict_id, "回答"),
+            # 5. 朗读
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.speaktext",
                 "WFWorkflowActionParameters": {
@@ -186,7 +280,7 @@ def build_interactive_shortcut():
         "WFWorkflowTypes": [],
         "WFWorkflowHasShortcutInputVariables": False,
         "WFQuickActionSurfaces": [],
-        "WFWorkflowName": "呼叫助手",
+        "WFWorkflowName": INTERACTIVE_SHORTCUT_NAME,
     }
 
 
@@ -197,12 +291,15 @@ def main():
         out = out_dir / f"{name}.shortcut"
         with open(out, "wb") as f:
             plistlib.dump(data, f, fmt=plistlib.FMT_BINARY)
+        signed = _sign_shortcut_file(out)
         print(f"已生成: {out}")
+        if signed:
+            print(f"已签名: {out}")
 
     print()
     print("第一步: 导入并运行「测试助手」验证 API 连通性")
-    print("第二步: 导入「呼叫助手」用于日常使用")
-    print('使用: "嘿 Siri, 运行呼叫助手"')
+    print(f"第二步: 导入「{INTERACTIVE_SHORTCUT_NAME}」作为 Siri 日常入口")
+    print(f'使用: "嘿 Siri, 运行{INTERACTIVE_SHORTCUT_NAME}"')
 
 
 if __name__ == "__main__":
