@@ -30,3 +30,8 @@ uv.lock
 PLAN.json
 PROGRESS.md
 .harness/
+.xcodegen/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+xcuserdata/
+*.xcworkspace/xcuserdata/

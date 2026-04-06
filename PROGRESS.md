@@ -181,3 +181,31 @@
   - The next step is to reconnect the iPhone, confirm it appears again as an available destination, and rerun:
     - `VOICEBRIDGE_TEST_BASE_URL='http://192.168.3.79:8900' xcodebuild ... test -only-testing:VoiceBridgeUITests/testManualSmokeFlowDisplaysBackendReply`
   - After that manual `/chat` smoke passes on-device, rerun the Siri/App Intent device acceptance path.
+
+## Session update - 2026-04-06 (real-device manual smoke deep diagnosis)
+- Completed verification:
+  - Re-ran `bash ~/.codex/scripts/global-init.sh` and `bash init.sh`; the observed pytest failure is sandbox-specific, not a VoiceBridge regression.
+  - `.venv/bin/pytest tests/test_openai_api.py::test_missing_messages_returns_400 -q` outside sandbox -> passed.
+  - `.venv/bin/pytest tests/cli/test_commands.py::test_onboard_fresh_install -q` outside sandbox -> passed.
+  - Real-device UI smoke now captures concrete device-side failure text instead of a bare `XCTAssertTrue failed`.
+  - The real-device test target now reads `VOICEBRIDGE_TEST_BASE_URL` from the UI-test bundle configuration, so the iPhone no longer falls back to `127.0.0.1`.
+  - `xcodebuild ... VOICEBRIDGE_TEST_BASE_URL='http://192.168.3.79:8900' test -only-testing:VoiceBridgeUITests/VoiceBridgeUITests/testManualSmokeFlowDisplaysBackendReply` reached the phone and reported:
+    - `baseURL=http://192.168.3.79:8900`
+    - `statusText=网络请求失败：The Internet connection appears to be offline.`
+    - `latestError=网络请求失败：The Internet connection appears to be offline.`
+  - Added `NSLocalNetworkUsageDescription` to the app target and handled the first local-network permission alert during UI automation.
+  - The device also surfaced a wireless-data permission alert; allowing local-network access alone is not enough if iOS data permissions remain denied.
+  - Host-side diagnostics confirmed:
+    - `lsof -nP -iTCP:8900 -sTCP:LISTEN` -> `Python ... TCP *:8900 (LISTEN)`
+    - `ifconfig` -> workstation LAN address is still `192.168.3.79`
+    - macOS firewall is enabled, `block all` is off, and `stealth mode` is off
+    - the live nanobot service is running under Homebrew `python@3.14`
+- Findings:
+  - The remaining blocker is no longer Siri, signing, ATS, or local app wiring. It is the network path from the physical iPhone to `http://192.168.3.79:8900`.
+  - A successful `curl` from the Mac to `192.168.3.79:8900` only proves local reachability on the host. It does not prove the iPhone can route to the same address.
+  - As of this round, even after local-network permission handling, the iPhone still reports the LAN host as offline. That strongly suggests the phone is not on a network path that can reach the Mac LAN address, or another host-level ingress control is still blocking it.
+- Remaining blockers / follow-up:
+  - The next minimum external validation is from the phone itself, not from Xcode:
+    - open Safari on the iPhone and visit `http://192.168.3.79:8900/health`
+  - If Safari cannot load `/health`, keep the blocker classified as network topology / host ingress, not app code.
+  - Only after the phone can load `/health` should the harness resume real-device manual `/chat` smoke and then Siri/App Intent acceptance.

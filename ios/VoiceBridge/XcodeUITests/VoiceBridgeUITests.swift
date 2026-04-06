@@ -9,8 +9,32 @@ final class VoiceBridgeUITests: XCTestCase {
         continueAfterFailure = false
     }
 
+    private func allowSystemAlertsIfPresent() {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let alert = springboard.alerts.firstMatch
+        guard alert.waitForExistence(timeout: 1) else { return }
+
+        for label in ["允许", "Allow", "好", "OK"] {
+            let button = alert.buttons[label]
+            if button.exists {
+                button.tap()
+                return
+            }
+        }
+    }
+
     private var configuredBaseURL: String {
-        ProcessInfo.processInfo.environment["VOICEBRIDGE_TEST_BASE_URL"] ?? defaultBaseURL
+        if let value = ProcessInfo.processInfo.environment["VOICEBRIDGE_TEST_BASE_URL"], !value.isEmpty {
+            return value
+        }
+        if
+            let value = Bundle(for: Self.self).object(forInfoDictionaryKey: "VOICEBRIDGE_TEST_BASE_URL") as? String,
+            !value.isEmpty,
+            !value.contains("$(")
+        {
+            return value
+        }
+        return defaultBaseURL
     }
 
     func testManualSmokeFlowDisplaysBackendReply() {
@@ -29,9 +53,24 @@ final class VoiceBridgeUITests: XCTestCase {
         let sendButton = app.buttons["manual.sendButton"]
         XCTAssertTrue(sendButton.waitForExistence(timeout: 10))
         sendButton.tap()
+        allowSystemAlertsIfPresent()
 
         let latestReply = app.staticTexts["manual.latestReply"]
-        XCTAssertTrue(latestReply.waitForExistence(timeout: 20))
+        guard latestReply.waitForExistence(timeout: 20) else {
+            let statusText = app.staticTexts["manual.statusText"]
+            let latestError = app.staticTexts["manual.latestError"]
+            let statusValue = statusText.waitForExistence(timeout: 1) ? statusText.label : "<missing>"
+            let errorValue = latestError.waitForExistence(timeout: 1) ? latestError.label : "<missing>"
+            XCTFail(
+                """
+                manual.latestReply did not appear on device
+                baseURL=\(configuredBaseURL)
+                statusText=\(statusValue)
+                latestError=\(errorValue)
+                """
+            )
+            return
+        }
 
         let placeholder = "尚未收到回复"
         let predicate = NSPredicate(format: "label != %@", placeholder)

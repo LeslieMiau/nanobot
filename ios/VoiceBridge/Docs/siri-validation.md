@@ -26,6 +26,9 @@ Only `iPhone Siri` is part of the v1 pass condition.
 - The device UI test runner must not use `http://127.0.0.1:8900` as the backend URL. On a physical iPhone, `127.0.0.1` points back to the phone, not the Mac running nanobot.
 - Real-device UI smoke should inject a Mac-reachable base URL through the host-side `VOICEBRIDGE_TEST_BASE_URL` environment variable before launching `xcodebuild test`.
 - For the current workstation, the known reachable host is `http://192.168.3.79:8900` unless the local network address changes.
+- The iPhone must have a real route to that host. In practice this means the phone and Mac must be on the same reachable LAN or another verified route, not just physically connected by USB for Xcode deployment.
+- The first live run may trigger system prompts for local-network access or wireless-data access. Those prompts must be allowed, otherwise the app will surface `The Internet connection appears to be offline.`
+- If the Mac firewall is enabled, the interpreter serving `nanobot` must also be allowed for incoming connections. A successful local `curl` from the Mac is not sufficient proof that the iPhone can reach the same service.
 
 ## Inline prompt note
 
