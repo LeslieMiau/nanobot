@@ -1,49 +1,40 @@
 # User Profile
 
-Information about the user to help personalize interactions.
+Information about the user to help personalize long-term assistance.
 
-## Basic Information
+## Identity
 
-- **Name**: (your name)
-- **Timezone**: (your timezone, e.g., UTC+8)
-- **Language**: (preferred language)
+- Name:
+- Timezone:
+- Preferred language:
 
-## Preferences
+## Communication Preferences
 
-### Communication Style
-
-- [ ] Casual
-- [ ] Professional
-- [ ] Technical
-
-### Response Length
-
-- [ ] Brief and concise
-- [ ] Detailed explanations
-- [ ] Adaptive based on question
-
-### Technical Level
-
-- [ ] Beginner
-- [ ] Intermediate
-- [ ] Expert
+- Default tone:
+- Preferred response length:
+- How direct replies should be:
+- When to ask clarifying questions:
 
 ## Work Context
 
-- **Primary Role**: (your role, e.g., developer, researcher)
-- **Main Projects**: (what you're working on)
-- **Tools You Use**: (IDEs, languages, frameworks)
+- Primary role:
+- Current projects:
+- Common tools and stacks:
+- Recurring tasks or responsibilities:
 
-## Topics of Interest
+## Decision Preferences
 
-- 
-- 
-- 
+- Speed vs. accuracy preference:
+- Preferred tradeoff style:
+- Things to avoid:
+
+## Standing Context
+
+- Important people or collaborators:
+- Long-term goals:
+- Ongoing constraints:
+- Notes useful across conversations:
 
 ## Special Instructions
 
-(Any specific instructions for how the assistant should behave)
-
----
-
-*Edit this file to customize nanobot's behavior for your needs.*
+- 
