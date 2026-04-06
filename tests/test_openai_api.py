@@ -254,6 +254,48 @@ async def test_clawpod_compatible_chat_endpoint_returns_reply_shape(aiohttp_clie
 
 @pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
 @pytest.mark.asyncio
+async def test_clawpod_chat_prefers_session_id_over_speaker(aiohttp_client, mock_agent) -> None:
+    app = create_app(mock_agent, model_name="test-model")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/chat",
+        json={"text": "hello", "speaker": "Alexis", "session_id": "shortcut-run-001"},
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["reply"] == "mock response"
+    assert body["end_conversation"] is False
+    mock_agent.process_direct.assert_called_once_with(
+        content="hello",
+        session_key="api:shortcut-run-001",
+        channel="api",
+        chat_id=API_CHAT_ID,
+    )
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
+async def test_voice_ask_prefers_session_id_over_speaker(aiohttp_client, mock_agent) -> None:
+    app = create_app(mock_agent, model_name="test-model")
+    client = await aiohttp_client(app)
+    resp = await client.post(
+        "/v1/voice/ask",
+        json={"text": "hello", "speaker": "Alexis", "session_id": "voice-run-002"},
+    )
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["reply"] == "mock response"
+    assert body["end_conversation"] is False
+    mock_agent.process_direct.assert_called_once_with(
+        content="hello",
+        session_key="api:voice-run-002",
+        channel="api",
+        chat_id=API_CHAT_ID,
+    )
+
+
+@pytest.mark.skipif(not HAS_AIOHTTP, reason="aiohttp not installed")
+@pytest.mark.asyncio
 async def test_fixed_session_requests_are_serialized(aiohttp_client) -> None:
     order: list[str] = []
 

@@ -138,23 +138,6 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         strip_model_prefix=True,
         supports_prompt_caching=True,
     ),
-    # AICodeWith: OpenAI-compatible gateway.
-    ProviderSpec(
-        name="aicodewith",
-        keywords=("aicodewith", "ai-codewith"),
-        env_key="OPENAI_API_KEY",
-        display_name="AICodeWith",
-        litellm_prefix="openai",
-        skip_prefixes=(),
-        env_extras=(),
-        is_gateway=True,
-        is_local=False,
-        detect_by_key_prefix="",
-        detect_by_base_keyword="aicodewith",
-        default_api_base="https://api.aicodewith.com/v1",
-        strip_model_prefix=True,
-        model_overrides=(),
-    ),
     # SiliconFlow (硅基流动): OpenAI-compatible gateway, model names keep org prefix
     ProviderSpec(
         name="siliconflow",

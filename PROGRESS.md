@@ -276,3 +276,33 @@
   - relevant files
   - latest checkpoint commits
   - suggested next actions for continuation
+
+## Session update - 2026-04-06 (HomePod multi-turn practical shortcut)
+- Restore / baseline notes:
+  - `git pull --ff-only origin main` -> already up to date on `main`.
+  - `bash ~/.codex/scripts/global-init.sh` and `bash init.sh` still fail on latest `main`, but the blocker is no longer the known `ProviderSpec(... litellm_prefix ...)` crash.
+  - Fixed the `ProviderSpec(... litellm_prefix ...)` collection failure by removing the stale duplicate `aicodewith` registry entry in `nanobot/providers/registry.py`.
+  - Full-repo `init.sh` remains blocked by unrelated upstream drift:
+    - `tests/test_coding_mode.py` imports `CodingConfig`, but current latest-main runtime/config files do not match that test family.
+  - Because that repo-wide breakage is outside the HomePod surface, this session continued only after confirming the requested HomePod regression subset is isolated and runnable.
+- Completed HomePod changes:
+  - Updated `nanobot/api/server.py` so `/chat` and `/v1/voice/ask` both accept optional `session_id`, route by `session_id` first, and still preserve `speaker` for legacy compatibility and log labeling.
+  - Reworked `scripts/generate_shortcut.py` so `纳博特.shortcut` now:
+    - creates one run-scoped `session_id` at startup,
+    - reuses that `session_id` on every `/chat` turn,
+    - loops with `Dictate Text -> POST /chat -> reply/end_conversation -> Speak Text`,
+    - exits on empty/cancelled input, local exit phrases (`结束` / `退出` / `再见`), or `end_conversation=true`.
+  - Kept `测试助手.shortcut` as the single-turn diagnostic shortcut.
+  - Rewrote `docs/HOMEPOD_SETUP.md` to match the actual delivered contract:
+    - this round ships “唤起一次后连续聊”,
+    - “一句话直达” is explicitly out of scope,
+    - docs now explain import, validation, ending a conversation, and starting a new session.
+- Verification:
+  - `.venv/bin/pytest tests/test_openai_api.py::test_clawpod_compatible_chat_endpoint_returns_reply_shape tests/test_openai_api.py::test_clawpod_chat_prefers_session_id_over_speaker tests/test_openai_api.py::test_voice_ask_prefers_session_id_over_speaker tests/test_shortcut_generation.py tests/test_verify_homepod_e2e.py -q` -> `7 passed`.
+  - `python3 scripts/generate_shortcut.py` -> regenerated and signed both `测试助手.shortcut` and `纳博特.shortcut`.
+  - Generated action counts from the source generator:
+    - `测试助手` -> `4`
+    - `纳博特` -> `24`
+- Harness note:
+  - `PLAN.json` was intentionally left unchanged in this session.
+  - The current remaining plan item is the older iPhone Siri App Intent one-shot phrase task, while this session was a user-directed HomePod + Shortcuts delivery pass with explicitly different scope.

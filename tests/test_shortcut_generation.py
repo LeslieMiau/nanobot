@@ -52,9 +52,27 @@ def test_recommended_shortcuts_keep_expected_names_and_api_shape() -> None:
     }
     assert test_json == {"text": "你好", "speaker": "homepod"}
 
-    assert interactive_shortcut["WFWorkflowActions"][0]["WFWorkflowActionIdentifier"] == "is.workflow.actions.dictatetext"
+    interactive_actions = interactive_shortcut["WFWorkflowActions"]
+    interactive_ids = [
+        action["WFWorkflowActionIdentifier"]
+        for action in interactive_actions
+    ]
+    assert interactive_ids[:4] == [
+        "is.workflow.actions.date",
+        "is.workflow.actions.format.date",
+        "is.workflow.actions.repeat.count",
+        "is.workflow.actions.dictatetext",
+    ]
+    assert interactive_ids.count("is.workflow.actions.repeat.count") == 2
+    assert "is.workflow.actions.showresult" not in interactive_ids
+    assert "is.workflow.actions.exit" in interactive_ids
+    assert interactive_ids.count("is.workflow.actions.conditional") == 10
 
-    interactive_download = interactive_shortcut["WFWorkflowActions"][1]["WFWorkflowActionParameters"]
+    interactive_download = next(
+        action["WFWorkflowActionParameters"]
+        for action in interactive_actions
+        if action["WFWorkflowActionIdentifier"] == "is.workflow.actions.downloadurl"
+    )
     assert interactive_download["WFHTTPMethod"] == "POST"
     assert interactive_download["WFHTTPBodyType"] == "JSON"
     assert interactive_download["WFURL"].endswith("/chat")
@@ -69,12 +87,40 @@ def test_recommended_shortcuts_keep_expected_names_and_api_shape() -> None:
 
     json_items = interactive_download["WFJSONValues"]["Value"]["WFDictionaryFieldValueItems"]
     keys = [item["WFKey"]["Value"]["string"] for item in json_items]
-    assert keys == ["text", "speaker"]
-    assert interactive_shortcut["WFWorkflowActions"][2]["WFWorkflowActionParameters"]["WFDictionaryKey"] == "reply"
+    assert keys == ["text", "speaker", "session_id"]
+
+    text_item, speaker_item, session_item = json_items
+    assert speaker_item["WFValue"]["Value"]["string"] == "homepod"
+    assert text_item["WFValue"]["Value"]["attachmentsByRange"]["0,1"]["Value"]["OutputName"] == "问题"
+    assert (
+        session_item["WFValue"]["Value"]["attachmentsByRange"]["0,1"]["Value"]["OutputName"]
+        == "session_id"
+    )
+
+    dictionary_keys = [
+        action["WFWorkflowActionParameters"]["WFDictionaryKey"]
+        for action in interactive_actions
+        if action["WFWorkflowActionIdentifier"] == "is.workflow.actions.getvalueforkey"
+    ]
+    assert dictionary_keys == ["reply", "end_conversation"]
+
+    start_conditions = [
+        action["WFWorkflowActionParameters"]
+        for action in interactive_actions
+        if action["WFWorkflowActionIdentifier"] == "is.workflow.actions.conditional"
+        and action["WFWorkflowActionParameters"].get("WFControlFlowMode") == 0
+    ]
+    assert any(condition["WFCondition"] == 101 for condition in start_conditions)
+    assert sum(condition["WFCondition"] == 99 for condition in start_conditions) == len(module.LOCAL_EXIT_PHRASES)
+    assert any(
+        condition["WFCondition"] == 4
+        and condition.get("WFConditionalActionString") == "1"
+        for condition in start_conditions
+    )
+
     assert test_shortcut["WFWorkflowActions"][2]["WFWorkflowActionIdentifier"] == "is.workflow.actions.showresult"
-    assert interactive_shortcut["WFWorkflowActions"][3]["WFWorkflowActionIdentifier"] == "is.workflow.actions.showresult"
     assert test_shortcut["WFWorkflowActions"][3]["WFWorkflowActionIdentifier"] == "is.workflow.actions.speaktext"
-    assert interactive_shortcut["WFWorkflowActions"][4]["WFWorkflowActionIdentifier"] == "is.workflow.actions.speaktext"
+    assert "is.workflow.actions.speaktext" in interactive_ids
 
 
 def test_docs_expose_recommended_shortcut_links() -> None:
@@ -88,6 +134,8 @@ def test_docs_expose_recommended_shortcut_links() -> None:
     assert "../测试助手.shortcut" in setup_doc
     assert "../纳博特.shortcut" in setup_doc
     assert "嘿 Siri, 运行纳博特" in setup_doc
-    assert "弹出 reply 文本并朗读" in setup_doc
+    assert "唤起一次后连续聊" in setup_doc
+    assert "一句话直达" in setup_doc
+    assert "session_id" in setup_doc
     assert "POST /chat" in setup_doc
     assert "ClawPod-compatible `POST /chat` bridge" in readme

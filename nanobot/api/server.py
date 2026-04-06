@@ -112,6 +112,24 @@ def _voice_friendly_error(text: str) -> str:
     return text
 
 
+def _coerce_optional_text(value: Any) -> str:
+    """Return a stripped string for optional request fields."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return str(value).strip()
+
+
+def _resolve_voice_session(body: dict[str, Any], *, default_speaker: str = "voice") -> tuple[str, str, str]:
+    """Resolve speaker, session_id, and routed session key for voice/chat requests."""
+    speaker = _coerce_optional_text(body.get("speaker"))
+    session_id = _coerce_optional_text(body.get("session_id"))
+    session_route = session_id or speaker or default_speaker
+    speaker_label = speaker or default_speaker
+    return speaker_label, session_id, f"api:{session_route}"
+
+
 # ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
@@ -208,13 +226,13 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
 async def handle_voice_ask(request: web.Request) -> web.Response:
     """POST/GET /v1/voice/ask — voice Q&A endpoint.
 
-    POST: {"text": "question", "speaker": "name"}
-    GET:  ?text=question&speaker=name
+    POST: {"text": "question", "speaker": "name", "session_id": "run-id"}
+    GET:  ?text=question&speaker=name&session_id=run-id
 
     Returns {"reply": "plain-text answer", "end_conversation": false}.
     """
     if request.method == "GET":
-        user_text = request.query.get("text", "").strip()
+        user_text = _coerce_optional_text(request.query.get("text"))
         body = dict(request.query)
     else:
         content_type = request.content_type or ""
@@ -226,14 +244,13 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
                 body = await request.json()
             except Exception:
                 return _error_json(400, "Invalid JSON body")
-        user_text = body.get("text", "").strip()
+        user_text = _coerce_optional_text(body.get("text"))
 
     if not user_text:
         return _error_json(400, "Missing 'text' field")
 
-    # Speaker / session identification — compatible with ClawPod
-    speaker = body.get("speaker", "") or body.get("session_id", "voice")
-    session_key = f"api:{speaker}"
+    # session_id is per-shortcut-run context; speaker remains for legacy clients and logs.
+    speaker, session_id, session_key = _resolve_voice_session(body)
 
     agent_loop = request.app["agent_loop"]
     timeout_s: float = request.app.get("request_timeout", 120.0)
@@ -241,7 +258,13 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
     session_locks: dict[str, asyncio.Lock] = request.app["session_locks"]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
-    logger.info("Voice ask speaker={} text={}", speaker, user_text[:80])
+    logger.info(
+        "Voice ask speaker={} session_id={} session_key={} text={}",
+        speaker or "-",
+        session_id or "-",
+        session_key,
+        user_text[:80],
+    )
 
     try:
         async with session_lock:
@@ -261,10 +284,10 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
             except asyncio.TimeoutError:
                 return _error_json(504, f"Request timed out after {voice_timeout}s")
             except Exception:
-                logger.exception("Error processing voice request for speaker {}", speaker)
+                logger.exception("Error processing voice request for session {}", session_key)
                 return _error_json(500, "Internal server error", err_type="server_error")
     except Exception:
-        logger.exception("Unexpected voice API lock error for speaker {}", speaker)
+        logger.exception("Unexpected voice API lock error for session {}", session_key)
         return _error_json(500, "Internal server error", err_type="server_error")
 
     response_text = _voice_friendly_error(response_text)
@@ -284,7 +307,7 @@ async def handle_clawpod_chat(request: web.Request) -> web.Response:
     """POST /chat — ClawPod-compatible chat bridge.
 
     Accepts the same payload shape as ClawPod's Shortcut:
-    {"text": "...", "speaker": "..."}
+    {"text": "...", "speaker": "...", "session_id": "..."}
 
     Returns {"reply": "...", "end_conversation": false}.
     """

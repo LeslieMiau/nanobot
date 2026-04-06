@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """生成 Apple Shortcut (.shortcut) 文件。
 
-最简方案: 用纯文本 URL + 单次 GET 请求，不依赖变量引用。
-缺点: 问题文本硬编码为 "hello"，用户需要在 Shortcuts App 里手动改。
-
-实际方案: 生成两个版本 —
-  1. 固定问题版（验证 API 连通性）
-  2. 交互版（按 Apple 官方 Web API 模式使用 POST JSON）
+生成两个版本：
+  1. `测试助手`：固定单轮请求，用来验证 API 连通性。
+  2. `纳博特`：进入快捷指令后连续多轮对话，每次运行生成新的 session_id。
 
 两者默认都走 ClawPod 兼容的 `POST /chat`。
 """
@@ -23,6 +20,8 @@ NANOBOT_PORT = 8900
 API_KEY = "nb-3b7d4b91132c9bb850c2646f92860dc8"
 SPEAKER = "homepod"
 INTERACTIVE_SHORTCUT_NAME = "纳博特"
+INTERACTIVE_MAX_TURNS = 20
+LOCAL_EXIT_PHRASES = ("结束", "退出", "再见")
 # ============================================================
 
 ENDPOINT = f"http://{NANOBOT_HOST}:{NANOBOT_PORT}/chat"
@@ -51,6 +50,13 @@ def _simple_text(s):
     return {"Value": {"string": s}, "WFSerializationType": "WFTextTokenString"}
 
 
+def _action(identifier, parameters=None):
+    return {
+        "WFWorkflowActionIdentifier": identifier,
+        "WFWorkflowActionParameters": parameters or {},
+    }
+
+
 def _show_result_action(output_id, output_name):
     """在屏幕上展示返回文本，避免“执行了但没反应”的假象。"""
     return {
@@ -59,6 +65,55 @@ def _show_result_action(output_id, output_name):
             "Text": _text({"0,1": _ref(output_id, output_name)}, "\uFFFC"),
         },
     }
+
+
+def _repeat_count_start(count, group_id):
+    return _action(
+        "is.workflow.actions.repeat.count",
+        {
+            "GroupingIdentifier": group_id,
+            "WFControlFlowMode": 0,
+            "WFRepeatCount": count,
+        },
+    )
+
+
+def _repeat_count_end(group_id):
+    return _action(
+        "is.workflow.actions.repeat.count",
+        {
+            "GroupingIdentifier": group_id,
+            "WFControlFlowMode": 2,
+        },
+    )
+
+
+def _conditional_start(input_id, input_name, *, group_id, condition, value=None, number_value=None):
+    parameters = {
+        "WFInput": _ref(input_id, input_name),
+        "GroupingIdentifier": group_id,
+        "WFControlFlowMode": 0,
+        "WFCondition": condition,
+    }
+    if value is not None:
+        parameters["WFConditionalActionString"] = str(value)
+    if number_value is not None:
+        parameters["WFNumberValue"] = number_value
+    return _action("is.workflow.actions.conditional", parameters)
+
+
+def _conditional_end(group_id):
+    return _action(
+        "is.workflow.actions.conditional",
+        {
+            "GroupingIdentifier": group_id,
+            "WFControlFlowMode": 2,
+        },
+    )
+
+
+def _exit_shortcut_action():
+    return _action("is.workflow.actions.exit")
 
 
 def _sign_shortcut_file(path: Path) -> bool:
@@ -186,31 +241,75 @@ def build_test_shortcut():
 
 
 def build_interactive_shortcut():
-    """交互版 — Dictate Text + POST JSON + 显示结果 + 朗读 reply。"""
+    """交互版 — 一次唤起后连续多轮对话，整轮复用同一个 session_id。"""
+    date_id = _uuid()
+    session_id = _uuid()
+    repeat_group_id = _uuid()
     ask_id = _uuid()
     url_id = _uuid()
-    dict_id = _uuid()
+    reply_id = _uuid()
+    end_id = _uuid()
 
-    return INTERACTIVE_SHORTCUT_NAME, {
-        "WFWorkflowMinimumClientVersion": 900,
-        "WFWorkflowMinimumClientVersionString": "900",
-        "WFWorkflowIcon": {
-            "WFWorkflowIconStartColor": 463140863,
-            "WFWorkflowIconGlyphNumber": 59750,
-        },
-        "WFWorkflowClientVersion": "2802.0.2",
-        "WFWorkflowOutputContentItemClasses": [],
-        "WFWorkflowHasOutputFallback": False,
-        "WFWorkflowActions": [
-            # 1. 口述文本，更适合 Siri / HomePod 语音路径
+    actions = [
+        _action(
+            "is.workflow.actions.date",
             {
-                "WFWorkflowActionIdentifier": "is.workflow.actions.dictatetext",
-                "WFWorkflowActionParameters": {
-                    "UUID": ask_id,
-                    "CustomOutputName": "问题",
-                },
+                "UUID": date_id,
+                "CustomOutputName": "当前时间",
             },
-            # 2. 获取 URL 内容（Apple 官方 Web API 模式：POST + JSON body）
+        ),
+        _action(
+            "is.workflow.actions.format.date",
+            {
+                "WFInput": _ref(date_id, "当前时间"),
+                "WFDateFormatStyle": "Custom",
+                "WFDateFormatString": "yyyyMMddHHmmssSSS",
+                "UUID": session_id,
+                "CustomOutputName": "session_id",
+            },
+        ),
+        _repeat_count_start(INTERACTIVE_MAX_TURNS, repeat_group_id),
+        {
+            "WFWorkflowActionIdentifier": "is.workflow.actions.dictatetext",
+            "WFWorkflowActionParameters": {
+                "UUID": ask_id,
+                "CustomOutputName": "问题",
+            },
+        },
+    ]
+
+    empty_input_group = _uuid()
+    actions.extend(
+        [
+            _conditional_start(
+                ask_id,
+                "问题",
+                group_id=empty_input_group,
+                condition=101,
+            ),
+            _exit_shortcut_action(),
+            _conditional_end(empty_input_group),
+        ]
+    )
+
+    for phrase in LOCAL_EXIT_PHRASES:
+        group_id = _uuid()
+        actions.extend(
+            [
+                _conditional_start(
+                    ask_id,
+                    "问题",
+                    group_id=group_id,
+                    condition=99,
+                    value=phrase,
+                ),
+                _exit_shortcut_action(),
+                _conditional_end(group_id),
+            ]
+        )
+
+    actions.extend(
+        [
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
                 "WFWorkflowActionParameters": {
@@ -247,6 +346,11 @@ def build_interactive_shortcut():
                                     "WFKey": _simple_text("speaker"),
                                     "WFValue": _simple_text(SPEAKER),
                                 },
+                                {
+                                    "WFItemType": 0,
+                                    "WFKey": _simple_text("session_id"),
+                                    "WFValue": _text({"0,1": _ref(session_id, "session_id")}, "\uFFFC"),
+                                },
                             ]
                         },
                         "WFSerializationType": "WFDictionaryFieldValue",
@@ -255,27 +359,62 @@ def build_interactive_shortcut():
                     "CustomOutputName": "回复",
                 },
             },
-            # 3. 取字典值
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
                 "WFWorkflowActionParameters": {
                     "WFInput": _ref(url_id, "回复"),
                     "WFDictionaryKey": "reply",
-                    "UUID": dict_id,
+                    "UUID": reply_id,
                     "CustomOutputName": "回答",
                 },
             },
-            # 4. 显示结果，便于人工确认
-            _show_result_action(dict_id, "回答"),
-            # 5. 朗读
+            {
+                "WFWorkflowActionIdentifier": "is.workflow.actions.getvalueforkey",
+                "WFWorkflowActionParameters": {
+                    "WFInput": _ref(url_id, "回复"),
+                    "WFDictionaryKey": "end_conversation",
+                    "UUID": end_id,
+                    "CustomOutputName": "结束标记",
+                },
+            },
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.speaktext",
                 "WFWorkflowActionParameters": {
-                    "WFText": _text({"0,1": _ref(dict_id, "回答")}, "\uFFFC"),
+                    "WFText": _text({"0,1": _ref(reply_id, "回答")}, "\uFFFC"),
                     "WFSpeakTextWait": True,
                 },
             },
-        ],
+        ]
+    )
+
+    end_conversation_group = _uuid()
+    actions.extend(
+        [
+            _conditional_start(
+                end_id,
+                "结束标记",
+                group_id=end_conversation_group,
+                condition=4,
+                value="1",
+                number_value=1,
+            ),
+            _exit_shortcut_action(),
+            _conditional_end(end_conversation_group),
+            _repeat_count_end(repeat_group_id),
+        ]
+    )
+
+    return INTERACTIVE_SHORTCUT_NAME, {
+        "WFWorkflowMinimumClientVersion": 900,
+        "WFWorkflowMinimumClientVersionString": "900",
+        "WFWorkflowIcon": {
+            "WFWorkflowIconStartColor": 463140863,
+            "WFWorkflowIconGlyphNumber": 59750,
+        },
+        "WFWorkflowClientVersion": "2802.0.2",
+        "WFWorkflowOutputContentItemClasses": [],
+        "WFWorkflowHasOutputFallback": False,
+        "WFWorkflowActions": actions,
         "WFWorkflowInputContentItemClasses": ["WFStringContentItem"],
         "WFWorkflowTypes": [],
         "WFWorkflowHasShortcutInputVariables": False,
@@ -298,7 +437,7 @@ def main():
 
     print()
     print("第一步: 导入并运行「测试助手」验证 API 连通性")
-    print(f"第二步: 导入「{INTERACTIVE_SHORTCUT_NAME}」作为 Siri 日常入口")
+    print(f"第二步: 导入「{INTERACTIVE_SHORTCUT_NAME}」作为连续对话入口")
     print(f'使用: "嘿 Siri, 运行{INTERACTIVE_SHORTCUT_NAME}"')
 
 
