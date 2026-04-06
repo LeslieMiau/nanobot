@@ -92,7 +92,7 @@ final class VoiceBridgeUITests: XCTestCase {
         sleep(5)
         XCUIDevice.shared.press(.home)
 
-        XCUIDevice.shared.siriService.activate(voiceRecognitionText: "问纳博特")
+        XCUIDevice.shared.siriService.activate(voiceRecognitionText: "使用纳博特")
         sleep(3)
         XCUIDevice.shared.siriService.activate(voiceRecognitionText: "你好")
         sleep(5)

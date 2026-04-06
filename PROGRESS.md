@@ -229,3 +229,21 @@
   - The remaining blocker is narrower: under XCTest's `XCUISiriService`, the custom App Shortcut phrase `问纳博特` followed by a spoken answer does not execute `AskBridgeIntent` on the physical iPhone.
   - Because built-in Siri automation still works on the same device, this is best classified as a custom App Shortcut automation boundary, not a general Siri test failure.
   - At this point, the remaining acceptance step for v1 is a manual spoken Siri run on the iPhone rather than another automated Siri UI test iteration.
+
+## Session update - 2026-04-06 (phrase redesign to avoid contact parsing)
+- Completed changes:
+  - Replaced the App Shortcut trigger phrases with action-oriented wording:
+    - `使用纳博特`
+    - `在纳博特中提问`
+    - `让纳博特回答`
+  - Updated the intent title and shortcut short title to `使用纳博特` so the visible shortcut label matches the spoken invocation pattern.
+  - Updated Siri validation docs and UI test input so all current v1 guidance points at the new trigger phrases instead of `问纳博特`.
+- Verification:
+  - Regenerated the Xcode project with `xcodegen generate`.
+  - Inspected the built `Metadata.appintents/root.ssu.yaml` and confirmed the new phrases are present in the App Intents training corpus.
+  - Re-ran the real-device Siri follow-up automation with the new phrase `使用纳博特`; the test still failed with `No Siri intent recorded`.
+  - Checked `/tmp/nanobot-api.log`; there was still no new Voice Bridge-driven `speaker=siri-iphone` request during that automated run.
+- Findings:
+  - The original user-reported phrase `问纳博特` was indeed a poor Siri trigger because it reads like “ask a person named 纳博特”.
+  - The phrase redesign is now shipped in the app metadata, so the next meaningful verification step is manual spoken Siri on the iPhone.
+  - XCTest automation still cannot prove custom App Shortcut execution on this device, even though built-in Siri control continues to pass.

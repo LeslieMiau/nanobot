@@ -5,9 +5,11 @@ struct VoiceBridgeShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: AskBridgeIntent(),
             phrases: [
-                "问\(.applicationName)"
+                "使用\(.applicationName)",
+                "在\(.applicationName)中提问",
+                "让\(.applicationName)回答"
             ],
-            shortTitle: "问纳博特",
+            shortTitle: "使用纳博特",
             systemImageName: "waveform"
         )
     }

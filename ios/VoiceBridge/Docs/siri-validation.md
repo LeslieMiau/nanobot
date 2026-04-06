@@ -6,7 +6,9 @@ Only `iPhone Siri` is part of the v1 pass condition.
 
 ## Supported phrases
 
-- `嘿 Siri，问纳博特`
+- `嘿 Siri，使用纳博特`
+- `嘿 Siri，在纳博特中提问`
+- `嘿 Siri，让纳博特回答`
 
 ## Expected behavior
 
@@ -18,7 +20,7 @@ Only `iPhone Siri` is part of the v1 pass condition.
 
 - `XCUISiriService` on the iOS 18.6 simulator can trigger built-in Siri actions. A control probe using `Open Safari` reliably brought Safari to the foreground.
 - The simulator also still passes the manual app smoke path: the Voice Bridge app can launch, send a manual prompt to `/chat`, and render a live backend reply.
-- The supported two-step Siri phrase `问纳博特` followed by `你好` did not execute `AskBridgeIntent` in simulator UI tests. The app's persisted intent-result probe stayed at `No Siri intent recorded`.
+- The supported two-step Siri phrase `使用纳博特` followed by `你好` did not execute `AskBridgeIntent` in simulator UI tests. The app's persisted intent-result probe stayed at `No Siri intent recorded`.
 - Treat the simulator as useful for Siri control probes and manual `/chat` smoke only. It is not a substitute for real-device Siri acceptance of the custom Voice Bridge invocation.
 
 ## Real-device UI smoke note
@@ -36,14 +38,14 @@ Only `iPhone Siri` is part of the v1 pass condition.
 - A real-device manual smoke test now passes end-to-end: the installed app can call `nanobot /chat` and render the reply on the connected iPhone.
 - A real-device Siri control probe using the built-in phrase `Open Safari` also passes under `XCUISiriService`, so XCTest still has working Siri automation on the physical device.
 - The custom Voice Bridge Siri phrase still does **not** execute `AskBridgeIntent` under XCTest automation on the physical device:
-  - `问纳博特` followed by `你好` leaves `settings.lastIntentOutcome` at `No Siri intent recorded`
+  - `使用纳博特` followed by `你好` leaves `settings.lastIntentOutcome` at `No Siri intent recorded`
   - no new Voice Bridge-triggered `/chat` request is observed for that automated run
 - Waiting after app launch, refreshing App Shortcut parameters on startup, and moving the app to the background before the Siri step did not change that result.
 - Treat this as an XCTest automation boundary, not a proof that the product is broken on-device. The remaining acceptance step is a manual spoken Siri run on the physical iPhone.
 
 ## Inline prompt note
 
-- `嘿 Siri，问纳博特 你好` is not a registered App Shortcut phrase in v1.
+- `嘿 Siri，使用纳博特 你好` is not a registered App Shortcut phrase in v1.
 - Real Xcode metadata validation rejects free-form `String` interpolation inside App Shortcut phrases; the shipped v1 shortcut phrase is the follow-up form only.
 - If Siri ever accepts an inline suffix on a real device, treat that as opportunistic system behavior, not a guaranteed contract.
 
