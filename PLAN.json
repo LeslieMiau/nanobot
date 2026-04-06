@@ -1,0 +1,501 @@
+{
+  "task": "Upgrade nanobot knowledge management into a persistent wiki workflow",
+  "created_at": "2026-04-06T09:45:00+08:00",
+  "features": [
+    {
+      "id": "F001",
+      "description": "Capture harness baseline for the knowledge wiki rollout",
+      "steps": [
+        "Confirm current repo status and test baseline",
+        "Record initial implementation scope and constraints"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F002",
+      "description": "Fix the pre-existing GitStore init failure in the local environment",
+      "steps": [
+        "Reproduce tests/agent/test_git_store.py::TestInit::test_init_creates_git_dir",
+        "Make GitStore work without assuming dulwich is installed"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F003",
+      "description": "Re-run targeted GitStore tests after the baseline fix",
+      "steps": [
+        "Run tests/agent/test_git_store.py",
+        "Confirm init, log, diff, and revert behaviors still pass"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F004",
+      "description": "Add knowledge configuration schema",
+      "steps": [
+        "Introduce knowledge.enabled, knowledge.dir, knowledge.searchBackend, knowledge.maxPagesPerQuery, knowledge.autoFileAnswers",
+        "Keep existing memory config semantics unchanged"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F005",
+      "description": "Create a dedicated nanobot.knowledge package",
+      "steps": [
+        "Add package entrypoints under nanobot/knowledge",
+        "Keep the implementation separate from memory and Dream"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F006",
+      "description": "Define typed knowledge models",
+      "steps": [
+        "Represent page metadata, source material, search hits, answer results, and lint findings",
+        "Make page metadata compatible with YAML frontmatter"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F007",
+      "description": "Implement knowledge directory layout management",
+      "steps": [
+        "Ensure knowledge/raw, knowledge/wiki/sources, knowledge/wiki/topics, knowledge/wiki/entities, knowledge/wiki/syntheses exist",
+        "Initialize knowledge/index.md, knowledge/log.md, knowledge/SCHEMA.md when needed"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F008",
+      "description": "Add bundled knowledge templates",
+      "steps": [
+        "Create initial SCHEMA.md template",
+        "Create initial index.md and log.md templates"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F009",
+      "description": "Implement wiki page frontmatter serialization",
+      "steps": [
+        "Write pages with type, title, aliases, source_ids, updated_at, links_out",
+        "Parse the same frontmatter back into typed metadata"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F010",
+      "description": "Implement deterministic page slugging",
+      "steps": [
+        "Normalize titles into stable slugs",
+        "Avoid collisions for repeated titles"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F011",
+      "description": "Implement raw source storage",
+      "steps": [
+        "Persist ingested local files or fetched URL content under knowledge/raw",
+        "Treat the stored raw payload as immutable after ingest"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F012",
+      "description": "Implement URL source fetching for kb ingest",
+      "steps": [
+        "Fetch readable text from http or https URLs",
+        "Preserve source origin and final title for wiki compilation"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F013",
+      "description": "Implement local file source loading for kb ingest",
+      "steps": [
+        "Read markdown, text, json, and similar file types safely",
+        "Capture source title and content without mutating the original file"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F014",
+      "description": "Introduce an LLM-backed source compiler",
+      "steps": [
+        "Compile one source into summary, topics, entities, key claims, contradictions, and superseded source ids",
+        "Parse model output into structured data"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F015",
+      "description": "Make the compiler resilient to malformed JSON output",
+      "steps": [
+        "Use tolerant JSON repair",
+        "Validate missing or malformed fields with safe defaults"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F016",
+      "description": "Write per-source wiki pages",
+      "steps": [
+        "Create pages under knowledge/wiki/sources",
+        "Include summary, key claims, conflicts, and raw-source references"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F017",
+      "description": "Write per-topic wiki pages",
+      "steps": [
+        "Create or update topic pages under knowledge/wiki/topics",
+        "Append new synthesized updates and related source ids"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F018",
+      "description": "Write per-entity wiki pages",
+      "steps": [
+        "Create or update entity pages under knowledge/wiki/entities",
+        "Track aliases and related source ids"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F019",
+      "description": "Track cross-links for wiki pages",
+      "steps": [
+        "Populate links_out in frontmatter",
+        "Emit inline links between source, topic, and entity pages where possible"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F020",
+      "description": "Refresh knowledge/index.md after ingest",
+      "steps": [
+        "List pages by category with one-line summaries",
+        "Keep source, topic, entity, and synthesis sections current"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F021",
+      "description": "Append ingest events to knowledge/log.md",
+      "steps": [
+        "Record ingest timestamp, source id, and touched pages",
+        "Keep the log append-only"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F022",
+      "description": "Implement knowledge search over wiki pages",
+      "steps": [
+        "Search index and page content with a grep-style local strategy",
+        "Return ranked hits capped by knowledge.maxPagesPerQuery"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F023",
+      "description": "Search knowledge/index.md before page drill-down",
+      "steps": [
+        "Use index.md to shortlist candidate pages",
+        "Read only the top relevant wiki pages for answering"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F024",
+      "description": "Build an ask prompt from retrieved wiki pages",
+      "steps": [
+        "Construct provider input from question plus page excerpts",
+        "Keep knowledge out of the normal agent system prompt"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F025",
+      "description": "Implement kb ask answer synthesis",
+      "steps": [
+        "Produce a final answer using retrieved wiki pages",
+        "Return page-level and source-level citations in the answer"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F026",
+      "description": "Support kb ask fallback without provider output",
+      "steps": [
+        "Return a deterministic extractive response when model synthesis fails",
+        "Still include citations to retrieved pages"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F027",
+      "description": "Append query events to knowledge/log.md",
+      "steps": [
+        "Record question text, selected pages, and whether an answer was filed",
+        "Preserve append-only ordering"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F028",
+      "description": "Implement optional synthesis filing",
+      "steps": [
+        "Create pages under knowledge/wiki/syntheses when --save is used",
+        "Record citations and supporting page ids in the saved answer"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F029",
+      "description": "Respect knowledge.autoFileAnswers default behavior",
+      "steps": [
+        "Do not auto-file answers when the config flag is false",
+        "Auto-file only when save is requested or the config flag is true"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F030",
+      "description": "Implement orphan-page linting",
+      "steps": [
+        "Detect wiki pages with no inbound links",
+        "Return machine-readable findings and human-readable summaries"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F031",
+      "description": "Implement missing-backlink linting",
+      "steps": [
+        "Detect one-way links that should have reciprocal references",
+        "Report the page pair for follow-up"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F032",
+      "description": "Implement superseded-source linting",
+      "steps": [
+        "Detect newer sources that supersede earlier source ids",
+        "Warn when the older page is not explicitly marked as superseded"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F033",
+      "description": "Implement explicit-conflict linting",
+      "steps": [
+        "Detect conflict markers in pages",
+        "Report them so the operator can investigate"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F034",
+      "description": "Append lint runs to knowledge/log.md",
+      "steps": [
+        "Record lint timestamp and finding counts",
+        "Keep lint history alongside ingest and query history"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F035",
+      "description": "Implement kb status reporting",
+      "steps": [
+        "Show whether knowledge is enabled",
+        "Report source, page, synthesis, and lint counts"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F036",
+      "description": "Implement kb import-memory",
+      "steps": [
+        "Read memory/MEMORY.md without modifying it",
+        "Create knowledge/wiki/topics/project-context.md from project context content"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F037",
+      "description": "Ensure import-memory is idempotent",
+      "steps": [
+        "Update the project-context topic page instead of duplicating it",
+        "Append a single log entry for each import run"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F038",
+      "description": "Expose a kb Typer subcommand group",
+      "steps": [
+        "Register nanobot kb ... under the main CLI",
+        "Keep help text consistent with existing command groups"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F039",
+      "description": "Add kb ingest CLI command",
+      "steps": [
+        "Accept a path or URL argument",
+        "Run the ingest workflow and print touched pages"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F040",
+      "description": "Add kb ask CLI command",
+      "steps": [
+        "Accept a question plus optional --save",
+        "Print the synthesized answer and cited pages"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F041",
+      "description": "Add kb lint CLI command",
+      "steps": [
+        "Run lint checks",
+        "Print findings and a success message when clean"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F042",
+      "description": "Add kb status CLI command",
+      "steps": [
+        "Show knowledge directory paths and counts",
+        "Avoid mutating the workspace during status checks"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F043",
+      "description": "Add kb import-memory CLI command",
+      "steps": [
+        "Expose the memory bridge operation",
+        "Report the created or updated page path"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F044",
+      "description": "Keep ContextBuilder free of full knowledge wiki injection",
+      "steps": [
+        "Do not add knowledge/wiki content to build_system_prompt",
+        "Preserve the existing memory-only prompt behavior"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F045",
+      "description": "Retire the obsolete legacy dream module",
+      "steps": [
+        "Delete or otherwise remove the unused nanobot/agent/dream.py path",
+        "Leave the active Dream implementation in nanobot/agent/memory.py untouched"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F046",
+      "description": "Stop presenting MemOS as the primary knowledge path",
+      "steps": [
+        "Keep memory.memos optional for memory facts only",
+        "Do not wire knowledge wiki behavior through MemOS"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F047",
+      "description": "Add unit tests for frontmatter and page serialization",
+      "steps": [
+        "Verify metadata fields round-trip correctly",
+        "Verify links_out and source_ids survive reloads"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F048",
+      "description": "Add unit tests for kb ingest",
+      "steps": [
+        "Verify raw source immutability and file creation",
+        "Verify index and log updates after ingest"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F049",
+      "description": "Add unit tests for kb ask search and answer routing",
+      "steps": [
+        "Verify index-first retrieval behavior",
+        "Verify citations are included in answers"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F050",
+      "description": "Add unit tests for kb lint",
+      "steps": [
+        "Verify orphan, backlink, superseded, and conflict findings",
+        "Verify clean states return no findings"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F051",
+      "description": "Add integration tests for the full knowledge workflow",
+      "steps": [
+        "Ingest complementary sources, ask a cross-source question, save the answer, then lint",
+        "Verify the wiki stays coherent after the full flow"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F052",
+      "description": "Add CLI tests for kb subcommands",
+      "steps": [
+        "Cover kb ingest, ask, lint, status, and import-memory",
+        "Keep tests isolated with temporary workspaces"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F053",
+      "description": "Document the new knowledge wiki workflow",
+      "steps": [
+        "Update README and/or dedicated docs to explain knowledge vs memory",
+        "Document the kb commands and workspace structure"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F054",
+      "description": "Run targeted verification for the completed rollout",
+      "steps": [
+        "Run knowledge tests and relevant CLI tests",
+        "Re-check memory and Dream regressions that overlap the touched code"
+      ],
+      "passes": false
+    },
+    {
+      "id": "F055",
+      "description": "Checkpoint the completed implementation state",
+      "steps": [
+        "Update PLAN.json passes and append PROGRESS.md entries",
+        "Create delivery commits with the required Codex trailer"
+      ],
+      "passes": false
+    }
+  ]
+}
