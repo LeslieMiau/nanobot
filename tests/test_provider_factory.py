@@ -107,7 +107,7 @@ def test_build_available_models_uses_openai_codex_for_default_entry() -> None:
         config,
         default_model=config.agents.defaults.model,
         default_provider_name=config.get_provider_name(config.agents.defaults.model),
-        coding_config=config.agents.defaults.coding,
+        coding_config=getattr(config.agents.defaults, "coding", None),
     )
 
     assert any(

@@ -189,6 +189,7 @@ class AgentLoop:
     """
 
     _RUNTIME_CHECKPOINT_KEY = "runtime_checkpoint"
+    _MODEL_SELECTION_KEY = "model_selection"
 
     def __init__(
         self,
@@ -213,8 +214,12 @@ class AgentLoop:
         coding_task_manager: CodexWorkerManager | None = None,
         hooks: list[AgentHook] | None = None,
         channel_status_provider: Callable[[], dict[str, Any]] | None = None,
+        provider_name: str | None = None,
+        provider_switcher: Callable[[str | None, str | None], tuple[LLMProvider, str, str | None]] | None = None,
+        available_models_provider: Callable[[str | None, str | None], list[Any]] | None = None,
     ):
         from nanobot.config.schema import ExecToolConfig, WebToolsConfig
+        from nanobot.agent.model_selection import ModelSelectionController
 
         defaults = AgentDefaults()
         self.bus = bus
@@ -245,6 +250,12 @@ class AgentLoop:
         self.exec_config = exec_config or ExecToolConfig()
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
+        self.provider_name = provider_name
+        self._provider_switcher = provider_switcher
+        self._available_models_provider = available_models_provider
+        self._default_provider = provider
+        self._default_provider_name = provider_name
+        self._default_model = self.model
         self._start_time = time.time()
         self._last_usage: dict[str, int] = {}
         self._extra_hooks: list[AgentHook] = hooks or []
@@ -300,6 +311,7 @@ class AgentLoop:
         self._register_default_tools()
         self.commands = CommandRouter()
         register_builtin_commands(self.commands)
+        self._model_selection = ModelSelectionController(self)
         if self.coding_task_manager is not None:
             from nanobot.coding_tasks import build_coding_task_runtime
             from nanobot.coding_tasks.router import register_coding_task_commands
@@ -317,6 +329,105 @@ class AgentLoop:
                 policy=runtime.policy,
                 repo_resolver=runtime.repo_resolver,
             )
+
+    def _effective_session_model(self, session: Session) -> tuple[str, str | None]:
+        return self._model_selection.effective_session_model(session)
+
+    def _persist_session_model_selection(
+        self,
+        session: Session,
+        *,
+        model: str,
+        provider_name: str | None,
+    ) -> None:
+        self._model_selection.persist_session_model_selection(
+            session,
+            model=model,
+            provider_name=provider_name,
+        )
+
+    def _clear_session_model_selection(self, session: Session) -> None:
+        self._model_selection.clear_session_model_selection(session)
+
+    def _switch_model_provider(self, requested_model: str, provider_name: str | None = None) -> None:
+        self._model_selection.switch_model_provider(requested_model, provider_name=provider_name)
+
+    def _reset_model_provider(self) -> None:
+        self._model_selection.reset_model_provider()
+
+    def _restore_session_model_provider(self, session: Session) -> None:
+        self._model_selection.restore_session_model_provider(session)
+
+    def _format_available_models(self, session: Session) -> str:
+        return self._model_selection.format_available_models(session)
+
+    def _resolve_model_selection_argument(
+        self,
+        session: Session,
+        arg: str,
+    ) -> tuple[str, str | None]:
+        return self._model_selection.resolve_model_selection_argument(session, arg)
+
+    def _handle_model_command_message(
+        self,
+        msg: InboundMessage,
+        session: Session,
+        cmd_arg: str,
+    ) -> OutboundMessage:
+        arg = cmd_arg.strip()
+        if not arg:
+            current_model, current_provider_name = self._effective_session_model(session)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    f"Current model: `{current_model}`\n"
+                    f"Current provider: `{current_provider_name or 'unknown'}`\n"
+                    "Use `/model list` to inspect choices, `/model <name>` or `/model <number>` "
+                    "to switch, or `/model reset` to restore default."
+                ),
+                metadata={**dict(msg.metadata or {}), "render_as": "text"},
+            )
+        if arg.lower() in {"list", "ls", "列表"}:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=self._format_available_models(session),
+                metadata={**dict(msg.metadata or {}), "render_as": "text"},
+            )
+        if arg.lower() in {"reset", "default", "默认", "恢复默认"}:
+            self._reset_model_provider()
+            self._clear_session_model_selection(session)
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=(
+                    f"Model reset to default: `{self.model}` "
+                    f"(provider: `{self.provider_name or 'unknown'}`)"
+                ),
+                metadata={**dict(msg.metadata or {}), "render_as": "text"},
+            )
+        try:
+            requested_model, requested_provider_name = self._resolve_model_selection_argument(session, arg)
+            self._switch_model_provider(requested_model, provider_name=requested_provider_name)
+            self._persist_session_model_selection(
+                session,
+                model=self.model,
+                provider_name=self.provider_name,
+            )
+        except Exception as exc:
+            return OutboundMessage(
+                channel=msg.channel,
+                chat_id=msg.chat_id,
+                content=f"Model switch failed: {exc}",
+                metadata={**dict(msg.metadata or {}), "render_as": "text"},
+            )
+        return OutboundMessage(
+            channel=msg.channel,
+            chat_id=msg.chat_id,
+            content=f"Model switched to: `{self.model}` (provider: `{self.provider_name or 'unknown'}`)",
+            metadata={**dict(msg.metadata or {}), "render_as": "text"},
+        )
 
     def _register_default_tools(self) -> None:
         """Register the default set of tools."""
@@ -580,13 +691,16 @@ class AgentLoop:
         on_stream_end: Callable[..., Awaitable[None]] | None = None,
     ) -> OutboundMessage | None:
         """Process a single inbound message and return the response."""
+        from nanobot.agent.model_selection import ModelSelectionController
+
         # System messages: parse origin from chat_id ("channel:chat_id")
         if msg.channel == "system":
             channel, chat_id = (msg.chat_id.split(":", 1) if ":" in msg.chat_id
                                 else ("cli", msg.chat_id))
             logger.info("Processing system message from {}", msg.sender_id)
-            key = f"{channel}:{chat_id}"
+            key = session_key or msg.session_key_override or f"{channel}:{chat_id}"
             session = self.sessions.get_or_create(key)
+            self._restore_session_model_provider(session)
             if self._restore_runtime_checkpoint(session):
                 self.sessions.save(session)
             await self.consolidator.maybe_consolidate_by_tokens(session)
@@ -614,6 +728,7 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
+        self._restore_session_model_provider(session)
         if self._restore_runtime_checkpoint(session):
             self.sessions.save(session)
 
@@ -622,6 +737,10 @@ class AgentLoop:
         ctx = CommandContext(msg=msg, session=session, key=key, raw=raw, loop=self)
         if result := await self.commands.dispatch(ctx):
             return result
+
+        natural_switch = ModelSelectionController.parse_natural_model_switch(raw)
+        if natural_switch:
+            return self._handle_model_command_message(msg, session, natural_switch)
 
         await self.consolidator.maybe_consolidate_by_tokens(session)
 

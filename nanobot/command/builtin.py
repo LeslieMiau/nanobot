@@ -285,38 +285,10 @@ async def cmd_dream_restore(ctx: CommandContext) -> OutboundMessage:
 
 
 async def cmd_model(ctx: CommandContext) -> OutboundMessage:
-    """List current model or switch to a new one."""
+    """Show, list, reset, or switch the runtime model for this session."""
     loop = ctx.loop
-    msg = ctx.msg
-    new_model = ctx.args.strip()
-
-    if not new_model:
-        return OutboundMessage(
-            channel=msg.channel,
-            chat_id=msg.chat_id,
-            content=f"Current model: `{loop.model}`\nUsage: /model <model-name> to switch",
-            metadata={"render_as": "text"},
-        )
-
-    # Switch model in-memory
-    loop.model = new_model
-
-    # Persist to config
-    try:
-        from nanobot.config.loader import get_config_path, load_config, save_config
-        config = load_config(get_config_path())
-        config.agents.defaults.model = new_model
-        save_config(config)
-        note = " (saved to config)"
-    except Exception as e:
-        note = f" (warning: could not save config: {e})"
-
-    return OutboundMessage(
-        channel=msg.channel,
-        chat_id=msg.chat_id,
-        content=f"Switched to model: `{new_model}`{note}",
-        metadata={"render_as": "text"},
-    )
+    session = ctx.session or loop.sessions.get_or_create(ctx.key)
+    return loop._handle_model_command_message(ctx.msg, session, ctx.args)
 
 
 async def cmd_help(ctx: CommandContext) -> OutboundMessage:

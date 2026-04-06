@@ -2,66 +2,55 @@
   {
     "id": 1,
     "category": "baseline",
-    "description": "Re-anchor the completed AICodeWith provider harness to the follow-up goal of exposing only live-verified AICodeWith models in `/model list`.",
+    "description": "Re-anchor the harness to the live `/model list` runtime regression reported after the AICodeWith catalog landed.",
     "steps": [
-      "Record in `PROGRESS.md` that the user asked for live verification and `/model list` catalog exposure after the provider integration landed.",
-      "Replace `PLAN.json` so the active harness tracks the catalog-update follow-up instead of the already-completed provider-routing plan.",
-      "Preserve the existing note about the unrelated `tests/test_coding_mode.py` baseline failure as a repository caveat rather than reclassifying it as part of this task."
+      "Record in `PROGRESS.md` that the running gateway treated `/model list` as a model switch instead of a listing request.",
+      "Replace `PLAN.json` so the active follow-up tracks the runtime `/model` repair rather than the already-completed catalog exposure work.",
+      "Preserve the unrelated `tests/test_coding_mode.py` import failure as an existing repository caveat rather than a new blocker introduced by this fix."
     ],
     "passes": true
   },
   {
     "id": 2,
-    "category": "verification",
-    "description": "AICodeWith candidate models are validated against the user's current local API key before any new `/model list` entries are added.",
+    "category": "runtime",
+    "description": "The active AgentLoop runtime exposes session-scoped model-selection state instead of relying on the stale config-writing `/model` command.",
     "steps": [
-      "Use the current local `providers.aicodewith` config from `~/.nanobot/config.json` to probe the candidate model set.",
-      "Record which models return a successful minimal response and which ones fail upstream.",
-      "Limit the new catalog entries to the models that were actually verified as usable in this run."
+      "Add the missing model-selection runtime fields and helper methods needed by the current slash-command path.",
+      "Restore per-session model/provider persistence and reset behavior without writing `list` or `reset` into the global config.",
+      "Ensure system-message and session-key-override flows reuse the stored session selection."
     ],
     "passes": true
   },
   {
     "id": 3,
-    "category": "catalog",
-    "description": "The provider catalog exposes curated AICodeWith entries in `/model list` even though AICodeWith is implemented as a gateway.",
+    "category": "commands",
+    "description": "The builtin `/model` command supports listing, index selection, reset, and provider-aware switching on the runtime path used by `nanobot gateway`.",
     "steps": [
-      "Update `nanobot/providers/catalog.py` so `aicodewith` is not dropped by the blanket gateway skip rule.",
-      "Keep the existing gateway-skip behavior for other providers unless they are explicitly allowlisted.",
-      "Verify the catalog still avoids adding speculative entries for unvalidated gateways."
+      "Replace the old builtin `/model` implementation that blindly wrote `ctx.args` into `config.agents.defaults.model`.",
+      "Return a formatted available-model list for `/model list` and support `/model <number>` resolution against the listed entries.",
+      "Keep natural-language model switch aliases aligned with the restored runtime model-selection helpers where practical."
     ],
     "passes": true
   },
   {
     "id": 4,
-    "category": "catalog",
-    "description": "The AICodeWith catalog entries match the live-verified usable model set rather than the generic OpenAI or Anthropic defaults.",
+    "category": "runtime",
+    "description": "The live runtime entrypoints actually provide provider-switch and available-model callbacks to AgentLoop.",
     "steps": [
-      "Add the verified AICodeWith GPT/Codex, Claude, and Gemini model names to the curated provider catalog.",
-      "Do not include models that returned live upstream errors in this run.",
-      "Verify the model strings match the forms expected by nanobot model switching."
+      "Wire `nanobot gateway`, `nanobot serve`, `nanobot agent`, and the SDK facade through the shared provider-switcher helper.",
+      "Make the available-model callback tolerant of missing optional config fields in the current schema.",
+      "Confirm the runtime list still shows the verified AICodeWith catalog entries."
     ],
     "passes": true
   },
   {
     "id": 5,
-    "category": "tests",
-    "description": "Model-list tests prove AICodeWith now contributes curated catalog entries and only for the intended verified models.",
-    "steps": [
-      "Replace the old assertion that AICodeWith must not produce catalog entries.",
-      "Assert that the verified AICodeWith catalog models appear with `provider_name == aicodewith` and `source == catalog`.",
-      "Keep the test isolated from network calls by validating the catalog output shape rather than replaying live probes."
-    ],
-    "passes": true
-  },
-  {
-    "id": 6,
     "category": "verification",
-    "description": "The `/model list` follow-up is checkpointed with targeted tests and progress notes so later sessions can trust the visible catalog entries.",
+    "description": "The `/model` regression fix is validated with focused tests and a live tmux gateway check.",
     "steps": [
-      "Run the focused pytest commands that cover the updated catalog behavior.",
-      "Append the live-verification results and the targeted test results to `PROGRESS.md`.",
-      "Commit the checkpoint after the catalog update passes verification."
+      "Run focused pytest coverage for the restored `/model` behavior and runtime provider-switch wiring.",
+      "Repair the user's polluted `~/.nanobot/config.json` default model after the command-path fix lands.",
+      "Restart the existing tmux gateway and verify a real `/model list` request now shows selectable models instead of switching to model `list`."
     ],
     "passes": true
   }

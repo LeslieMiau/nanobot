@@ -25,6 +25,8 @@ class ModelSelectionController:
     def parse_natural_model_switch(content: str) -> str | None:
         """Recognize natural-language model switch requests."""
         patterns = (
+            r"^(?:请)?切换模型\s+(.+)$",
+            r"^(?:请)?换模型\s+(.+)$",
             r"^(?:请)?(?:把)?模型(?:切换|换|改)(?:到|成|为)?\s+(.+)$",
             r"^(?:请)?(?:把)?模型切换(?:到|成|为)?\s+(.+)$",
             r"^(?:请)?(?:把)?模型换成\s+(.+)$",
@@ -42,6 +44,11 @@ class ModelSelectionController:
         self.loop.provider = provider
         self.loop.provider_name = provider_name
         self.loop.model = model
+        self.loop.runner.provider = provider
+        self.loop.consolidator.provider = provider
+        self.loop.consolidator.model = model
+        self.loop.dream.provider = provider
+        self.loop.dream.model = model
         self.loop.subagents.provider = provider
         self.loop.subagents.model = model
 

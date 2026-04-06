@@ -101,13 +101,14 @@ def build_provider_switcher(
         current_model: str | None,
         current_provider: str | None,
     ) -> list[AvailableModel]:
+        coding_config = getattr(config.agents.defaults, "coding", None)
         return build_available_models(
             config,
             default_model=config.agents.defaults.model,
             default_provider_name=default_provider_name,
             current_model=current_model,
             current_provider_name=current_provider,
-            coding_config=config.agents.defaults.coding,
+            coding_config=coding_config,
         )
 
     return default_provider_name, provider_switcher, available_models_provider

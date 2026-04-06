@@ -26,6 +26,8 @@ class _Provider(LLMProvider):
         max_tokens=4096,
         temperature=0.7,
         reasoning_effort=None,
+        tool_choice=None,
+        **kwargs,
     ) -> LLMResponse:
         self.last_model = model
         return LLMResponse(content=f"{self.label}:{model}")
@@ -49,6 +51,7 @@ def _make_loop(
         workspace=workspace,
         model="dummy",
         max_iterations=1,
+        context_window_tokens=65536,
         provider_name=provider_name,
         provider_switcher=provider_switcher,
         available_models_provider=available_models_provider,
@@ -255,7 +258,7 @@ def test_build_available_models_filters_unauthenticated_github_copilot(monkeypat
         config,
         default_model=config.agents.defaults.model,
         default_provider_name="openai",
-        coding_config=config.agents.defaults.coding,
+        coding_config=getattr(config.agents.defaults, "coding", None),
     )
 
     assert not any(model.provider_name == "github_copilot" for model in models)

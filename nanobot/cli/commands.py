@@ -743,6 +743,7 @@ def serve(
     from loguru import logger
     from nanobot.agent.loop import AgentLoop
     from nanobot.api.server import create_app
+    from nanobot.app.runtime import build_provider_switcher
     from nanobot.bus.queue import MessageBus
     from nanobot.session.manager import SessionManager
 
@@ -759,6 +760,7 @@ def serve(
     sync_workspace_templates(runtime_config.workspace_path)
     bus = MessageBus()
     provider = _make_provider(runtime_config)
+    default_provider_name, provider_switcher, available_models_provider = build_provider_switcher(runtime_config)
     session_manager = SessionManager(runtime_config.workspace_path)
     agent_loop = AgentLoop(
         bus=bus,
@@ -777,6 +779,9 @@ def serve(
         mcp_servers=runtime_config.tools.mcp_servers,
         channels_config=runtime_config.channels,
         timezone=runtime_config.agents.defaults.timezone,
+        provider_name=default_provider_name,
+        provider_switcher=provider_switcher,
+        available_models_provider=available_models_provider,
     )
 
     model_name = runtime_config.agents.defaults.model
@@ -835,6 +840,7 @@ def gateway(
 ):
     """Start the nanobot gateway."""
     from nanobot.agent.loop import AgentLoop
+    from nanobot.app.runtime import build_provider_switcher
     from nanobot.bus.queue import MessageBus
     from nanobot.channels.manager import ChannelManager
     from nanobot.cron.service import CronService
@@ -863,6 +869,7 @@ def gateway(
         sync_workspace_templates(config.workspace_path)
         bus = MessageBus()
         provider = _make_provider(config)
+        default_provider_name, provider_switcher, available_models_provider = build_provider_switcher(config)
         session_manager = SessionManager(config.workspace_path)
         restart_reason: str | None = None
 
@@ -911,6 +918,9 @@ def gateway(
             coding_task_runtime=coding_task_runtime,
             coding_task_manager=codex_workers,
             channel_status_provider=channels.get_status,
+            provider_name=default_provider_name,
+            provider_switcher=provider_switcher,
+            available_models_provider=available_models_provider,
         )
 
         # Set cron callback (needs agent)
@@ -1513,6 +1523,7 @@ def agent(
     from loguru import logger
 
     from nanobot.agent.loop import AgentLoop
+    from nanobot.app.runtime import build_provider_switcher
     from nanobot.bus.queue import MessageBus
     from nanobot.cron.service import CronService
 
@@ -1521,6 +1532,7 @@ def agent(
 
     bus = MessageBus()
     provider = _make_provider(config)
+    default_provider_name, provider_switcher, available_models_provider = build_provider_switcher(config)
 
     # Preserve existing single-workspace installs, but keep custom workspaces clean.
     if is_default_workspace(config.workspace_path):
@@ -1552,6 +1564,9 @@ def agent(
         mcp_servers=config.tools.mcp_servers,
         channels_config=config.channels,
         timezone=config.agents.defaults.timezone,
+        provider_name=default_provider_name,
+        provider_switcher=provider_switcher,
+        available_models_provider=available_models_provider,
     )
     restart_notice = consume_restart_notice_from_env()
     if restart_notice and should_show_cli_restart_notice(restart_notice, session_id):

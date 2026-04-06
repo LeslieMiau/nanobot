@@ -49,6 +49,7 @@ class Nanobot:
         """
         from nanobot.config.loader import load_config
         from nanobot.config.schema import Config
+        from nanobot.app.runtime import build_provider_switcher
 
         resolved: Path | None = None
         if config_path is not None:
@@ -63,6 +64,7 @@ class Nanobot:
             )
 
         provider = _make_provider(config)
+        default_provider_name, provider_switcher, available_models_provider = build_provider_switcher(config)
         bus = MessageBus()
         defaults = config.agents.defaults
 
@@ -81,6 +83,9 @@ class Nanobot:
             restrict_to_workspace=config.tools.restrict_to_workspace,
             mcp_servers=config.tools.mcp_servers,
             timezone=defaults.timezone,
+            provider_name=default_provider_name,
+            provider_switcher=provider_switcher,
+            available_models_provider=available_models_provider,
         )
         return cls(loop)
 

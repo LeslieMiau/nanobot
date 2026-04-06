@@ -493,3 +493,51 @@
     - `catalog:gemini/gemini-2.5-flash`
 - Remaining caveats:
   - The repository-wide baseline still has the unrelated `tests/test_coding_mode.py` collection error for missing `CodingConfig`; this `/model list` work did not attempt to resolve that separate issue.
+
+## Session update - 2026-04-06 (live `/model list` runtime regression)
+- New user-reported regression:
+  - The running `nanobot gateway` did not show selectable models for `/model list`.
+  - Live tmux logs showed the command path treated `/model list` as a model switch, then later tried to call AICodeWith with model name `list`, returning `模型 list 不存在或未上线`.
+  - The stale builtin slash-command path in `nanobot/command/builtin.py` also wrote `/model reset` into `~/.nanobot/config.json`, which polluted `agents.defaults.model` to the literal string `reset`.
+- Diagnosis completed before code changes:
+  - The active gateway is using the current repo source, not a stale installed wheel; the bug is in the checked-out runtime path.
+  - The live runtime still routes slash commands through `nanobot.command.builtin.cmd_model`, not the newer helper logic mirrored in `nanobot/agent/command_router.py`.
+  - `nanobot/providers/catalog.py` already returns the verified AICodeWith catalog entries when invoked directly; the missing piece is runtime wiring plus the outdated builtin `/model` implementation.
+- Execution plan for this follow-up:
+  - Restore session-scoped model selection helpers on the actual `AgentLoop` runtime used by the gateway.
+  - Upgrade the builtin `/model` command to support `list`, `reset`, and indexed selection without mutating global config on every switch.
+  - Wire the live CLI and SDK entrypoints to pass provider-switcher and available-model callbacks, then repair the polluted local config and re-verify against the tmux gateway.
+
+## Session update - 2026-04-06 (live `/model list` runtime regression fixed)
+- Completed features:
+  - Extended `nanobot/agent/loop.py` with the missing runtime model-selection state used by the current slash-command path:
+    - default provider/model tracking
+    - session-scoped model/provider persistence
+    - reset and list helpers
+    - session restore on each message, including `system` messages that rely on `session_key_override`
+  - Updated `nanobot/command/builtin.py` so the active `/model` command now supports:
+    - `/model`
+    - `/model list`
+    - `/model <number>`
+    - `/model <name>`
+    - `/model reset`
+    - and no longer writes `list` / `reset` into `~/.nanobot/config.json`
+  - Added natural-language switch coverage to the live runtime path by intercepting recognized model-switch phrases before the normal LLM turn.
+  - Wired the actual entrypoints used in this repo to provide provider-switch and available-model callbacks to `AgentLoop`:
+    - `nanobot gateway`
+    - `nanobot serve`
+    - `nanobot agent`
+    - `Nanobot.from_config()`
+  - Repaired the polluted local `~/.nanobot/config.json` default model from the invalid literal `reset` back to the usable `gpt-5.4`.
+- Verification:
+  - `.venv/bin/pytest -q tests/test_model_command.py -k 'model_command and not image_confirm'` -> passed (`16 passed, 1 deselected`)
+  - `.venv/bin/pytest -q tests/test_nanobot_facade.py` -> passed (`12 passed`)
+  - `.venv/bin/pytest -q tests/cli/test_commands.py::test_make_provider_uses_aicodewith_custom_backend tests/test_provider_factory.py::test_create_provider_uses_custom_provider_for_aicodewith` -> passed (`2 passed`)
+  - `./.venv/bin/nanobot agent -m '/model list' --no-markdown` -> now prints a real selectable list with the verified AICodeWith entries instead of switching to model `list`
+  - `./.venv/bin/nanobot agent -s verify-model-list -m '/model 2' --no-markdown` -> switched to `gpt-5.3-codex` on provider `aicodewith`
+  - `./.venv/bin/nanobot agent -s verify-model-list -m '/model' --no-markdown` -> confirmed the session-scoped selection persisted as `gpt-5.3-codex` / `aicodewith`
+  - Local telegram-path simulation via `process_direct('/model list', session_key='telegram:6460709699', channel='telegram', chat_id='6460709699')` -> returned the same selectable model list
+  - Restarted the live `nanobot:1.0` tmux gateway in place and confirmed startup logs again reached `Telegram bot @kimmydoomyBot connected`
+- Remaining caveats:
+  - The repository-wide baseline still contains the unrelated `tests/test_coding_mode.py` import failure for missing `CodingConfig`; this fix did not attempt to resolve that separate schema drift.
+  - `agents.defaults.provider` remains `auto`, and the user's config still has `providers.custom` pointing at the same AICodeWith endpoint, so the default `gpt-5.4` entry still labels as provider `custom` while the catalog-only entries remain labeled `aicodewith`.
