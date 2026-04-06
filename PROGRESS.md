@@ -264,3 +264,15 @@
   - Launched the updated app once on-device with `xcrun devicectl device process launch --device ... com.miau.voicebridge`.
 - Remaining step:
   - Re-run the manual spoken Siri flow on the iPhone with the updated app bundle and confirm whether Siri now speaks the backend reply instead of ending with the generic error.
+
+## Session update - 2026-04-06 (Opus handoff doc)
+- Added a dedicated handoff note for the next agent:
+  - [opus-handoff-2026-04-06.md](/Users/miau/Documents/nanobot/.claude/worktrees/objective-hoover/ios/VoiceBridge/Docs/opus-handoff-2026-04-06.md)
+- The handoff explicitly separates:
+  - Siri/App Intent reply-path behavior
+  - backend/provider quota failures
+- It also includes:
+  - latest working and failing evidence
+  - relevant files
+  - latest checkpoint commits
+  - suggested next actions for continuation
