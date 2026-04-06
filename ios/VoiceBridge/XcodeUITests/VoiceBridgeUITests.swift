@@ -89,10 +89,13 @@ final class VoiceBridgeUITests: XCTestCase {
         app.launchEnvironment["VOICEBRIDGE_UI_TEST_BASE_URL"] = configuredBaseURL
         app.launchEnvironment["VOICEBRIDGE_UI_TEST_API_KEY"] = apiKey
         app.launch()
+        sleep(5)
+        XCUIDevice.shared.press(.home)
 
         XCUIDevice.shared.siriService.activate(voiceRecognitionText: "问纳博特")
-        sleep(1)
+        sleep(3)
         XCUIDevice.shared.siriService.activate(voiceRecognitionText: "你好")
+        sleep(5)
         app.activate()
 
         let settingsTab = app.tabBars.buttons["Settings"]

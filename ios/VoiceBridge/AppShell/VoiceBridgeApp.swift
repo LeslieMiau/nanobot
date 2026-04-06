@@ -1,3 +1,4 @@
+import AppIntents
 import SwiftUI
 
 @main
@@ -6,6 +7,7 @@ struct VoiceBridgeApp: App {
 
     init() {
         BridgeLaunchConfiguration.primeUserDefaults()
+        VoiceBridgeShortcuts.updateAppShortcutParameters()
     }
 
     var body: some Scene {

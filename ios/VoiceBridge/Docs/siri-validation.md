@@ -29,6 +29,17 @@ Only `iPhone Siri` is part of the v1 pass condition.
 - The iPhone must have a real route to that host. In practice this means the phone and Mac must be on the same reachable LAN or another verified route, not just physically connected by USB for Xcode deployment.
 - The first live run may trigger system prompts for local-network access or wireless-data access. Those prompts must be allowed, otherwise the app will surface `The Internet connection appears to be offline.`
 - If the Mac firewall is enabled, the interpreter serving `nanobot` must also be allowed for incoming connections. A successful local `curl` from the Mac is not sufficient proof that the iPhone can reach the same service.
+- After the app launches, it now calls `VoiceBridgeShortcuts.updateAppShortcutParameters()` so the system refreshes the registered App Shortcut metadata before Siri validation.
+
+## Real-device Siri automation findings
+
+- A real-device manual smoke test now passes end-to-end: the installed app can call `nanobot /chat` and render the reply on the connected iPhone.
+- A real-device Siri control probe using the built-in phrase `Open Safari` also passes under `XCUISiriService`, so XCTest still has working Siri automation on the physical device.
+- The custom Voice Bridge Siri phrase still does **not** execute `AskBridgeIntent` under XCTest automation on the physical device:
+  - `问纳博特` followed by `你好` leaves `settings.lastIntentOutcome` at `No Siri intent recorded`
+  - no new Voice Bridge-triggered `/chat` request is observed for that automated run
+- Waiting after app launch, refreshing App Shortcut parameters on startup, and moving the app to the background before the Siri step did not change that result.
+- Treat this as an XCTest automation boundary, not a proof that the product is broken on-device. The remaining acceptance step is a manual spoken Siri run on the physical iPhone.
 
 ## Inline prompt note
 

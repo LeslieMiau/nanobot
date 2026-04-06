@@ -209,3 +209,23 @@
     - open Safari on the iPhone and visit `http://192.168.3.79:8900/health`
   - If Safari cannot load `/health`, keep the blocker classified as network topology / host ingress, not app code.
   - Only after the phone can load `/health` should the harness resume real-device manual `/chat` smoke and then Siri/App Intent acceptance.
+
+## Session update - 2026-04-06 (real-device Siri automation boundary)
+- Completed verification:
+  - User confirmed the iPhone can reach `http://192.168.3.79:8900/health` in Safari, so the LAN path is valid from the device.
+  - After the user allowed wireless data for the app, the real-device manual smoke passed again:
+    - `xcodebuild ... test -only-testing:VoiceBridgeUITests/VoiceBridgeUITests/testManualSmokeFlowDisplaysBackendReply` -> passed on `Miau’s iPhone`
+  - Added `VoiceBridgeShortcuts.updateAppShortcutParameters()` on app launch so the system refreshes App Shortcut metadata before Siri validation.
+  - Re-ran the real-device Siri follow-up acceptance twice:
+    - once immediately after the shortcut refresh change
+    - once with extra delay/backgrounding so App Shortcut indexing had time to settle
+  - Both real-device Siri follow-up runs still failed with the same symptom:
+    - `settings.lastIntentOutcome` stayed `No Siri intent recorded`
+    - no new Voice Bridge-driven `/chat` request was observed for those automated Siri runs
+  - Added a real-device Siri control probe using the built-in phrase `Open Safari`:
+    - `xcodebuild ... test -only-testing:VoiceBridgeUITests/VoiceBridgeUITests/testSimulatorSiriCanOpenSafari` -> passed on the physical iPhone
+- Findings:
+  - The product path is not blocked by signing, ATS, device networking, or generic Siri automation.
+  - The remaining blocker is narrower: under XCTest's `XCUISiriService`, the custom App Shortcut phrase `问纳博特` followed by a spoken answer does not execute `AskBridgeIntent` on the physical iPhone.
+  - Because built-in Siri automation still works on the same device, this is best classified as a custom App Shortcut automation boundary, not a general Siri test failure.
+  - At this point, the remaining acceptance step for v1 is a manual spoken Siri run on the iPhone rather than another automated Siri UI test iteration.
