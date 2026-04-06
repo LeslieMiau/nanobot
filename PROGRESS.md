@@ -370,3 +370,18 @@
   - This means the local OAuth token is present and the login flow is healthy, but the currently authorized OpenAI account is still not usable for inference at this moment because the upstream account is quota-limited or rate-limited.
 - Harness note:
   - `PLAN.json` remains unchanged because this was an operational reauthorization/debugging request, not a new Voice Bridge feature item.
+
+## Session update - 2026-04-06 (OpenAI OAuth reauthorization re-run)
+- User-directed scope:
+  - The user asked to re-run `openai-oauth` authorization once more.
+- Completed verification:
+  - Re-ran `bash ~/.codex/scripts/global-init.sh`; the repo-wide baseline still stops on the unrelated `tests/test_coding_mode.py` import error for `CodingConfig`.
+  - `.venv/bin/pytest tests/test_openai_oauth_provider.py -q` -> passed (`2 passed`), so the OAuth provider code path remains healthy locally.
+  - `.venv/bin/nanobot provider login openai-oauth` -> completed successfully again and reported:
+    - `Authenticated with OpenAI (OAuth)  b27ce0a0-638b-46b7-8dcc-12c91276a68b`
+- New finding:
+  - A fresh real provider smoke still fails after the new reauthorization:
+    - `.venv/bin/nanobot agent -m 'Say only ok'` -> retried three times, then returned `ChatGPT usage quota exceeded or rate limit triggered. Please try again later.`
+  - This confirms the current authorized account/token pair is still valid enough to complete OAuth login, but inference remains blocked by upstream quota or rate limiting rather than a local login failure.
+- Harness note:
+  - `PLAN.json` remains unchanged because this was a repeated operational OAuth reauth request rather than new product work.
