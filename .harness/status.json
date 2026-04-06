@@ -22,7 +22,7 @@
   "blocking_issues": [
     "Free-form String inline phrases such as '问纳博特 {prompt}' fail real App Shortcuts metadata validation; v1 currently supports only the follow-up Siri phrase.",
     "Simulator Siri can execute built-in commands such as 'Open Safari', but the supported custom Voice Bridge phrase still does not trigger AskBridgeIntent in UI tests; simulator Siri cannot replace real-device Siri acceptance.",
-    "A physical iPhone Siri run is still pending; current verification now covers simulator build, simulator unit tests, and simulator UI smoke, but not on-device voice invocation.",
-    "No non-simulator iPhone destination is visible in `xcrun xcdevice list`, so end-to-end Siri speech acceptance cannot be completed on this machine yet."
+    "A physical iPhone destination is now visible and paired, but Xcode on this Mac has no logged-in developer account, code-signing identity, or provisioning profiles, so real-device builds fail before install.",
+    "End-to-end Siri speech acceptance is blocked until Xcode can select a development team and automatic signing can create the required app identity/profile."
   ]
 }

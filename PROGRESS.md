@@ -138,3 +138,24 @@
 - Remaining blockers / follow-up:
   - v1 still needs physical iPhone Siri acceptance for `嘿 Siri，问纳博特` followed by the spoken prompt answer.
   - Feature `#45` remains incomplete because Apple still does not support free-form inline App Shortcut phrases for this design.
+
+## Session update - 2026-04-06 (real device bring-up)
+- Completed verification:
+  - `bash ~/.codex/scripts/global-init.sh` -> passed during session restore.
+  - `xcrun devicectl manage pair --device 00008130-001924C20E98001C` -> paired successfully with `Miau’s iPhone`.
+  - `xcrun devicectl device info details --device 00008130-001924C20E98001C` -> now shows:
+    - `developerModeStatus: enabled`
+    - `ddiServicesAvailable: true`
+    - `pairingState: paired`
+    - `transportType: wired`
+  - `xcodebuild -project ios/VoiceBridge/VoiceBridge.xcodeproj -scheme VoiceBridge -showdestinations` -> lists `Miau’s iPhone` as an available iOS destination.
+- New blocker:
+  - `xcodebuild -project ios/VoiceBridge/VoiceBridge.xcodeproj -scheme VoiceBridge -destination 'id=00008130-001924C20E98001C' -allowProvisioningUpdates build` now fails at signing rather than device connectivity.
+  - Exact failure: `Signing for "VoiceBridge" requires a development team. Select a development team in the Signing & Capabilities editor.`
+  - Local Xcode signing state on this Mac is empty:
+    - `security find-identity -v -p codesigning` -> `0 valid identities found`
+    - `defaults read com.apple.dt.Xcode DVTDeveloperAccountManagerAppleIDLists` -> empty account list
+    - `~/Library/MobileDevice/Provisioning Profiles` -> empty
+- Remaining blockers / follow-up:
+  - The next action is not code work; Xcode on this Mac needs an Apple ID/team so automatic signing can create a development identity and provisioning profile.
+  - Once Xcode has a usable team, rerun the device build with `-allowProvisioningUpdates`, then continue with app install, manual `/chat`, and Siri acceptance.
