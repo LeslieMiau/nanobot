@@ -616,3 +616,34 @@
 - Remaining caveats:
   - The repository-wide baseline still contains the unrelated `tests/test_coding_mode.py` import failure for missing `CodingConfig`; this follow-up did not touch that separate schema drift.
   - `glm-5`, `deepseek-v3.2`, and `kimi-k2.5` are now selectable in nanobot and route through AICodeWith correctly, but the current AICodeWith account returns `Settlement blocked` for those three models during live use.
+
+## Session update - 2026-04-06 (runtime model switch to Sonnet 4.6)
+- User-directed scope:
+  - The user reported that summoning nanobot was failing and asked to switch the runtime model to `sonnet 4.6`.
+- Completed verification:
+  - Re-ran `bash ~/.codex/scripts/global-init.sh`; it still completes with the same existing repository failure in `tests/test_coding_mode.py` (`CodingConfig` import drift), not a new regression from this runtime fix.
+  - Confirmed the live user config at `~/.nanobot/config.json` was still using:
+    - `agents.defaults.provider = auto`
+    - `agents.defaults.model = gpt-5.4`
+  - Confirmed the local AICodeWith key/base remained configured in both `providers.custom` and `providers.aicodewith`.
+  - Live AICodeWith probes with the current key returned success for both:
+    - `gpt-5.4` -> `ok`
+    - `claude-sonnet-4-6` -> `ok`
+  - Captured the pre-fix serve log in `/tmp/nanobot-api.log` and confirmed the running API process still advertised `Model    : gpt-5.4`.
+  - Updated the live user config to:
+    - `agents.defaults.provider = aicodewith`
+    - `agents.defaults.model = claude-sonnet-4-6`
+  - Restarted the existing `nanobot` tmux windows in place:
+    - `nanobot:1.0` -> `gateway`
+    - `nanobot:2.0` -> `serve`
+  - Verified the restarted runtime:
+    - `tmux capture-pane -pt nanobot:1.0` -> gateway restarted from `/Users/miau/Documents/nanobot` and reconnected `Telegram bot @kimmydoomyBot`
+    - `/tmp/nanobot-api.log` now shows `Model    : claude-sonnet-4-6`
+    - `lsof -nP -iTCP:8900 -sTCP:LISTEN` -> new Python PID listening on `*:8900`
+    - `curl -X POST http://127.0.0.1:8900/chat ... {"text":"Say only ok","speaker":"serve-smoke-sonnet"}` -> `{"reply": "ok", "end_conversation": false}`
+- Findings:
+  - The current AICodeWith key can serve both GPT and Claude, so the failure was not simply “GPT unavailable”.
+  - The live runtime was still pinned to stale defaults (`auto` + `gpt-5.4`) and needed a clean in-place restart.
+  - After switching to explicit `aicodewith + claude-sonnet-4-6` and restarting the existing tmux processes, the OpenAI-compatible `/chat` summon path is healthy again.
+- Harness note:
+  - `PLAN.json` remains unchanged because this was an operational runtime repair on top of the completed AICodeWith follow-up, not a new repo feature.
