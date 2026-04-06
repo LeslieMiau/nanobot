@@ -5,6 +5,7 @@ from oauth_cli_kit import OAuthToken
 
 import nanobot.providers.openai_oauth_provider as oauth_provider
 from nanobot.providers.openai_oauth_provider import OpenAIOAuthProvider, _strip_model_prefix
+from nanobot.providers.base import ToolCallRequest
 
 
 def test_strip_model_prefix_supports_hyphen_and_underscore():
