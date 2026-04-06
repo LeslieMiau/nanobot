@@ -1,6 +1,6 @@
 """OpenAI-compatible HTTP API server for a fixed nanobot session.
 
-Provides /v1/chat/completions, /v1/models, /v1/voice/ask, and /v1/audio/speech endpoints.
+Provides /v1/chat/completions, /v1/models, /v1/voice/ask, /chat, and /v1/audio/speech endpoints.
 All requests route to a single persistent API session.
 """
 
@@ -99,6 +99,17 @@ def _strip_markdown(text: str) -> str:
     for pattern, replacement in _MD_PATTERNS:
         text = pattern.sub(replacement, text)
     return text.strip()
+
+
+_PROVIDER_ERROR_MARKERS = ("quota exceeded", "rate limit", "error calling")
+
+
+def _voice_friendly_error(text: str) -> str:
+    """Replace raw provider errors with user-friendly Chinese messages."""
+    lower = text.lower()
+    if any(m in lower for m in _PROVIDER_ERROR_MARKERS):
+        return "抱歉，语言模型暂时无法使用，请稍后再试。"
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +237,7 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
 
     agent_loop = request.app["agent_loop"]
     timeout_s: float = request.app.get("request_timeout", 120.0)
+    voice_timeout = min(timeout_s, 10.0)  # Siri kills intents after ~10s
     session_locks: dict[str, asyncio.Lock] = request.app["session_locks"]
     session_lock = session_locks.setdefault(session_key, asyncio.Lock())
 
@@ -241,13 +253,13 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
                         channel="api",
                         chat_id=API_CHAT_ID,
                     ),
-                    timeout=timeout_s,
+                    timeout=voice_timeout,
                 )
                 response_text = _response_text(response)
                 if not response_text or not response_text.strip():
                     response_text = EMPTY_FINAL_RESPONSE_MESSAGE
             except asyncio.TimeoutError:
-                return _error_json(504, f"Request timed out after {timeout_s}s")
+                return _error_json(504, f"Request timed out after {voice_timeout}s")
             except Exception:
                 logger.exception("Error processing voice request for speaker {}", speaker)
                 return _error_json(500, "Internal server error", err_type="server_error")
@@ -255,6 +267,7 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
         logger.exception("Unexpected voice API lock error for speaker {}", speaker)
         return _error_json(500, "Internal server error", err_type="server_error")
 
+    response_text = _voice_friendly_error(response_text)
     plain_text = _strip_markdown(response_text)
 
     # Detect end-of-conversation signals in the response
@@ -265,6 +278,17 @@ async def handle_voice_ask(request: web.Request) -> web.Response:
         "reply": plain_text,
         "end_conversation": end_conversation,
     })
+
+
+async def handle_clawpod_chat(request: web.Request) -> web.Response:
+    """POST /chat — ClawPod-compatible chat bridge.
+
+    Accepts the same payload shape as ClawPod's Shortcut:
+    {"text": "...", "speaker": "..."}
+
+    Returns {"reply": "...", "end_conversation": false}.
+    """
+    return await handle_voice_ask(request)
 
 
 async def handle_audio_speech(request: web.Request) -> web.Response:
@@ -357,6 +381,7 @@ def create_app(
     app["session_locks"] = {}  # per-user locks, keyed by session_key
 
     app.router.add_post("/v1/chat/completions", handle_chat_completions)
+    app.router.add_post("/chat", handle_clawpod_chat)
     app.router.add_post("/v1/voice/ask", handle_voice_ask)
     app.router.add_get("/v1/voice/ask", handle_voice_ask)
     app.router.add_post("/v1/audio/speech", handle_audio_speech)

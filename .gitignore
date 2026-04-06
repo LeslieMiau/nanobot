@@ -16,6 +16,7 @@ build/
 *.pywz
 *.pyzz
 .venv/
+.build/
 venv/
 __pycache__/
 poetry.lock
@@ -29,3 +30,9 @@ uv.lock
 # Harness 临时文件
 PLAN.json
 PROGRESS.md
+.harness/
+.xcodegen/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+xcuserdata/
+*.xcworkspace/xcuserdata/
