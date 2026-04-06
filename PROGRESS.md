@@ -446,3 +446,50 @@
 - Remaining caveats:
   - The repo-wide baseline still has the unrelated collection error in `tests/test_coding_mode.py` for missing `CodingConfig`, so I did not claim a full-suite clean pass.
   - The AICodeWith work itself now has targeted runtime coverage and no known failing tests in the touched path set.
+
+## Session update - 2026-04-06 (AICodeWith `/model list` verification follow-up)
+- User-directed scope:
+  - After the provider integration landed, the user asked whether the AICodeWith models were actually usable and requested that only verified usable models be added to `/model list`.
+- Live verification using the current local `~/.nanobot/config.json` AICodeWith key:
+  - Verified usable:
+    - `gpt-5.4`
+    - `gpt-5.3-codex`
+    - `gpt-5.2`
+    - `anthropic/claude-sonnet-4-5`
+    - `anthropic/claude-opus-4-5`
+    - `gemini/gemini-2.5-pro`
+    - `gemini/gemini-2.5-flash`
+  - Verified unavailable in this run:
+    - `gpt-5.1`
+    - `gpt-4.1`
+  - The unavailable models returned live upstream `HTTP 400` responses stating that the model does not exist or is not online on AICodeWith at this time.
+- Harness re-anchor:
+  - Replaced `PLAN.json` again so the active follow-up plan now tracks the `/model list` catalog work rather than the already-completed provider-routing step.
+
+## Session update - 2026-04-06 (AICodeWith `/model list` catalog complete)
+- Completed features:
+  - Updated `nanobot/providers/catalog.py` so `aicodewith` is the only gateway provider currently allowed to contribute curated catalog entries to `/model list`.
+  - Added the live-verified AICodeWith model set to the curated catalog:
+    - `gpt-5.4`
+    - `gpt-5.3-codex`
+    - `gpt-5.2`
+    - `anthropic/claude-sonnet-4-5`
+    - `anthropic/claude-opus-4-5`
+    - `gemini/gemini-2.5-pro`
+    - `gemini/gemini-2.5-flash`
+  - Left the live-verified unavailable models out of the catalog:
+    - `gpt-5.1`
+    - `gpt-4.1`
+  - Updated the model-list tests so AICodeWith is now expected to emit curated catalog entries while other gateways such as `openrouter` remain catalog-skipped.
+- Verification:
+  - `.venv/bin/pytest -q tests/test_model_command.py::test_build_available_models_includes_verified_aicodewith_catalog_entries tests/test_model_command.py::test_build_available_models_still_skips_other_gateway_catalog_entries tests/cli/test_commands.py::test_make_provider_uses_aicodewith_custom_backend tests/test_provider_factory.py::test_create_provider_uses_custom_provider_for_aicodewith` -> passed (`4 passed`).
+  - Built the available-model list using the real local `~/.nanobot/config.json` and confirmed the current AICodeWith catalog output contains:
+    - `catalog:gpt-5.4`
+    - `catalog:gpt-5.3-codex`
+    - `catalog:gpt-5.2`
+    - `catalog:anthropic/claude-sonnet-4-5`
+    - `catalog:anthropic/claude-opus-4-5`
+    - `catalog:gemini/gemini-2.5-pro`
+    - `catalog:gemini/gemini-2.5-flash`
+- Remaining caveats:
+  - The repository-wide baseline still has the unrelated `tests/test_coding_mode.py` collection error for missing `CodingConfig`; this `/model list` work did not attempt to resolve that separate issue.

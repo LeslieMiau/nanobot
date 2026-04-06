@@ -211,7 +211,7 @@ async def test_model_command_lists_available_models(tmp_path: Path) -> None:
     assert "Current model: `dummy`" in out.content
 
 
-def test_build_available_models_skips_speculative_gateway_catalog_entries() -> None:
+def test_build_available_models_includes_verified_aicodewith_catalog_entries() -> None:
     config = Config()
     config.agents.defaults.provider = "aicodewith"
     config.agents.defaults.model = "gpt-5.4"
@@ -224,11 +224,21 @@ def test_build_available_models_skips_speculative_gateway_catalog_entries() -> N
         coding_config=getattr(config.agents.defaults, "coding", None),
     )
 
-    assert any(model.model == "gpt-5.4" and model.provider_name == "aicodewith" for model in models)
-    assert not any(
-        model.provider_name == "aicodewith" and model.source == "catalog"
+    aicodewith_catalog_models = {
+        model.model
         for model in models
-    )
+        if model.provider_name == "aicodewith" and model.source == "catalog"
+    }
+
+    assert aicodewith_catalog_models == {
+        "gpt-5.3-codex",
+        "gpt-5.2",
+        "anthropic/claude-sonnet-4-5",
+        "anthropic/claude-opus-4-5",
+        "gemini/gemini-2.5-pro",
+        "gemini/gemini-2.5-flash",
+    }
+    assert any(model.model == "gpt-5.4" and model.provider_name == "aicodewith" for model in models)
 
 
 def test_build_available_models_filters_unauthenticated_github_copilot(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -249,6 +259,25 @@ def test_build_available_models_filters_unauthenticated_github_copilot(monkeypat
     )
 
     assert not any(model.provider_name == "github_copilot" for model in models)
+
+
+def test_build_available_models_still_skips_other_gateway_catalog_entries() -> None:
+    config = Config()
+    config.agents.defaults.provider = "openrouter"
+    config.agents.defaults.model = "gpt-5.4"
+    config.providers.openrouter.api_key = "sk-or-test"
+
+    models = build_available_models(
+        config,
+        default_model=config.agents.defaults.model,
+        default_provider_name="openrouter",
+        coding_config=getattr(config.agents.defaults, "coding", None),
+    )
+
+    assert not any(
+        model.provider_name == "openrouter" and model.source == "catalog"
+        for model in models
+    )
 
 
 @pytest.mark.asyncio

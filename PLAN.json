@@ -2,99 +2,66 @@
   {
     "id": 1,
     "category": "baseline",
-    "description": "Re-anchor the active harness from the prior Voice Bridge task to the new AICodeWith provider-integration goal without losing prior progress history.",
+    "description": "Re-anchor the completed AICodeWith provider harness to the follow-up goal of exposing only live-verified AICodeWith models in `/model list`.",
     "steps": [
-      "Record in `PROGRESS.md` that the user explicitly redirected the repository to AICodeWith provider integration.",
-      "Replace `PLAN.json` with a plan that matches the new goal instead of the completed-or-stale Voice Bridge scope.",
-      "Verify the repo baseline note still records the pre-existing unrelated `tests/test_coding_mode.py` import failure separately from this task."
+      "Record in `PROGRESS.md` that the user asked for live verification and `/model list` catalog exposure after the provider integration landed.",
+      "Replace `PLAN.json` so the active harness tracks the catalog-update follow-up instead of the already-completed provider-routing plan.",
+      "Preserve the existing note about the unrelated `tests/test_coding_mode.py` baseline failure as a repository caveat rather than reclassifying it as part of this task."
     ],
     "passes": true
   },
   {
     "id": 2,
-    "category": "runtime",
-    "description": "CLI startup uses the AICodeWith custom multi-route provider so `providers.aicodewith` can serve GPT/Codex, Claude, and Gemini traffic from a single API key.",
+    "category": "verification",
+    "description": "AICodeWith candidate models are validated against the user's current local API key before any new `/model list` entries are added.",
     "steps": [
-      "Update `nanobot/cli/commands.py` so `_make_provider()` instantiates `CustomProvider` when the resolved provider is `aicodewith`.",
-      "Keep the existing `providers.aicodewith` config schema and default API base behavior unchanged.",
-      "Verify the CLI route no longer forces `aicodewith` through the Anthropic provider class."
+      "Use the current local `providers.aicodewith` config from `~/.nanobot/config.json` to probe the candidate model set.",
+      "Record which models return a successful minimal response and which ones fail upstream.",
+      "Limit the new catalog entries to the models that were actually verified as usable in this run."
     ],
     "passes": true
   },
   {
     "id": 3,
-    "category": "runtime",
-    "description": "SDK/runtime startup uses the same AICodeWith custom provider path as the CLI so `Nanobot.from_config()` behaves consistently.",
+    "category": "catalog",
+    "description": "The provider catalog exposes curated AICodeWith entries in `/model list` even though AICodeWith is implemented as a gateway.",
     "steps": [
-      "Update `nanobot/nanobot.py` so `_make_provider()` instantiates `CustomProvider` for `aicodewith`.",
-      "Keep existing validation semantics for missing API keys intact.",
-      "Verify SDK startup no longer binds `aicodewith` to the Anthropic provider class."
+      "Update `nanobot/providers/catalog.py` so `aicodewith` is not dropped by the blanket gateway skip rule.",
+      "Keep the existing gateway-skip behavior for other providers unless they are explicitly allowlisted.",
+      "Verify the catalog still avoids adding speculative entries for unvalidated gateways."
     ],
     "passes": true
   },
   {
     "id": 4,
-    "category": "factory",
-    "description": "Runtime model switching and provider factory helpers resolve `aicodewith` through the custom provider implementation instead of the wrong backend.",
+    "category": "catalog",
+    "description": "The AICodeWith catalog entries match the live-verified usable model set rather than the generic OpenAI or Anthropic defaults.",
     "steps": [
-      "Update `nanobot/providers/factory.py` so `create_provider()` returns `CustomProvider` for `provider_name == \"aicodewith\"`.",
-      "Reuse the resolved provider config and API base rather than hard-coding a second config path.",
-      "Verify model-switching code can activate `aicodewith` without raising a backend mismatch."
+      "Add the verified AICodeWith GPT/Codex, Claude, and Gemini model names to the curated provider catalog.",
+      "Do not include models that returned live upstream errors in this run.",
+      "Verify the model strings match the forms expected by nanobot model switching."
     ],
     "passes": true
   },
   {
     "id": 5,
-    "category": "routing",
-    "description": "AICodeWith model-name normalization strips the provider prefix correctly so explicit `aicodewith/<model>` selections reach the upstream route with the right model id.",
+    "category": "tests",
+    "description": "Model-list tests prove AICodeWith now contributes curated catalog entries and only for the intended verified models.",
     "steps": [
-      "Update `nanobot/providers/custom_provider.py` normalization helpers so they remove a leading `aicodewith/` prefix before the OpenAI/Anthropic/Gemini route-specific normalization runs.",
-      "Preserve existing handling for `anthropic/...`, `openai/...`, `chatgpt/...`, `gemini/...`, and `google/...` prefixes.",
-      "Verify explicit `aicodewith/gpt-5.4`, `aicodewith/claude-*`, and `aicodewith/gemini-*` examples normalize as intended."
+      "Replace the old assertion that AICodeWith must not produce catalog entries.",
+      "Assert that the verified AICodeWith catalog models appear with `provider_name == aicodewith` and `source == catalog`.",
+      "Keep the test isolated from network calls by validating the catalog output shape rather than replaying live probes."
     ],
     "passes": true
   },
   {
     "id": 6,
-    "category": "tests",
-    "description": "Provider-routing unit coverage proves the CLI, SDK, and factory all instantiate the AICodeWith custom provider instead of the wrong backend.",
-    "steps": [
-      "Add or update tests in the CLI/provider/facade suites for `provider == aicodewith` instantiation.",
-      "Keep the assertions focused on provider class selection and default model/API-base propagation.",
-      "Verify the new tests fail before the routing fix and pass after it."
-    ],
-    "passes": true
-  },
-  {
-    "id": 7,
-    "category": "tests",
-    "description": "Custom-provider unit coverage proves explicit AICodeWith model prefixes are stripped before route dispatch so GPT/Codex, Claude, and Gemini requests send valid upstream model names.",
-    "steps": [
-      "Extend `tests/test_custom_provider.py` with explicit `aicodewith/...` normalization assertions.",
-      "Cover at least one OpenAI-style model, one Claude-style model, and one Gemini-style model.",
-      "Verify the helper outputs the provider-free model identifiers expected by each route."
-    ],
-    "passes": true
-  },
-  {
-    "id": 8,
-    "category": "docs",
-    "description": "README provider documentation explains how to configure AICodeWith as a single-key gateway for GPT/Codex, Claude, and Gemini models in nanobot.",
-    "steps": [
-      "Add `aicodewith` to the provider summary table in `README.md`.",
-      "Document the nanobot config shape, default base URL, and example model/provider settings for AICodeWith.",
-      "Verify the docs align with the actual implementation semantics instead of the old Anthropic-only description."
-    ],
-    "passes": true
-  },
-  {
-    "id": 9,
     "category": "verification",
-    "description": "The AICodeWith integration change is checkpointed with targeted verification and progress notes so later sessions can resume from a known-good state.",
+    "description": "The `/model list` follow-up is checkpointed with targeted tests and progress notes so later sessions can trust the visible catalog entries.",
     "steps": [
-      "Run the targeted pytest commands that cover the touched runtime and custom-provider paths.",
-      "Append the verification results and any remaining baseline caveats to `PROGRESS.md`.",
-      "Commit the checkpoint once the new feature work and targeted verification are complete."
+      "Run the focused pytest commands that cover the updated catalog behavior.",
+      "Append the live-verification results and the targeted test results to `PROGRESS.md`.",
+      "Commit the checkpoint after the catalog update passes verification."
     ],
     "passes": true
   }

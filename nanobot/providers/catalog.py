@@ -23,6 +23,15 @@ class AvailableModel:
 
 
 _PROVIDER_MODEL_CATALOG: dict[str, tuple[str, ...]] = {
+    "aicodewith": (
+        "gpt-5.4",
+        "gpt-5.3-codex",
+        "gpt-5.2",
+        "anthropic/claude-sonnet-4-5",
+        "anthropic/claude-opus-4-5",
+        "gemini/gemini-2.5-pro",
+        "gemini/gemini-2.5-flash",
+    ),
     "anthropic": (
         "anthropic/claude-opus-4-5",
         "anthropic/claude-sonnet-4-5",
@@ -119,7 +128,11 @@ def build_available_models(
         current_provider_name=current_provider_name,
     ):
         spec = find_by_name(provider_name)
-        if spec is None or spec.is_gateway or spec.is_local or provider_name in {"custom", "vllm"}:
+        if (
+            spec is None
+            or _skip_catalog_for_provider(spec.name, spec.is_gateway, spec.is_local)
+            or provider_name in {"custom", "vllm"}
+        ):
             continue
         for model in _PROVIDER_MODEL_CATALOG.get(provider_name, ()):
             add(model, provider_name, "catalog")
@@ -189,6 +202,19 @@ def _provider_looks_available(
     if provider_name in {"custom", "vllm"}:
         return bool(api_base)
     return bool(api_key)
+
+
+def _skip_catalog_for_provider(
+    provider_name: str,
+    is_gateway: bool,
+    is_local: bool,
+) -> bool:
+    """Return True when the provider should not contribute curated catalog entries."""
+    if is_local:
+        return True
+    if is_gateway and provider_name != "aicodewith":
+        return True
+    return False
 
 
 def _infer_provider_name(
