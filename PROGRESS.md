@@ -385,3 +385,33 @@
   - This confirms the current authorized account/token pair is still valid enough to complete OAuth login, but inference remains blocked by upstream quota or rate limiting rather than a local login failure.
 - Harness note:
   - `PLAN.json` remains unchanged because this was a repeated operational OAuth reauth request rather than new product work.
+
+## Session update - 2026-04-06 (OpenAI OAuth quota-vs-plan diagnosis)
+- User-directed scope:
+  - The user challenged the earlier quota diagnosis and provided evidence that the ChatGPT account still shows remaining product-side quota in the UI.
+- Completed verification:
+  - Decoded the current OAuth token at `~/Library/Application Support/oauth-cli-kit/auth/openai.json` and confirmed it matches the same authenticated account:
+    - `account_id = b27ce0a0-638b-46b7-8dcc-12c91276a68b`
+    - `chatgpt_plan_type = plus`
+  - Confirmed the token scopes currently present are:
+    - `openid`
+    - `profile`
+    - `email`
+    - `offline_access`
+    - `api.connectors.read`
+    - `api.connectors.invoke`
+  - Probed the raw `https://chatgpt.com/backend-api/codex/responses` endpoint directly with the current OAuth token:
+    - malformed non-stream request -> `400 Stream must be set to true`
+    - provider-matching streaming request -> `429`
+  - Captured the raw upstream `429` response body instead of nanobot's friendly wrapper:
+    - `{"error":{"type":"usage_limit_reached","message":"The usage limit has been reached","plan_type":"plus","resets_at":1775692520,...}}`
+  - Converted the upstream reset timestamp:
+    - `resets_at = 2026-04-09 07:55:20 +08:00`
+- Findings:
+  - The earlier nanobot message `ChatGPT usage quota exceeded or rate limit triggered` was not a pure local guess; it was the provider's generic wrapper around an actual upstream `429`.
+  - The stronger conclusion is narrower and more accurate:
+    - the account is indeed a `Plus` account
+    - but the specific `chatgpt.com/backend-api/codex/responses` usage bucket used by nanobot is currently returning `usage_limit_reached`
+  - Therefore the screenshot and the backend error can both be true at the same time if the ChatGPT UI is showing a different quota surface/window than the backend codex/responses route nanobot is calling.
+- Harness note:
+  - `PLAN.json` remains unchanged because this was a runtime diagnosis step, not product implementation work.
