@@ -697,3 +697,16 @@
   - `xcrun devicectl device install app --device '00008130-001924C20E98001C' .../VoiceBridge.app` -> installed updated app
 - Device note:
   - A post-install foreground launch attempt was blocked because the iPhone was locked, so the final metadata refresh still requires the device to be unlocked once after install.
+
+## Session update - 2026-04-06 (legacy shortcut cleanup)
+- User-directed scope:
+  - The user asked to delete unused shortcut artifacts now that the primary voice path is `iPhone Siri` and only the HomePod diagnostic/production shortcuts remain relevant.
+- Completed changes:
+  - Removed seven obsolete shortcut bundles from the repository: `Ask_Nanobot.shortcut`, `呼叫助手.shortcut`, `呼叫小助手.shortcut`, `嘿助手.shortcut`, `小助手测试.shortcut`, `问_Nanobot.shortcut`, and `问机器人.shortcut`.
+  - Kept the current HomePod shortcut pair intact: `测试助手.shortcut` and `纳博特.shortcut`.
+  - Updated the README HomePod section so it no longer tells users to delete legacy repository shortcuts that are no longer shipped.
+- Verification:
+  - `git ls-files '*.shortcut'` now lists only the two supported shipped shortcuts: `测试助手.shortcut` and `纳博特.shortcut`.
+  - `rg -n "Ask_Nanobot\\.shortcut|呼叫助手\\.shortcut|呼叫小助手\\.shortcut|嘿助手\\.shortcut|小助手测试\\.shortcut|问_Nanobot\\.shortcut|问机器人\\.shortcut" README.md docs ios PROGRESS.md scripts` shows the removed names only inside this progress log entry, not in active runtime or documentation paths.
+- Harness note:
+  - `PLAN.json` remains unchanged because the active plan tracks an older completed AICodeWith follow-up, while this was a user-directed repository cleanup task.

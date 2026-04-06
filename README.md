@@ -476,7 +476,7 @@ Recommended voice command:
 嘿 Siri, 运行纳博特
 ```
 
-Import `测试助手.shortcut` first, confirm it shows the reply on screen and reads it aloud, then delete or rename old interactive shortcuts such as `问机器人` and `嘿助手`, and import `纳博特.shortcut` for daily use.
+Import `测试助手.shortcut` first, confirm it shows the reply on screen and reads it aloud, then import `纳博特.shortcut` for daily use. Older experimental shortcut variants have been removed from the repository to keep the supported HomePod path unambiguous.
 
 </details>
 
