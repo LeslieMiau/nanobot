@@ -52,7 +52,7 @@
       "Keep watcher polling so status transitions are still detected, but only send content for `completed`, `failed`, and `waiting_user` tasks.",
       "Update notifier tests to prove running tasks no longer emit Telegram messages while terminal states still do."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 6,
@@ -63,7 +63,7 @@
       "Implement `classify_failure_reason()` and rework `build_failure_report()` to show Chinese labels, likely causes, branch/worktree context, recent commit, and suggested recovery actions.",
       "Update failure-producing code paths so their summaries align with the new structured classification scheme."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 7,
@@ -74,7 +74,7 @@
       "Before rendering active tasks, probe tmux session liveness and trigger monitor refresh for missing sessions so the list reflects the latest state.",
       "Render list entries with status badges, repo name, branch/worktree branch, progress bar, and truncated goal summary."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 8,
@@ -85,7 +85,7 @@
       "Expose worktree branch, recent commit summary, and failure details in the failure report without overwhelming the user.",
       "Keep waiting-user copy aligned with the existing harness-conflict flow while adding the new richer action prompts."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 9,
@@ -96,6 +96,6 @@
       "Run targeted pytest commands while implementing each feature checkpoint, then run `pytest tests/coding_tasks/` as the final coding-task regression sweep.",
       "Record the known unrelated `tests/test_coding_mode.py` import failure separately if it still blocks repository-wide pytest outside the coding-task suite."
     ],
-    "passes": false
+    "passes": true
   }
 ]

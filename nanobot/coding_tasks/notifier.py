@@ -12,7 +12,6 @@ from nanobot.coding_tasks.reporting import (
     build_completion_report,
     build_failure_report,
     build_waiting_user_report,
-    repo_display_name,
 )
 
 
@@ -69,46 +68,4 @@ class CodingTaskNotifier:
             return build_failure_report(task)
         if task.status == "waiting_user":
             return build_waiting_user_report(task)
-        if task.status == "starting":
-            return self._build_start_notification(task)
-        if task.status == "running":
-            return self._build_running_notification(task, report)
         return ""
-
-    def _build_start_notification(self, task) -> str:
-        repo_name = repo_display_name(task)
-        goal = _truncate_line(task.goal, limit=64)
-        return "\n".join(
-            [
-                f"**已开始编程任务** · `{repo_name}`",
-                f"**目标**: {goal}",
-            ]
-        )
-
-    def _build_running_notification(self, task, report: TaskProgressReport) -> str:
-        repo_name = repo_display_name(task)
-        lines = [f"**编程进行中** · `{repo_name}`"]
-        if report.plan_progress.total:
-            pp = report.plan_progress
-            bar = _progress_bar(pp.completed, pp.total)
-            lines.append(f"**进度**: {bar} {pp.completed}/{pp.total} 项")
-        detail = report.latest_note or report.live_output or ""
-        if detail:
-            lines.append(f"**最近**: {_truncate_line(detail, limit=200)}")
-        if not report.plan_progress.total and not detail:
-            return ""
-        return "\n".join(lines)
-
-
-def _progress_bar(completed: int, total: int, *, width: int = 6) -> str:
-    if total <= 0:
-        return "░" * width
-    filled = round(completed / total * width)
-    return "█" * filled + "░" * (width - filled)
-
-
-def _truncate_line(text: str, *, limit: int) -> str:
-    compact = " ".join(text.split())
-    if len(compact) <= limit:
-        return compact
-    return compact[: limit - 3] + "..."

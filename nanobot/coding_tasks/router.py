@@ -21,6 +21,7 @@ from nanobot.coding_tasks.reporting import (
     repo_display_name,
 )
 from nanobot.coding_tasks.types import FAILURE_LAUNCH_ERROR, FAILURE_USER_CANCELLED
+from nanobot.coding_tasks.types import task_workspace_path, task_worktree_branch
 from nanobot.coding_tasks.worker import CodexWorkerLauncher
 
 _START_PREFIX = "开始编程"
@@ -62,6 +63,7 @@ class ParsedSlashCodingCommand:
 
     action: str
     index: int | None = None
+    extra: str | None = None
     error: str | None = None
 
 
@@ -104,9 +106,11 @@ def parse_slash_coding_command(text: str) -> ParsedSlashCodingCommand | None:
             return ParsedSlashCodingCommand(action=action, error="用法: /coding help")
         return ParsedSlashCodingCommand(action=action)
     if action == "list":
-        if len(tokens) != 1:
-            return ParsedSlashCodingCommand(action=action, error="用法: /coding list")
-        return ParsedSlashCodingCommand(action=action)
+        if len(tokens) == 1:
+            return ParsedSlashCodingCommand(action=action)
+        if len(tokens) == 2 and tokens[1].lower() == "all":
+            return ParsedSlashCodingCommand(action=action, extra="all")
+        return ParsedSlashCodingCommand(action=action, error="用法: /coding list [all]")
     if len(tokens) > 2:
         return ParsedSlashCodingCommand(action=action, error=f"用法: /coding {action} [index]")
     if len(tokens) == 2:
@@ -423,7 +427,15 @@ def _make_control_handler(
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=_format_task_list(policy, msg.channel, msg.chat_id, manager, monitor=monitor),
+                content=_format_task_list(
+                    policy,
+                    msg.channel,
+                    msg.chat_id,
+                    manager,
+                    monitor=monitor,
+                    launcher=launcher,
+                    include_all=slash_command is not None and slash_command.extra == "all",
+                ),
             )
 
         indexed_task = None
@@ -638,18 +650,34 @@ def _format_task_list(
     manager: CodexWorkerManager,
     *,
     monitor: CodexProgressMonitor | None = None,
+    launcher: CodexWorkerLauncher | None = None,
+    include_all: bool = False,
 ) -> str:
-    tasks = policy.tasks_for_origin(channel, chat_id)
+    if monitor is not None and launcher is not None:
+        for task in manager.tasks_for_origin(channel, chat_id):
+            if task.status not in {"starting", "running", "waiting_user"}:
+                continue
+            if not task.metadata.get("worktree_path"):
+                continue
+            if not task.tmux_session or launcher.has_session(task.tmux_session):
+                continue
+            monitor.refresh_task(task.id, session_missing=True)
+
+    tasks = (
+        manager.tasks_for_origin(channel, chat_id)
+        if include_all
+        else policy.tasks_for_origin(channel, chat_id)
+    )
     if not tasks:
         return (
             "**当前私聊里没有可管理的编程任务**\n"
             "已完成、失败或已取消的任务已隐藏；先发送 `开始编程 ...` 或 `/coding <repo> <goal>` 创建一个新任务。"
         )
-    lines = ["**当前编程任务列表**"]
+    lines = ["**当前编程任务列表**" if not include_all else "**全部编程任务列表**"]
     for index, task in enumerate(tasks, start=1):
         repo_name = repo_display_name(task)
         goal = _truncate_line(task.goal, limit=40)
-        pp = summarize_plan_progress(task.repo_path) if task.repo_path else None
+        pp = summarize_plan_progress(task_workspace_path(task)) if task.repo_path else None
         if pp and pp.total:
             if pp.is_complete:
                 progress_tag = "✅ 完成"
@@ -658,7 +686,10 @@ def _format_task_list(
                 progress_tag = f"[{bar}] {pp.completed}/{pp.total}"
         else:
             progress_tag = ""
-        entry = f"{index}. **{task.status}** · `{repo_name}` · {goal}"
+        entry = f"{index}. {_status_badge(task)} · `{repo_name}`"
+        if branch_name := (task.branch_name or task_worktree_branch(task)):
+            entry += f" · `{branch_name}`"
+        entry += f" · {goal}"
         if progress_tag:
             entry += f" · {progress_tag}"
         lines.append(entry)
@@ -682,6 +713,8 @@ def _format_task_status(
     ]
     if task.branch_name:
         lines.append(f"**分支**: {task.branch_name}")
+    elif worktree_branch := task_worktree_branch(task):
+        lines.append(f"**worktree 分支**: {worktree_branch}")
     if recent_commit := task.metadata.get("recent_commit_summary"):
         lines.append(f"**最近提交**: {recent_commit}")
     if latest_note := task.metadata.get("latest_note"):
@@ -748,3 +781,20 @@ def _is_harness_conflict_task(task) -> bool:
         task.status == "waiting_user"
         and task.metadata.get("harness_conflict_reason") in _HARNESS_CONFLICT_REASONS
     )
+
+
+def _status_badge(task) -> str:
+    if task.status in {"starting", "running"}:
+        return "🟢 运行中"
+    if task.status == "waiting_user":
+        return "⏸ 等待"
+    if task.status == "completed":
+        return "✅ 完成"
+    if task.status == "cancelled":
+        return "⏹ 已取消"
+    if task.status == "failed":
+        summary = str(task.last_progress_summary or "")
+        if "session_disappeared" in summary:
+            return "🔴 会话丢失"
+        return "🔴 失败"
+    return f"⚪ {task.status}"

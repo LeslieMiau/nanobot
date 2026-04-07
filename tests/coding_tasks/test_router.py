@@ -11,6 +11,7 @@ from nanobot.coding_tasks.router import (
     extract_coding_task_slots,
     is_explicit_coding_entry,
     is_start_coding_request,
+    parse_slash_coding_command,
     parse_start_coding_request,
     resolve_repo_ref,
     validate_repo_path,
@@ -139,6 +140,14 @@ def test_detect_coding_task_intent_accepts_structured_fields_with_alias_resolver
     ) is True
 
 
+def test_parse_slash_coding_command_accepts_list_all() -> None:
+    parsed = parse_slash_coding_command("/coding list all")
+
+    assert parsed is not None
+    assert parsed.action == "list"
+    assert parsed.extra == "all"
+
+
 def test_format_task_list_shows_plan_progress_tags(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
@@ -171,15 +180,20 @@ def test_format_task_list_shows_plan_progress_tags(tmp_path: Path) -> None:
         metadata={"origin_channel": "telegram", "origin_chat_id": "chat-1"},
     )
     manager.mark_starting(task_done.id, summary="Boot")
-    manager.mark_waiting_user(task_done.id, summary="Review ready")
+    manager.mark_failed(task_done.id, summary="session_disappeared: tmux died")
 
     content = _format_task_list(policy, "telegram", "chat-1", manager)
 
     assert "**当前编程任务列表**" in content
+    assert "🟢 运行中" in content
     assert "`repo-running`" in content
     assert "[███░░░] 2/4" in content
-    assert "`repo-done`" in content
-    assert "✅ 完成" in content
+    assert "`repo-done`" not in content
+
+    all_content = _format_task_list(policy, "telegram", "chat-1", manager, include_all=True)
+    assert "**全部编程任务列表**" in all_content
+    assert "`repo-done`" in all_content
+    assert "🔴 会话丢失" in all_content
 
 
 def test_format_task_status_shows_plan_features_and_overflow_note(tmp_path: Path) -> None:
@@ -211,6 +225,10 @@ def test_format_task_status_shows_plan_features_and_overflow_note(tmp_path: Path
     assert "**当前编程任务状态** · `repo`" in content
     assert "**PLAN 进度**: " in content
     assert "4/16 项" in content
+    assert "**worktree 分支**: codex/task-123" in _format_task_status(
+        manager.update_metadata(task.id, updates={"worktree_branch": "codex/task-123"}),
+        report_summary="Updated task summaries and plan visibility",
+    )
     assert "✅ 1. Feature 1 improves the coding task report output" in content
     assert "⬜ 10. Feature 10 improves the coding task report output" in content
     assert "Feature 11 improves the coding task report output" not in content

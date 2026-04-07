@@ -19,6 +19,7 @@ from nanobot.coding_tasks.reporting import (
     build_completion_report,
     build_failure_report,
     build_waiting_user_report,
+    classify_failure_reason,
     detect_waiting_reason,
     inspect_repo_snapshot,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "build_failure_report",
     "build_task_progress_report",
     "build_waiting_user_report",
+    "classify_failure_reason",
     "CodexWorkerManager",
     "CodexWorkerLauncher",
     "CodingRunEvent",

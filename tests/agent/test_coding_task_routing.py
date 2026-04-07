@@ -474,7 +474,7 @@ async def test_private_telegram_slash_coding_list_shows_origin_tasks_newest_firs
 
     assert response is not None
     assert "当前编程任务列表" in response.content
-    assert "1. **running**" in response.content
+    assert "1. 🟢 运行中" in response.content
     assert "`demo-repo`" in response.content
     assert second.id not in response.content
 
@@ -1051,7 +1051,7 @@ async def test_private_telegram_stop_interrupts_live_worker_and_marks_waiting(tm
     assert "已停止编程任务" in response.content
     updated = store.get_task(task.id)
     assert updated is not None
-    assert updated.status == "waiting_user"
+    assert updated.status == "cancelled"
     assert updated.last_user_control == "stop"
 
 

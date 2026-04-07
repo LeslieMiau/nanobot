@@ -7,6 +7,7 @@ from nanobot.coding_tasks.reporting import (
     build_completion_report,
     build_failure_report,
     build_waiting_user_report,
+    classify_failure_reason,
     inspect_repo_snapshot,
 )
 from nanobot.coding_tasks.types import CodingTask
@@ -52,8 +53,12 @@ def test_completion_and_failure_reports_include_actionable_context() -> None:
             repo_path="/tmp/repo",
             goal="demo goal",
             status="failed",
-            last_progress_summary="pytest failed on test_x",
-            metadata={"latest_note": "Refactor complete"},
+            last_progress_summary="task_timeout: 任务运行超过 4 小时，已停止 worker 并清理 worktree。",
+            metadata={
+                "latest_note": "Refactor complete",
+                "worktree_branch": "codex/task-123",
+                "recent_commit_summary": "abc123 init repo",
+            },
         )
     )
     waiting = build_waiting_user_report(
@@ -113,14 +118,25 @@ def test_completion_and_failure_reports_include_actionable_context() -> None:
     )
 
     assert "**分支**: feature/demo" in completion
+    assert "`/coding repo <新目标>`" in completion
     assert "**最近提交**: abc123 init repo" in completion
+    assert "**故障类型**: 任务超时" in failure
+    assert "**worktree 分支**: codex/task-123" in failure
     assert "**最近成功步骤**: Refactor complete" in failure
-    assert "**恢复建议**" in failure
+    assert "**操作**: `继续` 重试 · `/coding stop` 终止" in failure
     assert "**等待原因**: Need plan confirmation" in waiting
+    assert "**操作**: `继续` · `取消`" in waiting
     assert "**旧任务摘要**: continue old task" in conflict_waiting
-    assert "按新任务开始" in conflict_waiting
+    assert "**操作**: `继续旧任务` · `按新任务开始` · `取消`" in conflict_waiting
     assert "已有已完成的 harness" in completed_conflict_waiting
     assert "**历史摘要**: completed prior mobile shell cleanup" in completed_conflict_waiting
     assert "等待你确认结果" in exit_review_waiting
     assert "**最后进展**: 验证证据已经拿到了" in exit_review_waiting
     assert "不会阻塞新任务" in exit_review_waiting
+
+
+def test_classify_failure_reason_recognizes_known_prefixes() -> None:
+    assert classify_failure_reason("session_disappeared: tmux died") == "session_disappeared"
+    assert classify_failure_reason("task_timeout: exceeded 4 hours") == "task_timeout"
+    assert classify_failure_reason("task_stale: no progress") == "task_stale"
+    assert classify_failure_reason("launch_error: startup failed") == "launch_error"

@@ -6,7 +6,17 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from nanobot.coding_tasks.types import CodingTask, WAITING_REASON_KIND_WORKER_EXIT_REVIEW
+from nanobot.coding_tasks.types import (
+    FAILURE_CODEX_CRASH,
+    FAILURE_LAUNCH_ERROR,
+    FAILURE_SESSION_DISAPPEARED,
+    FAILURE_STALE,
+    FAILURE_TIMEOUT,
+    FAILURE_USER_CANCELLED,
+    CodingTask,
+    WAITING_REASON_KIND_WORKER_EXIT_REVIEW,
+    task_worktree_branch,
+)
 
 _WAITING_PATTERNS = (
     "waiting for user",
@@ -15,6 +25,14 @@ _WAITING_PATTERNS = (
     "need plan confirmation",
     "waiting for confirmation",
 )
+_FAILURE_REASON_LABELS = {
+    FAILURE_SESSION_DISAPPEARED: ("Worker 会话丢失", "tmux 会话意外退出", "`继续` 重试"),
+    FAILURE_TIMEOUT: ("任务超时", "运行超过 4 小时", "`/coding resume`"),
+    FAILURE_STALE: ("进度停滞", "1 小时内无新进展", "`/coding resume` 或 `/coding stop`"),
+    FAILURE_LAUNCH_ERROR: ("启动失败", "Worker 启动阶段报错", "`继续` 重试"),
+    FAILURE_USER_CANCELLED: ("用户已取消", "收到停止或取消指令", "`/coding <repo> <新目标>`"),
+    FAILURE_CODEX_CRASH: ("Codex 崩溃", "Codex 进程异常退出", "`继续` 重试"),
+}
 
 
 @dataclass(slots=True)
@@ -89,17 +107,25 @@ def build_completion_report(task: CodingTask) -> str:
     if latest_note := _latest_note(task):
         lines.append(f"**最近记录**: {latest_note}")
     lines.append(f"**结果**: {task.last_progress_summary or 'Completed'}")
-    lines.append("**下一步**: 如需继续新目标，直接重新发起 `/coding <repo> <goal>`。")
+    lines.append(f"**操作**: `/coding {repo_display_name(task)} <新目标>`")
     return "\n".join(lines)
 
 
 def build_failure_report(task: CodingTask) -> str:
     """Build a failure summary with resume guidance."""
     lines = _base_task_report("**编程任务失败**", task)
-    lines.append(f"**原因**: {task.last_progress_summary or _latest_note(task) or '-'}")
+    reason = classify_failure_reason(task.last_progress_summary)
+    label, cause, suggestion = _FAILURE_REASON_LABELS.get(
+        reason,
+        ("执行失败", "Worker 未完成任务", "`继续` 或 `/coding resume`"),
+    )
+    lines.append(f"**故障类型**: {label}")
+    lines.append(f"**原因**: {cause}")
+    lines.append(f"**错误详情**: {_strip_failure_prefix(task.last_progress_summary) or _latest_note(task) or '-'}")
     if recent := _latest_note(task):
         lines.append(f"**最近成功步骤**: {recent}")
-    lines.append("**恢复建议**: 发送 `继续` 或 `/coding resume` 重试；如需放弃可发送 `/coding stop`。")
+    lines.append(f"**恢复建议**: {suggestion}")
+    lines.append("**操作**: `继续` 重试 · `/coding stop` 终止")
     return "\n".join(lines)
 
 
@@ -113,7 +139,7 @@ def build_waiting_user_report(task: CodingTask) -> str:
         if existing := task.metadata.get("existing_harness_summary"):
             lines.append(f"**旧任务摘要**: {existing}")
         lines.append(f"**你的新目标**: {task.goal}")
-        lines.append("**下一步**: 回复 `继续旧任务`、`按新任务开始` 或 `取消`。")
+        lines.append("**操作**: `继续旧任务` · `按新任务开始` · `取消`")
         return "\n".join(lines)
     if task.metadata.get("harness_conflict_reason") == "repo_completed_harness":
         lines = [
@@ -123,7 +149,7 @@ def build_waiting_user_report(task: CodingTask) -> str:
         if existing := task.metadata.get("existing_harness_summary"):
             lines.append(f"**历史摘要**: {existing}")
         lines.append(f"**你的新目标**: {task.goal}")
-        lines.append("**下一步**: 回复 `继续旧任务`、`按新任务开始` 或 `取消`。")
+        lines.append("**操作**: `继续旧任务` · `按新任务开始` · `取消`")
         return "\n".join(lines)
 
     if task.metadata.get("waiting_reason_kind") == WAITING_REASON_KIND_WORKER_EXIT_REVIEW:
@@ -133,14 +159,13 @@ def build_waiting_user_report(task: CodingTask) -> str:
         if recent := _last_meaningful_progress(task):
             lines.append(f"**最后进展**: {recent}")
         lines.append(f"**等待原因**: {task.last_progress_summary or '-'}")
-        lines.append(
-            "**下一步**: 发送 `状态` 或 `/coding status` 查看详情；如需继续，发送 `继续` 或 `/coding resume`。这个待确认状态不会阻塞新任务。"
-        )
+        lines.append("**说明**: 这个待确认状态不会阻塞新任务。")
+        lines.append("**操作**: `状态` · `继续` · `/coding resume`")
         return "\n".join(lines)
 
     lines = _base_task_report("**编程任务等待你的确认**", task)
     lines.append(f"**等待原因**: {task.last_progress_summary or '-'}")
-    lines.append("**下一步**: 回复 `继续` 或 `取消`。")
+    lines.append("**操作**: `继续` · `取消`")
     return "\n".join(lines)
 
 
@@ -152,6 +177,8 @@ def _base_task_report(title: str, task: CodingTask) -> list[str]:
     ]
     if task.branch_name:
         lines.append(f"**分支**: {task.branch_name}")
+    if worktree_branch := task_worktree_branch(task):
+        lines.append(f"**worktree 分支**: {worktree_branch}")
     if recent_commit := _recent_commit(task):
         lines.append(f"**最近提交**: {recent_commit}")
     return lines
@@ -181,3 +208,23 @@ def _run_git(repo_path: Path, args: list[str]) -> str:
     except Exception:
         return ""
     return (result.stdout or "").strip()
+
+
+def classify_failure_reason(summary: str) -> str:
+    """Classify one task failure summary into a stable reason code."""
+    text = (summary or "").strip()
+    if not text:
+        return ""
+    for reason in _FAILURE_REASON_LABELS:
+        if text.startswith(f"{reason}:") or reason in text:
+            return reason
+    return ""
+
+
+def _strip_failure_prefix(summary: str) -> str:
+    text = (summary or "").strip()
+    reason = classify_failure_reason(text)
+    prefix = f"{reason}:"
+    if reason and text.startswith(prefix):
+        return text[len(prefix) :].strip()
+    return text

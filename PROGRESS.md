@@ -741,3 +741,27 @@
 - Notes:
   - The coding-task E2E test was updated to write completion evidence into the launched worktree, matching the new isolation model.
   - Repository-wide pytest is still expected to stop early on the unrelated `tests/test_coding_mode.py` `CodingConfig` import drift until that separate baseline issue is repaired.
+
+## Session update - 2026-04-07 (`/coding` Phase 2/3: event-driven notifications + structured failure reporting + list UX)
+- Completed changes:
+  - Removed proactive `starting` / `running` Telegram pushes from `nanobot/coding_tasks/notifier.py`, so coding tasks now run silently until they either finish, fail, or need user input.
+  - Added stable failure reason classification in `nanobot/coding_tasks/reporting.py` and rewrote failure reports to include:
+    - Chinese fault label
+    - likely cause
+    - stripped error detail
+    - worktree branch
+    - recent commit
+    - explicit recovery action hints
+  - Improved completion and waiting-user reports with code-formatted follow-up commands, keeping the existing harness-conflict branching while making the next action clearer in Telegram.
+  - Extended `/coding list` parsing and rendering:
+    - `/coding list all` now includes completed / failed / cancelled history
+    - default `/coding list` keeps active-task focus
+    - active launched tasks are health-checked before rendering, and missing worker sessions are auto-triaged through the monitor path
+    - list entries now show status badges, repo name, branch/worktree branch, progress bar, and truncated goal summary
+  - Updated routing semantics so plain-text `停止` now matches the slash-stop terminal cleanup behavior and records `cancelled` instead of leaving tasks in `waiting_user`.
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_notifier.py tests/coding_tasks/test_reporting.py tests/coding_tasks/test_router.py tests/agent/test_coding_task_routing.py -q` -> passed (`59 passed`)
+  - `.venv/bin/pytest tests/coding_tasks/ tests/agent/test_coding_task_routing.py -q` -> passed (`134 passed`)
+  - `bash init.sh` -> completed with the same pre-existing repository-wide failure in `tests/test_coding_mode.py` (`CodingConfig` import drift) and no new `/coding` regressions
+- Completion:
+  - All planned `/coding` task-system improvement features are complete as of 2026-04-07.
