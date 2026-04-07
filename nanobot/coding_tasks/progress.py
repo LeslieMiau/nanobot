@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from nanobot.coding_tasks.manager import CodexWorkerManager
+from nanobot.coding_tasks.postflight import CodexPostflightRunner
 from nanobot.coding_tasks.reporting import detect_waiting_reason, inspect_repo_snapshot
 from nanobot.coding_tasks.types import (
     FAILURE_SESSION_DISAPPEARED,
@@ -173,9 +174,15 @@ def build_task_progress_report(repo_path: str | Path, pane_output: str) -> TaskP
 class CodexProgressMonitor:
     """Poll tmux-backed Codex sessions and refresh persisted task summaries."""
 
-    def __init__(self, manager: CodexWorkerManager, launcher: CodexWorkerLauncher) -> None:
+    def __init__(
+        self,
+        manager: CodexWorkerManager,
+        launcher: CodexWorkerLauncher,
+        postflight: CodexPostflightRunner | None = None,
+    ) -> None:
         self.manager = manager
         self.launcher = launcher
+        self.postflight = postflight or CodexPostflightRunner(manager)
 
     async def poll_task(self, task_id: str) -> TaskProgressReport:
         """Capture recent pane output and update the task progress summary."""
@@ -229,7 +236,8 @@ class CodexProgressMonitor:
         )
         if session_missing and task.status in {"starting", "running", "waiting_user"}:
             self._triage_missing_session(task, report)
-            return report
+            task = self.manager.require_task(task_id)
+            return build_task_progress_report(task_workspace_path(task), current_output or "")
         waiting_reason = detect_waiting_reason(report.live_output)
         if waiting_reason:
             self.manager.mark_waiting_user(task_id, summary=waiting_reason)
@@ -301,23 +309,22 @@ class CodexProgressMonitor:
             )
         if report.plan_progress.is_complete:
             self._clear_waiting_metadata(task.id)
-            completion_summary = report.latest_note or recent or report.summary or "Repo harness completed"
-            self.manager.mark_completed(task.id, summary=completion_summary)
+            self._complete_via_postflight(task, report)
             return
         if self._has_strong_completion_evidence(report, recent):
-            review_summary = self._build_exit_review_summary(report, recent)
-            self.manager.mark_waiting_user(task.id, summary=review_summary)
-            self.manager.update_metadata(
-                task.id,
-                updates={
-                    "waiting_reason_kind": WAITING_REASON_KIND_WORKER_EXIT_REVIEW,
-                    "exit_review_progress": recent,
-                },
-            )
+            self._complete_via_postflight(task, report)
             return
         self._clear_waiting_metadata(task.id)
         failure_summary = self._build_missing_session_failure_summary(report, recent)
         self.manager.mark_failed(task.id, summary=failure_summary)
+
+    def _complete_via_postflight(self, task, report: TaskProgressReport) -> None:
+        result = self.postflight.run(task)
+        if result.ok:
+            completion_summary = result.summary or report.latest_note or report.summary or "Repo harness completed"
+            self.manager.mark_completed(task.id, summary=completion_summary)
+            return
+        self.manager.mark_failed(task.id, summary=result.summary)
 
     def _clear_waiting_metadata(self, task_id: str) -> None:
         self.manager.update_metadata(

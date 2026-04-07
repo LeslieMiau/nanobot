@@ -12,3 +12,23 @@
   - The current coding-task system has no explicit postflight gate that enforces `test -> merge main -> push origin` before marking a Telegram coding task completed.
 - Known caveat carried into this harness:
   - Repository-wide pytest still stops early on `tests/test_coding_mode.py` because `nanobot.config.schema.CodingConfig` cannot be imported. This is treated as unrelated baseline drift unless it directly blocks the `/coding` changes.
+
+## Session update - 2026-04-07 (`/coding` postflight implementation)
+- Implemented the new postflight gate for coding tasks:
+  - added `nanobot/coding_tasks/postflight.py` to run `validation -> git merge main -> git push origin main` before a task can become `completed`
+  - wired postflight into missing-session completion triage, runtime assembly, reporting metadata, and worker cleanup semantics
+  - preserved failed-task worktrees for postflight forensics while keeping successful worktree cleanup intact
+- Fixed the status mismatch between Telegram `/coding list` and `/coding status`:
+  - Telegram `/coding status` now refreshes active tasks and also treats missing tmux sessions like `/coding list` does
+  - CLI `coding-task status` now follows the same missing-session refresh path
+- Real validation completed:
+  - `bash ~/.codex/scripts/global-init.sh` still shows only the pre-existing `tests/test_coding_mode.py` import failure
+  - `.venv/bin/pytest tests/coding_tasks/test_postflight.py tests/cli/test_commands.py tests/agent/test_coding_task_routing.py -q` -> `108 passed`
+  - `.venv/bin/pytest tests/coding_tasks/ tests/agent/test_coding_task_routing.py tests/cli/test_commands.py -q` -> `205 passed`
+  - disposable repo smoke at `/tmp/nanobot-postflight-smoke-lQLHaT/repo` verified the real status/postflight path:
+    - `coding-task status` detected a missing worker session, ran postflight, and moved the task to `completed`
+    - validation passed via repo `init.sh`
+    - the task branch merged into `main`, `origin/main` advanced to commit `08ad5d7`, and the task worktree directory was removed afterward
+  - restarted `nanobot` gateway in tmux pane `nanobot:1.0`; logs show `Telegram bot @kimmydoomyBot connected` again at `2026-04-07 09:24:33`
+- Remaining harness bookkeeping:
+  - a subset of stretch-plan items remains intentionally `passes: false` because this session focused on the user-requested postflight flow and the `list/status` inconsistency, not on every optional reporting/audit enhancement from the expanded micro-plan.

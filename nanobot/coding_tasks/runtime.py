@@ -10,6 +10,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.notifier import CodingTaskNotifier
 from nanobot.coding_tasks.policy import CodingTaskPolicy
+from nanobot.coding_tasks.postflight import CodexPostflightRunner
 from nanobot.coding_tasks.progress import CodexProgressMonitor
 from nanobot.coding_tasks.repo_resolver import RepoRefResolver
 from nanobot.coding_tasks.recovery import CodexTaskRecovery
@@ -40,6 +41,7 @@ def build_coding_task_runtime(
     store: CodingTaskStore | None = None,
     manager: CodexWorkerManager | None = None,
     launcher: CodexWorkerLauncher | None = None,
+    postflight: CodexPostflightRunner | None = None,
     repo_aliases: dict[str, str] | None = None,
 ) -> CodingTaskRuntime:
     """Assemble the coding-task collaborators from one workspace root."""
@@ -49,7 +51,8 @@ def build_coding_task_runtime(
     )
     task_manager = manager or CodexWorkerManager(resolved_workspace, task_store)
     task_launcher = launcher or CodexWorkerLauncher(resolved_workspace, task_manager)
-    task_monitor = CodexProgressMonitor(task_manager, task_launcher)
+    task_postflight = postflight or CodexPostflightRunner(task_manager)
+    task_monitor = CodexProgressMonitor(task_manager, task_launcher, postflight=task_postflight)
     task_recovery = CodexTaskRecovery(task_manager, task_launcher, task_monitor)
     task_policy = CodingTaskPolicy(task_manager)
     task_repo_resolver = RepoRefResolver(

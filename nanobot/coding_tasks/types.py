@@ -45,9 +45,14 @@ FAILURE_STALE = "task_stale"
 FAILURE_LAUNCH_ERROR = "launch_error"
 FAILURE_USER_CANCELLED = "user_cancelled"
 FAILURE_CODEX_CRASH = "codex_crash"
+FAILURE_POSTFLIGHT = "postflight_failed"
 
 TASK_METADATA_WORKTREE_PATH = "worktree_path"
 TASK_METADATA_WORKTREE_BRANCH = "worktree_branch"
+TASK_METADATA_POSTFLIGHT_STAGE = "postflight_stage"
+TASK_METADATA_POSTFLIGHT_RESULT = "postflight_result"
+TASK_METADATA_POSTFLIGHT_SUMMARY = "postflight_summary"
+TASK_METADATA_PRESERVE_FAILURE_WORKTREE = "preserve_failure_worktree"
 
 
 @dataclass(slots=True)

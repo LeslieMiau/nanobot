@@ -9,6 +9,7 @@ from pathlib import Path
 from nanobot.coding_tasks.types import (
     FAILURE_CODEX_CRASH,
     FAILURE_LAUNCH_ERROR,
+    FAILURE_POSTFLIGHT,
     FAILURE_SESSION_DISAPPEARED,
     FAILURE_STALE,
     FAILURE_TIMEOUT,
@@ -32,6 +33,7 @@ _FAILURE_REASON_LABELS = {
     FAILURE_LAUNCH_ERROR: ("启动失败", "Worker 启动阶段报错", "`继续` 重试"),
     FAILURE_USER_CANCELLED: ("用户已取消", "收到停止或取消指令", "`/coding <repo> <新目标>`"),
     FAILURE_CODEX_CRASH: ("Codex 崩溃", "Codex 进程异常退出", "`继续` 重试"),
+    FAILURE_POSTFLIGHT: ("收尾失败", "测试、合并或推送阶段失败", "`继续` 重试"),
 }
 
 

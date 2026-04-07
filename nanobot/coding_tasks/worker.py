@@ -14,6 +14,10 @@ from typing import Callable
 from nanobot.coding_tasks.harness import build_codex_bootstrap_prompt, detect_repo_harness
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.types import (
+    TASK_METADATA_POSTFLIGHT_RESULT,
+    TASK_METADATA_POSTFLIGHT_STAGE,
+    TASK_METADATA_POSTFLIGHT_SUMMARY,
+    TASK_METADATA_PRESERVE_FAILURE_WORKTREE,
     TASK_METADATA_WORKTREE_BRANCH,
     TASK_METADATA_WORKTREE_PATH,
     CodingTask,
@@ -109,7 +113,14 @@ class CodexWorkerLauncher:
         """Launch a coding task in tmux or reuse the existing session."""
         self.manager.update_metadata(
             task_id,
-            remove_keys=("waiting_reason_kind", "exit_review_progress"),
+            remove_keys=(
+                "waiting_reason_kind",
+                "exit_review_progress",
+                TASK_METADATA_POSTFLIGHT_STAGE,
+                TASK_METADATA_POSTFLIGHT_RESULT,
+                TASK_METADATA_POSTFLIGHT_SUMMARY,
+                TASK_METADATA_PRESERVE_FAILURE_WORKTREE,
+            ),
         )
         task = self.manager.require_task(task_id)
         worktree_path = self._create_task_worktree(task)
@@ -229,14 +240,15 @@ class CodexWorkerLauncher:
     def cleanup_task(self, task: CodingTask | str) -> dict[str, object]:
         """Remove task runtime resources after terminal state transitions."""
         task_obj = self.manager.require_task(task) if isinstance(task, str) else task
-        deleted_branch = task_obj.status in {"failed", "cancelled"}
+        preserve_failure_worktree = bool(task_obj.metadata.get(TASK_METADATA_PRESERVE_FAILURE_WORKTREE))
+        deleted_branch = task_obj.status in {"failed", "cancelled"} and not preserve_failure_worktree
         session_killed = self.kill_session(task_obj.tmux_session or "")
         worktree_removed = False
         branch_removed = False
         failed_steps: list[str] = []
 
         worktree = Path(task_worktree_path(task_obj) or self._default_worktree_path(task_obj))
-        if worktree.exists():
+        if worktree.exists() and not preserve_failure_worktree:
             try:
                 self._run_git(task_obj.repo_path, "worktree", "remove", "--force", str(worktree))
                 worktree_removed = True

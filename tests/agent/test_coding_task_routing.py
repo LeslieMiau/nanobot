@@ -457,6 +457,91 @@ async def test_private_telegram_slash_coding_status_routes_to_latest_origin_task
 
 
 @pytest.mark.asyncio
+async def test_private_telegram_status_refreshes_task_before_rendering(tmp_path: Path) -> None:
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
+    manager, task = _create_origin_task(store, tmp_path, status="running", summary="still running")
+
+    class _RefreshingMonitor:
+        def refresh_task(self, task_id: str, *, session_missing: bool = False):
+            assert task_id == task.id
+            assert session_missing is False
+            manager.mark_completed(task.id, summary="postflight passed")
+            return type("R", (), {"summary": "done", "plan_features": []})()
+
+        def build_task_report(self, task_id: str):
+            raise AssertionError("refresh_task should be used for active status requests")
+
+    from nanobot.coding_tasks.router import register_coding_task_commands
+    loop.commands = loop.commands.__class__()
+    from nanobot.command import register_builtin_commands
+    register_builtin_commands(loop.commands)
+    register_coding_task_commands(
+        loop.commands,
+        manager,
+        launcher=type("L", (), {})(),
+        monitor=_RefreshingMonitor(),  # type: ignore[arg-type]
+    )
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding status",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "编程任务已完成" in response.content
+    assert "postflight passed" in response.content
+
+
+@pytest.mark.asyncio
+async def test_private_telegram_status_treats_missing_session_like_list_refresh(tmp_path: Path) -> None:
+    loop, store, _manager, _launcher = _make_loop(tmp_path)
+    manager, task = _create_origin_task(store, tmp_path, status="running", summary="still running")
+    manager.update_metadata(task.id, updates={"worktree_path": "/tmp/demo/.codex-tasks/task"})
+
+    class _RefreshingMonitor:
+        def refresh_task(self, task_id: str, *, session_missing: bool = False):
+            assert task_id == task.id
+            assert session_missing is True
+            manager.mark_completed(task.id, summary="postflight passed")
+            return type("R", (), {"summary": "done", "plan_features": []})()
+
+        def build_task_report(self, task_id: str):
+            raise AssertionError("refresh_task should be used for active status requests")
+
+    from nanobot.coding_tasks.router import register_coding_task_commands
+
+    loop.commands = loop.commands.__class__()
+    from nanobot.command import register_builtin_commands
+
+    register_builtin_commands(loop.commands)
+    register_coding_task_commands(
+        loop.commands,
+        manager,
+        launcher=type("L", (), {"has_session": lambda self, name: False})(),
+        monitor=_RefreshingMonitor(),  # type: ignore[arg-type]
+    )
+
+    response = await loop._process_message(
+        InboundMessage(
+            channel="telegram",
+            sender_id="u1",
+            chat_id="chat-1",
+            content="/coding status",
+            metadata={"is_group": False},
+        )
+    )
+
+    assert response is not None
+    assert "编程任务已完成" in response.content
+    assert "postflight passed" in response.content
+
+
+@pytest.mark.asyncio
 async def test_private_telegram_slash_coding_list_shows_origin_tasks_newest_first(tmp_path: Path) -> None:
     loop, store, _manager, _launcher = _make_loop(tmp_path)
     _manager, first = _create_origin_task(store, tmp_path, status="running", summary="first task")

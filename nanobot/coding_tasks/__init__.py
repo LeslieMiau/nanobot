@@ -4,6 +4,7 @@ from nanobot.coding_tasks.harness import RepoHarnessState, build_codex_bootstrap
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.notifier import CodingTaskNotifier
 from nanobot.coding_tasks.policy import CodingTaskPolicy
+from nanobot.coding_tasks.postflight import CodexPostflightRunner, PostflightResult, PostflightStep
 from nanobot.coding_tasks.progress import (
     CodexProgressMonitor,
     PlanProgress,
@@ -34,8 +35,11 @@ __all__ = [
     "CodingTaskPolicy",
     "CodingTaskRuntime",
     "CodexProgressMonitor",
+    "CodexPostflightRunner",
     "CodexTaskRecovery",
     "PlanProgress",
+    "PostflightResult",
+    "PostflightStep",
     "RepoHarnessState",
     "RepoSnapshot",
     "RecoveryResult",

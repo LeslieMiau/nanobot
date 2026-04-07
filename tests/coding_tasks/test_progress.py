@@ -16,6 +16,7 @@ from nanobot.coding_tasks.progress import (
     extract_latest_progress_note,
     summarize_plan_progress,
 )
+from nanobot.coding_tasks.postflight import PostflightResult
 from nanobot.coding_tasks.store import CodingTaskStore
 
 
@@ -415,18 +416,23 @@ async def test_poll_task_marks_completed_when_missing_session_repo_harness_is_fi
         def capture_pane(self, session: str) -> str:
             raise AssertionError("capture_pane should not run when the tmux session is gone")
 
-    monitor = CodexProgressMonitor(manager, _FakeLauncher())  # type: ignore[arg-type]
+    class _FakePostflight:
+        def run(self, task_obj):
+            assert task_obj.id == task.id
+            return PostflightResult(ok=True, summary="Postflight passed", stage="done")
+
+    monitor = CodexProgressMonitor(manager, _FakeLauncher(), postflight=_FakePostflight())  # type: ignore[arg-type]
     report = await monitor.poll_task(task.id)
 
     refreshed = store.get_task(task.id)
     assert refreshed is not None
     assert refreshed.status == "completed"
-    assert refreshed.last_progress_summary == "wrapped everything up"
+    assert refreshed.last_progress_summary == "Postflight passed"
     assert report.plan_progress.is_complete is True
 
 
 @pytest.mark.asyncio
-async def test_poll_task_marks_waiting_user_when_missing_session_has_strong_completion_evidence(tmp_path: Path) -> None:
+async def test_poll_task_marks_completed_when_missing_session_has_strong_completion_evidence(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
     manager = CodexWorkerManager(workspace, store)
@@ -457,14 +463,18 @@ async def test_poll_task_marks_waiting_user_when_missing_session_has_strong_comp
         def capture_pane(self, session: str) -> str:
             raise AssertionError("capture_pane should not run when the tmux session is gone")
 
-    monitor = CodexProgressMonitor(manager, _MissingLauncher())  # type: ignore[arg-type]
+    class _FakePostflight:
+        def run(self, task_obj):
+            assert task_obj.id == task.id
+            return PostflightResult(ok=True, summary="Postflight passed", stage="done")
+
+    monitor = CodexProgressMonitor(manager, _MissingLauncher(), postflight=_FakePostflight())  # type: ignore[arg-type]
     await monitor.poll_task(task.id)
 
     refreshed = store.get_task(task.id)
     assert refreshed is not None
-    assert refreshed.status == "waiting_user"
-    assert refreshed.metadata.get("waiting_reason_kind") == "worker_exit_review"
-    assert "substantial progress" in refreshed.last_progress_summary
+    assert refreshed.status == "completed"
+    assert refreshed.last_progress_summary == "Postflight passed"
 
 
 @pytest.mark.asyncio

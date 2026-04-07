@@ -12,6 +12,7 @@ from nanobot.bus.events import OutboundMessage
 from nanobot.cli.commands import app
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.notifier import CodingTaskNotifier
+from nanobot.coding_tasks.postflight import PostflightResult
 from nanobot.coding_tasks.runtime import build_coding_task_runtime
 from nanobot.coding_tasks.store import CodingTaskStore
 from nanobot.coding_tasks.worker import CodexWorkerLauncher
@@ -82,7 +83,18 @@ async def test_cli_coding_task_e2e_completes_harness_and_hides_archived_task(mon
     manager = CodexWorkerManager(workspace, store)
     runner = _MutableTmuxRunner()
     launcher = CodexWorkerLauncher(workspace, manager, runner=runner)
-    runtime = build_coding_task_runtime(workspace, store=store, manager=manager, launcher=launcher)
+
+    class _FakePostflight:
+        def run(self, task_obj):
+            return PostflightResult(ok=True, summary="Postflight passed", stage="done")
+
+    runtime = build_coding_task_runtime(
+        workspace,
+        store=store,
+        manager=manager,
+        launcher=launcher,
+        postflight=_FakePostflight(),
+    )
     sent: list[OutboundMessage] = []
     notifier = CodingTaskNotifier(manager, lambda msg: _collect(sent, msg), throttle_s=0)
 
@@ -139,12 +151,12 @@ async def test_cli_coding_task_e2e_completes_harness_and_hides_archived_task(mon
     updated = store.get_task(task.id)
     assert updated is not None
     assert updated.status == "completed"
-    assert updated.last_progress_summary == "wrapped everything up"
+    assert updated.last_progress_summary == "Postflight passed"
     assert prompt_path.exists() is False
     assert launch_path.exists() is False
     assert log_path.exists() is False
     assert sent and "编程任务已完成" in sent[0].content
-    assert "wrapped everything up" in sent[0].content
+    assert "Postflight passed" in sent[0].content
 
     default_list = cli.invoke(app, ["coding-task", "list", "--config", str(config_file)])
     assert default_list.exit_code == 0
@@ -162,7 +174,7 @@ async def test_cli_coding_task_e2e_completes_harness_and_hides_archived_task(mon
     status_output = _strip_ansi(status_result.stdout)
     assert "Status: completed" in status_output
     assert "编程任务已完成" in status_output
-    assert "wrapped everything up" in status_output
+    assert "Postflight passed" in status_output
 
     cleanup_events = [event for event in store.read_run_events(task.id) if event.event == "artifact_cleanup"]
     assert len(cleanup_events) == 1

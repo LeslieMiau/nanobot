@@ -1577,7 +1577,7 @@ def test_coding_task_status_shows_details_and_recent_events(monkeypatch, tmp_pat
     assert "Repo: /tmp/repo-a" in output
     assert "Goal: Inspect" in output
     assert "Recoverable: yes" in output
-    assert "Last progress: Working" in output
+    assert "Last progress: 当前输出: Running pytest tests/coding_tasks" in output
     assert "Live report:" in output
     assert "Recent events:" in output
     assert "created" in output
@@ -1621,7 +1621,14 @@ def test_coding_task_status_reads_report_without_persisting_metadata(monkeypatch
         store=store,
         manager=manager,
         launcher=type("L", (), {})(),
-        monitor=type("M", (), {"build_task_report": lambda self, task_id: report})(),
+        monitor=type(
+            "M",
+            (),
+            {
+                "build_task_report": lambda self, task_id: report,
+                "refresh_task": lambda self, task_id, session_missing=False: report,
+            },
+        )(),
         recovery=type("R", (), {"recover_tasks": lambda self: None})(),
         policy=CodingTaskPolicy(manager),
         repo_resolver=RepoRefResolver(),
@@ -1642,6 +1649,125 @@ def test_coding_task_status_reads_report_without_persisting_metadata(monkeypatch
     assert reloaded is not None
     assert reloaded.branch_name is None
     assert reloaded.metadata.get("recent_commit_summary") is None
+
+
+def test_coding_task_status_refreshes_active_task_before_rendering(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.coding_tasks.policy import CodingTaskPolicy
+    from nanobot.coding_tasks.repo_resolver import RepoRefResolver
+    from nanobot.coding_tasks.runtime import CodingTaskRuntime
+    from nanobot.coding_tasks.manager import CodexWorkerManager
+    from nanobot.coding_tasks.store import CodingTaskStore
+
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    task = manager.create_task(repo_path="/tmp/repo-a", goal="Inspect")
+    manager.mark_starting(task.id, summary="Boot")
+    manager.mark_running(task.id, summary="Working")
+
+    report = type("R", (), {"branch_name": "main", "recent_commit_summary": "abc1234 commit", "summary": "done"})()
+
+    class _Monitor:
+        def refresh_task(self, task_id: str, *, session_missing: bool = False):
+            assert task_id == task.id
+            assert session_missing is False
+            manager.mark_completed(task.id, summary="Postflight passed")
+            return report
+
+        def build_task_report(self, task_id: str):
+            raise AssertionError("refresh_task should be used for active tasks")
+
+    runtime = CodingTaskRuntime(
+        workspace=workspace,
+        store=store,
+        manager=manager,
+        launcher=type("L", (), {})(),
+        monitor=_Monitor(),
+        recovery=type("R", (), {"recover_tasks": lambda self: None})(),
+        policy=CodingTaskPolicy(manager),
+        repo_resolver=RepoRefResolver(),
+        notifier=None,
+    )
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands._load_coding_task_runtime", lambda _config, send_callback=None: runtime)
+
+    result = runner.invoke(app, ["coding-task", "status", task.id, "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    output = _strip_ansi(result.stdout)
+    assert "Status: completed" in output
+    assert "编程任务已完成" in output
+    assert "Postflight passed" in output
+
+
+def test_coding_task_status_marks_missing_session_as_terminal(monkeypatch, tmp_path: Path) -> None:
+    from nanobot.coding_tasks.manager import CodexWorkerManager
+    from nanobot.coding_tasks.policy import CodingTaskPolicy
+    from nanobot.coding_tasks.repo_resolver import RepoRefResolver
+    from nanobot.coding_tasks.runtime import CodingTaskRuntime
+    from nanobot.coding_tasks.store import CodingTaskStore
+
+    config_file = tmp_path / "instance" / "config.json"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("{}")
+
+    workspace = tmp_path / "workspace"
+    config = Config()
+    config.agents.defaults.workspace = str(workspace)
+
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    task = manager.create_task(
+        repo_path="/tmp/repo-a",
+        goal="Inspect",
+        metadata={"worktree_path": "/tmp/repo-a/.codex-tasks/demo"},
+    )
+    manager.mark_starting(task.id, summary="Boot")
+    manager.mark_running(task.id, summary="Working")
+
+    report = type("R", (), {"branch_name": "main", "recent_commit_summary": "abc1234 commit", "summary": "done"})()
+
+    class _Monitor:
+        def refresh_task(self, task_id: str, *, session_missing: bool = False):
+            assert task_id == task.id
+            assert session_missing is True
+            manager.mark_completed(task.id, summary="Postflight passed")
+            return report
+
+        def build_task_report(self, task_id: str):
+            raise AssertionError("refresh_task should be used for active tasks")
+
+    runtime = CodingTaskRuntime(
+        workspace=workspace,
+        store=store,
+        manager=manager,
+        launcher=type("L", (), {"has_session": lambda self, name: False})(),
+        monitor=_Monitor(),
+        recovery=type("R", (), {"recover_tasks": lambda self: None})(),
+        policy=CodingTaskPolicy(manager),
+        repo_resolver=RepoRefResolver(),
+        notifier=None,
+    )
+
+    monkeypatch.setattr("nanobot.config.loader.set_config_path", lambda _path: None)
+    monkeypatch.setattr("nanobot.config.loader.load_config", lambda _path=None: config)
+    monkeypatch.setattr("nanobot.cli.commands._load_coding_task_runtime", lambda _config, send_callback=None: runtime)
+
+    result = runner.invoke(app, ["coding-task", "status", task.id, "--config", str(config_file)])
+
+    assert result.exit_code == 0
+    output = _strip_ansi(result.stdout)
+    assert "Status: completed" in output
+    assert "Postflight passed" in output
 
 
 def test_coding_task_cancel_updates_status_and_reason(monkeypatch, tmp_path: Path) -> None:

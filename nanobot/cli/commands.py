@@ -1268,20 +1268,29 @@ def coding_task_status(
         console.print(f"[red]Unknown coding task: {task_id}[/red]")
         raise typer.Exit(1)
 
+    session_missing = False
+    if task.status in {"starting", "running", "waiting_user"} and task.metadata.get("worktree_path"):
+        has_session = getattr(runtime.launcher, "has_session", None)
+        if callable(has_session) and task.tmux_session:
+            session_missing = not has_session(task.tmux_session)
+
+    if task.status in {"starting", "running", "waiting_user"}:
+        report = runtime.monitor.refresh_task(task.id, session_missing=session_missing)
+    else:
+        report = runtime.monitor.build_task_report(task.id)
+    current = store.get_task(task.id) or task
     recoverable_ids = {item.id for item in manager.recoverable_tasks()}
     recoverable = "yes" if task.id in recoverable_ids else "no"
-    console.print(f"Task: {task.id}")
-    console.print(f"Title: {task.title}")
-    console.print(f"Status: {task.status}")
-    console.print(f"Repo: {task.repo_path}")
-    console.print(f"Goal: {task.goal}")
-    console.print(f"tmux: {task.tmux_session or '-'}")
-    console.print(f"Codex session: {task.codex_session_hint or '-'}")
-    console.print(f"Harness state: {task.harness_state}")
+    console.print(f"Task: {current.id}")
+    console.print(f"Title: {current.title}")
+    console.print(f"Status: {current.status}")
+    console.print(f"Repo: {current.repo_path}")
+    console.print(f"Goal: {current.goal}")
+    console.print(f"tmux: {current.tmux_session or '-'}")
+    console.print(f"Codex session: {current.codex_session_hint or '-'}")
+    console.print(f"Harness state: {current.harness_state}")
     console.print(f"Recoverable: {recoverable}")
-    console.print(f"Last progress: {task.last_progress_summary or '-'}")
-    report = runtime.monitor.build_task_report(task.id)
-    current = store.get_task(task.id) or task
+    console.print(f"Last progress: {current.last_progress_summary or '-'}")
     console.print(f"Branch: {report.branch_name or current.branch_name or '-'}")
     console.print(f"Recent commit: {report.recent_commit_summary or current.metadata.get('recent_commit_summary', '-')}")
     if report.summary:

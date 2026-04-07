@@ -464,19 +464,25 @@ def _make_control_handler(
             )
 
         if is_status_request:
-            report = monitor.build_task_report(task.id) if monitor else None
-            if task.status == "completed":
-                content = build_completion_report(task)
-            elif task.status == "failed":
-                content = build_failure_report(task)
-            elif task.status == "waiting_user":
-                content = build_waiting_user_report(task)
+            current_task = task
+            if monitor and task.status in {"starting", "running", "waiting_user"}:
+                report = monitor.refresh_task(task.id, **_status_refresh_kwargs(task, launcher))
+                current_task = manager.require_task(task.id)
+            else:
+                report = monitor.build_task_report(task.id) if monitor else None
+                current_task = manager.require_task(task.id)
+            if current_task.status == "completed":
+                content = build_completion_report(current_task)
+            elif current_task.status == "failed":
+                content = build_failure_report(current_task)
+            elif current_task.status == "waiting_user":
+                content = build_waiting_user_report(current_task)
             else:
                 content = _format_task_status(
-                    task,
+                    current_task,
                     report_summary=report.summary if report else "",
                     plan_features=report.plan_features if report else None,
-                    recoverable=task.id in {item.id for item in manager.recoverable_tasks()},
+                    recoverable=current_task.id in {item.id for item in manager.recoverable_tasks()},
                 )
             return OutboundMessage(
                 channel=msg.channel,
@@ -695,6 +701,17 @@ def _format_task_list(
         lines.append(entry)
     lines.append("使用 `/coding status 2`、`/coding pause 2`、`/coding resume 2`、`/coding stop 2` 操作指定任务。")
     return "\n".join(lines)
+
+
+def _status_refresh_kwargs(task, launcher: CodexWorkerLauncher | None) -> dict[str, bool]:
+    if not task.metadata.get("worktree_path"):
+        return {}
+    if not task.tmux_session or launcher is None:
+        return {}
+    has_session = getattr(launcher, "has_session", None)
+    if not callable(has_session):
+        return {}
+    return {"session_missing": not has_session(task.tmux_session)}
 
 
 def _format_task_status(
