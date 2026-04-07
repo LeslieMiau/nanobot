@@ -710,3 +710,17 @@
   - `rg -n "Ask_Nanobot\\.shortcut|呼叫助手\\.shortcut|呼叫小助手\\.shortcut|嘿助手\\.shortcut|小助手测试\\.shortcut|问_Nanobot\\.shortcut|问机器人\\.shortcut" README.md docs ios PROGRESS.md scripts` shows the removed names only inside this progress log entry, not in active runtime or documentation paths.
 - Harness note:
   - `PLAN.json` remains unchanged because the active plan tracks an older completed AICodeWith follow-up, while this was a user-directed repository cleanup task.
+
+## Session update - 2026-04-07 (`/coding` task system improvement kickoff)
+- User-directed scope:
+  - The active repository task is now the Telegram `/coding` system overhaul covering per-task worktree isolation, event-driven notifications, terminal-state cleanup, timeout/staleness triage, and clearer `/coding list` / failure reporting.
+  - The user approved the implementation plan and asked for direct execution without pausing between feature checkpoints.
+- Baseline restore before edits:
+  - `pwd` -> `/Users/miau/Documents/nanobot`
+  - `git log --oneline -20` -> confirmed the current branch context is `main` with the recent voice-bridge and shortcut cleanup history intact.
+  - `bash ~/.codex/scripts/global-init.sh` -> completed with the same pre-existing repository-wide pytest failure in `tests/test_coding_mode.py` (`CodingConfig` import drift).
+  - `bash init.sh` -> completed with the same known baseline failure and normal CLI health output.
+  - `git status --short` -> clean before starting the new `/coding` implementation task.
+- Harness decision:
+  - The previous `PLAN.json` was fully complete but had not been cleaned up, so the harness is being re-anchored to this new `/coding` task instead of continuing the older AICodeWith follow-up.
+  - The existing `tests/test_coding_mode.py` import error is treated as an unrelated repository caveat during this coding-task-focused implementation.

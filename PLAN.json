@@ -2,45 +2,100 @@
   {
     "id": 1,
     "category": "baseline",
-    "description": "Re-anchor the harness from the LiteLLM-removal checkpoint to the follow-up task of refreshing the AICodeWith model catalog and runtime bindings.",
+    "description": "Re-anchor the coding-task harness from the completed AICodeWith follow-up to the Telegram `/coding` system improvement plan.",
     "steps": [
-      "Record in `PROGRESS.md` that the user requested a new AICodeWith model set for `/model list` and post-verification restarts of both `gateway` and `serve`.",
-      "Replace `PLAN.json` so the active follow-up tracks the model-catalog refresh instead of the already-completed LiteLLM removal.",
-      "Preserve the unrelated `tests/test_coding_mode.py` `CodingConfig` import failure as an existing repository caveat during this follow-up."
+      "Record in `PROGRESS.md` that the active repository task is now the `/coding` isolation/cleanup/reporting overhaul.",
+      "Preserve the existing unrelated baseline failure in `tests/test_coding_mode.py` (`CodingConfig` import drift) as a known repository caveat during this task.",
+      "Replace `PLAN.json` so the active feature list tracks the new `/coding` work instead of the already-completed AICodeWith follow-up."
     ],
     "passes": true
   },
   {
     "id": 2,
-    "category": "catalog",
-    "description": "AICodeWith exposes the requested curated model list in `/model list` using the exact user-facing names.",
+    "category": "worktree",
+    "description": "Each coding task launches inside its own git worktree and records the real task workspace separately from the display repo root.",
     "steps": [
-      "Update `nanobot/providers/catalog.py` so AICodeWith lists `gpt-5.4`, `claude-opus-4-6`, `claude-sonnet-4-6`, `gemini-3.1-pro-preview`, `glm-5`, `deepseek-v3.2`, and `kimi-k2.5`.",
-      "Remove the older `gpt-5.3-codex`, `gpt-5.2`, `claude-*4-5`, and `gemini-2.5-*` AICodeWith catalog entries.",
-      "Refresh the README AICodeWith examples and wording to match the new bare model names."
+      "Add `worktree_path` tracking to `CodingTask` metadata/state handling without losing the original `repo_path` display value.",
+      "Teach `worker.py` to create `.codex-tasks/{task_id}` worktrees on task launch, create `codex/task-{task_id}` branches from the current repo HEAD, and run Codex inside that worktree.",
+      "Update bootstrap prompt construction and related helpers to use the worktree path as the task execution directory while preserving the original repo path for user-facing summaries."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 3,
-    "category": "runtime",
-    "description": "Runtime model switching honors the refreshed AICodeWith list without cross-family fallback surprises.",
+    "category": "cleanup",
+    "description": "Task shutdown paths clean tmux sessions, worktrees, branches, and task artifacts consistently across completion, failure, and cancellation.",
     "steps": [
-      "Make `/model <name>` prefer the current available-model binding on exact match so AICodeWith list entries resolve back to `provider: aicodewith`.",
-      "Tighten `nanobot/providers/custom_provider.py` so AICodeWith openai-route requests do not silently fall back from `glm`/`deepseek`/`kimi` to legacy GPT models.",
-      "Keep Claude and Gemini route detection working with the new bare model names."
+      "Add `kill_session()` and `cleanup_task()` helpers in `worker.py` that stop the tmux worker and remove the task worktree.",
+      "Keep successful task branches for inspection while removing the worktree directory, and delete both the worktree and the task branch for failed or cancelled tasks.",
+      "Extend manager/router lifecycle handling so cleanup runs for `completed`, `failed`, and `cancelled` tasks without regressing artifact audit logging."
     ],
-    "passes": true
+    "passes": false
   },
   {
     "id": 4,
-    "category": "verification",
-    "description": "The refreshed AICodeWith model set is covered by focused tests, live smoke checks, and service restarts.",
+    "category": "progress",
+    "description": "Harness progress and repo inspection follow the task worktree and detect stale or overlong workers automatically.",
     "steps": [
-      "Update and run the targeted pytest coverage for catalog, command routing, and custom-provider behavior.",
-      "Use the configured AICodeWith key to live-check the requested models through the current runtime path.",
-      "Restart both `nanobot gateway` and `nanobot serve` after verification and record the evidence in `PROGRESS.md`."
+      "Make `progress.py` and `harness.py` read `PLAN.json`, `PROGRESS.md`, branch names, and recent commits from `worktree_path` when present, with `repo_path` as fallback.",
+      "Add task staleness checks for workers running longer than 4 hours total or with no progress update for 1 hour.",
+      "When timeout or stale conditions trigger, stop the tmux session, remove the worktree, and mark the task failed with a structured summary."
     ],
-    "passes": true
+    "passes": false
+  },
+  {
+    "id": 5,
+    "category": "notifications",
+    "description": "Telegram notifications become event-driven and remain silent during normal starting/running execution.",
+    "steps": [
+      "Remove proactive `starting` and `running` notification builders from `notifier.py`.",
+      "Keep watcher polling so status transitions are still detected, but only send content for `completed`, `failed`, and `waiting_user` tasks.",
+      "Update notifier tests to prove running tasks no longer emit Telegram messages while terminal states still do."
+    ],
+    "passes": false
+  },
+  {
+    "id": 6,
+    "category": "failure-reporting",
+    "description": "Failure summaries are classified into stable machine-readable reasons and rendered into clearer Chinese recovery guidance.",
+    "steps": [
+      "Add explicit failure reason constants in `types.py` for session disappearance, timeout, staleness, launch errors, user cancellation, and Codex crashes.",
+      "Implement `classify_failure_reason()` and rework `build_failure_report()` to show Chinese labels, likely causes, branch/worktree context, recent commit, and suggested recovery actions.",
+      "Update failure-producing code paths so their summaries align with the new structured classification scheme."
+    ],
+    "passes": false
+  },
+  {
+    "id": 7,
+    "category": "router-ux",
+    "description": "`/coding list` and control commands reflect task health, support `list all`, and automatically triage missing worker sessions.",
+    "steps": [
+      "Extend `/coding list` parsing to accept `/coding list all` and keep the default list focused on active tasks.",
+      "Before rendering active tasks, probe tmux session liveness and trigger monitor refresh for missing sessions so the list reflects the latest state.",
+      "Render list entries with status badges, repo name, branch/worktree branch, progress bar, and truncated goal summary."
+    ],
+    "passes": false
+  },
+  {
+    "id": 8,
+    "category": "telegram-copy",
+    "description": "Completed, failed, and waiting-user Telegram reports include richer task context and explicit next-step command hints.",
+    "steps": [
+      "Append code-formatted follow-up actions to completion, failure, and waiting-user reports.",
+      "Expose worktree branch, recent commit summary, and failure details in the failure report without overwhelming the user.",
+      "Keep waiting-user copy aligned with the existing harness-conflict flow while adding the new richer action prompts."
+    ],
+    "passes": false
+  },
+  {
+    "id": 9,
+    "category": "verification",
+    "description": "The `/coding` overhaul is covered by focused tests plus a full `tests/coding_tasks/` regression run.",
+    "steps": [
+      "Add or update worker, manager, progress, notifier, reporting, harness, and router tests for worktree lifecycle, cleanup, timeout/stale failure, and list health checks.",
+      "Run targeted pytest commands while implementing each feature checkpoint, then run `pytest tests/coding_tasks/` as the final coding-task regression sweep.",
+      "Record the known unrelated `tests/test_coding_mode.py` import failure separately if it still blocks repository-wide pytest outside the coding-task suite."
+    ],
+    "passes": false
   }
 ]
