@@ -19,7 +19,7 @@
       "Teach `worker.py` to create `.codex-tasks/{task_id}` worktrees on task launch, create `codex/task-{task_id}` branches from the current repo HEAD, and run Codex inside that worktree.",
       "Update bootstrap prompt construction and related helpers to use the worktree path as the task execution directory while preserving the original repo path for user-facing summaries."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 3,
@@ -30,7 +30,7 @@
       "Keep successful task branches for inspection while removing the worktree directory, and delete both the worktree and the task branch for failed or cancelled tasks.",
       "Extend manager/router lifecycle handling so cleanup runs for `completed`, `failed`, and `cancelled` tasks without regressing artifact audit logging."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 4,
@@ -41,7 +41,7 @@
       "Add task staleness checks for workers running longer than 4 hours total or with no progress update for 1 hour.",
       "When timeout or stale conditions trigger, stop the tmux session, remove the worktree, and mark the task failed with a structured summary."
     ],
-    "passes": false
+    "passes": true
   },
   {
     "id": 5,

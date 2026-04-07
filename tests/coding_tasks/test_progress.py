@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import subprocess
+import time
 
 import pytest
 
@@ -389,7 +390,7 @@ async def test_poll_task_marks_failed_when_worker_session_disappears(tmp_path: P
     refreshed = store.get_task(task.id)
     assert refreshed is not None
     assert refreshed.status == "failed"
-    assert "Worker session disappeared after launch" in refreshed.last_progress_summary
+    assert "session_disappeared:" in refreshed.last_progress_summary
     assert "pytest tests/example.py" in refreshed.last_progress_summary
     assert report.plan_progress.is_complete is False
 
@@ -511,3 +512,64 @@ def test_refresh_task_persists_repo_metadata_without_status_view_side_effects(tm
     assert refreshed.branch_name == "main"
     assert "seed repo" in refreshed.metadata.get("recent_commit_summary", "")
     assert refreshed.last_progress_summary == report.summary
+
+
+def test_build_task_report_prefers_existing_worktree_path(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    repo = tmp_path / "repo"
+    worktree = tmp_path / "repo-worktree"
+    _prepare_repo(repo)
+    _prepare_repo(worktree)
+    _init_git_repo(worktree)
+    (worktree / "PROGRESS.md").write_text("## Session update\n- Worktree note\n", encoding="utf-8")
+    task = manager.create_task(
+        repo_path=str(repo),
+        goal="Track worktree progress",
+        metadata={"worktree_path": str(worktree)},
+    )
+    task = manager.mark_starting(task.id, summary="Launching")
+    task = manager.mark_running(task.id, summary="Working")
+
+    class _FakeLauncher:
+        def capture_pane(self, session: str) -> str:
+            assert session == task.tmux_session
+            return "Running pytest\n"
+
+    monitor = CodexProgressMonitor(manager, _FakeLauncher())  # type: ignore[arg-type]
+    report = monitor.build_task_report(task.id)
+
+    assert report.latest_note == "Worktree note"
+    assert report.branch_name == "main"
+
+
+@pytest.mark.asyncio
+async def test_poll_task_marks_timeout_and_calls_cleanup(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    store = CodingTaskStore(workspace / "automation" / "coding" / "tasks.json")
+    manager = CodexWorkerManager(workspace, store)
+    repo = tmp_path / "repo"
+    _prepare_repo(repo)
+    task = manager.create_task(repo_path=str(repo), goal="Timeout task")
+    task = manager.mark_starting(task.id, summary="Launching")
+    overdue = store.get_task(task.id)
+    assert overdue is not None
+    overdue.created_at_ms = int(time.time() * 1000) - (5 * 60 * 60 * 1000)
+    overdue.updated_at_ms = overdue.created_at_ms
+    store.upsert_task(overdue)
+    cleaned: list[str] = []
+
+    class _FakeLauncher:
+        def cleanup_task(self, task_obj) -> None:
+            cleaned.append(task_obj.id)
+
+    monitor = CodexProgressMonitor(manager, _FakeLauncher())  # type: ignore[arg-type]
+    report = await monitor.poll_task(task.id)
+
+    refreshed = store.get_task(task.id)
+    assert refreshed is not None
+    assert refreshed.status == "failed"
+    assert refreshed.last_progress_summary.startswith("task_timeout:")
+    assert cleaned == [task.id]
+    assert "task_timeout" in report.live_output or "task_timeout" in report.summary

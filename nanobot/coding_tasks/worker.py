@@ -13,7 +13,14 @@ from typing import Callable
 
 from nanobot.coding_tasks.harness import build_codex_bootstrap_prompt, detect_repo_harness
 from nanobot.coding_tasks.manager import CodexWorkerManager
-from nanobot.coding_tasks.types import CodingTask
+from nanobot.coding_tasks.types import (
+    TASK_METADATA_WORKTREE_BRANCH,
+    TASK_METADATA_WORKTREE_PATH,
+    CodingTask,
+    task_worktree_branch,
+    task_worktree_path,
+    task_workspace_path,
+)
 from nanobot.utils.helpers import ensure_dir
 
 _SESSION_HINT_PATTERNS = (
@@ -57,6 +64,7 @@ _STARTUP_DIAGNOSTICS = (
         "Worker hit an operation-not-permitted error before Codex emitted JSON events.",
     ),
 )
+_WORKTREE_DIRNAME = ".codex-tasks"
 
 
 @dataclass(slots=True)
@@ -95,6 +103,7 @@ class CodexWorkerLauncher:
         self.shell_bin = "/bin/sh"
         self.shell_env = self._build_shell_env()
         self.launch_cwd = self._resolve_launch_cwd()
+        self.manager.set_cleanup_task_callback(self.cleanup_task)
 
     def launch_task(self, task_id: str) -> CodexLaunchResult:
         """Launch a coding task in tmux or reuse the existing session."""
@@ -103,10 +112,18 @@ class CodexWorkerLauncher:
             remove_keys=("waiting_reason_kind", "exit_review_progress"),
         )
         task = self.manager.require_task(task_id)
-        harness = detect_repo_harness(task.repo_path)
+        worktree_path = self._create_task_worktree(task)
+        task = self.manager.update_metadata(
+            task.id,
+            updates={
+                TASK_METADATA_WORKTREE_PATH: str(worktree_path),
+                TASK_METADATA_WORKTREE_BRANCH: self._task_worktree_branch(task),
+            },
+        )
+        harness = detect_repo_harness(worktree_path)
         harness_resolution = task.metadata.get("harness_conflict_resolution", "resume_existing")
         prompt = build_codex_bootstrap_prompt(
-            repo_path=task.repo_path,
+            repo_path=worktree_path,
             goal=task.goal,
             branch_name=task.branch_name,
             approval_policy=task.approval_policy,
@@ -154,7 +171,7 @@ class CodexWorkerLauncher:
         codex_args = self.build_codex_args(task)
         codex_cmd = " ".join(shlex.quote(part) for part in codex_args)
         inner = (
-            f"cd {shlex.quote(task.repo_path)} && "
+            f"cd {shlex.quote(task_workspace_path(task))} && "
             f"{codex_cmd} < {shlex.quote(str(prompt_path))} 2>&1 | tee -a {shlex.quote(str(log_path))}"
         )
         return "#!/bin/sh\nexec " + self.build_shell_wrapper(inner) + "\n"
@@ -164,7 +181,7 @@ class CodexWorkerLauncher:
         args = [self.codex_bin, "exec", "--json", "--full-auto"]
         for override in _CODEX_CONFIG_OVERRIDES:
             args.extend(["-c", override])
-        args.extend(["-C", task.repo_path, "-"])
+        args.extend(["-C", task_workspace_path(task), "-"])
         return args
 
     def build_shell_wrapper(self, command: str) -> str:
@@ -202,6 +219,46 @@ class CodexWorkerLauncher:
         self._send_ctrl_c(session_name)
         return task
 
+    def kill_session(self, session_name: str) -> bool:
+        """Terminate a task tmux session when it still exists."""
+        if not session_name or not self.has_session(session_name):
+            return False
+        self._run_tmux("kill-session", "-t", session_name, check=False)
+        return True
+
+    def cleanup_task(self, task: CodingTask | str) -> dict[str, object]:
+        """Remove task runtime resources after terminal state transitions."""
+        task_obj = self.manager.require_task(task) if isinstance(task, str) else task
+        deleted_branch = task_obj.status in {"failed", "cancelled"}
+        session_killed = self.kill_session(task_obj.tmux_session or "")
+        worktree_removed = False
+        branch_removed = False
+        failed_steps: list[str] = []
+
+        worktree = Path(task_worktree_path(task_obj) or self._default_worktree_path(task_obj))
+        if worktree.exists():
+            try:
+                self._run_git(task_obj.repo_path, "worktree", "remove", "--force", str(worktree))
+                worktree_removed = True
+            except subprocess.CalledProcessError as exc:
+                failed_steps.append(self._format_process_error("worktree_remove", exc))
+
+        branch_name = self._task_worktree_branch(task_obj)
+        if deleted_branch and branch_name:
+            result = self._run_git(task_obj.repo_path, "branch", "-D", branch_name, check=False)
+            branch_removed = result.returncode == 0
+            if result.returncode != 0:
+                failed_steps.append(self._format_process_result("branch_delete", result))
+
+        return {
+            "session_killed": session_killed,
+            "worktree_removed": worktree_removed,
+            "branch_removed": branch_removed,
+            "worktree_path": str(worktree),
+            "worktree_branch": branch_name,
+            "failed_steps": failed_steps,
+        }
+
     @staticmethod
     def extract_session_hint(text: str) -> str | None:
         """Extract a Codex session hint from pane output when present."""
@@ -236,6 +293,27 @@ class CodexWorkerLauncher:
 
     def _log_path(self, task: CodingTask) -> Path:
         return self.artifacts_dir / f"{task.id}.codex.log"
+
+    def _create_task_worktree(self, task: CodingTask) -> Path:
+        worktree = Path(task_worktree_path(task) or self._default_worktree_path(task))
+        if worktree.exists():
+            return worktree
+        ensure_dir(worktree.parent)
+        self._run_git(
+            task.repo_path,
+            "worktree",
+            "add",
+            "-b",
+            self._task_worktree_branch(task),
+            str(worktree),
+        )
+        return worktree
+
+    def _default_worktree_path(self, task: CodingTask) -> str:
+        return str(Path(task.repo_path) / _WORKTREE_DIRNAME / task.id)
+
+    def _task_worktree_branch(self, task: CodingTask) -> str:
+        return task_worktree_branch(task) or f"codex/task-{task.id}"
 
     def _has_session(self, session: str) -> bool:
         result = self._run_tmux("has-session", "-t", session, check=False)
@@ -309,6 +387,30 @@ class CodexWorkerLauncher:
             cmd.extend(["-S", self.socket_path])
         cmd.extend(args)
         return self.runner(cmd, check=check, capture_output=True, text=True)
+
+    @staticmethod
+    def _run_git(repo_path: str | Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args],
+            cwd=repo_path,
+            check=check,
+            capture_output=True,
+            text=True,
+        )
+
+    @staticmethod
+    def _format_process_error(prefix: str, exc: subprocess.CalledProcessError) -> str:
+        stderr = (exc.stderr or "").strip()
+        stdout = (exc.stdout or "").strip()
+        detail = stderr or stdout or f"exit {exc.returncode}"
+        return f"{prefix}: {detail}"
+
+    @staticmethod
+    def _format_process_result(prefix: str, result: subprocess.CompletedProcess[str]) -> str:
+        stderr = (result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        detail = stderr or stdout or f"exit {result.returncode}"
+        return f"{prefix}: {detail}"
 
     @staticmethod
     def _default_runner(cmd: list[str], **kwargs) -> subprocess.CompletedProcess[str]:

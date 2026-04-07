@@ -20,6 +20,7 @@ from nanobot.coding_tasks.reporting import (
     build_waiting_user_report,
     repo_display_name,
 )
+from nanobot.coding_tasks.types import FAILURE_LAUNCH_ERROR, FAILURE_USER_CANCELLED
 from nanobot.coding_tasks.worker import CodexWorkerLauncher
 
 _START_PREFIX = "开始编程"
@@ -356,7 +357,7 @@ def _make_start_coding_handler(
         except Exception as exc:
             failed = manager.mark_failed(
                 task.id,
-                summary=f"Automatic Telegram launch failed: {type(exc).__name__}: {exc}",
+                summary=f"{FAILURE_LAUNCH_ERROR}: Automatic Telegram launch failed: {type(exc).__name__}: {exc}",
             )
             return OutboundMessage(
                 channel=msg.channel,
@@ -522,10 +523,10 @@ def _make_control_handler(
             manager.record_user_control(task.id, "cancel")
             if launcher:
                 try:
-                    launcher.interrupt_task(task.id)
+                    launcher.cleanup_task(task.id)
                 except Exception:
                     pass
-            updated = manager.cancel_task(task.id, summary="Cancelled from Telegram private chat")
+            updated = manager.cancel_task(task.id, summary=f"{FAILURE_USER_CANCELLED}: Cancelled from Telegram private chat")
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
@@ -570,11 +571,11 @@ def _make_control_handler(
                 )
             if launcher:
                 try:
-                    launcher.interrupt_task(task.id)
+                    launcher.cleanup_task(task.id)
                 except Exception:
                     pass
             manager.record_user_control(task.id, "stop")
-            updated = manager.cancel_task(task.id, summary="Stopped from Telegram /coding")
+            updated = manager.cancel_task(task.id, summary=f"{FAILURE_USER_CANCELLED}: Stopped from Telegram /coding")
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
@@ -583,9 +584,12 @@ def _make_control_handler(
 
         if is_stop_request:
             if launcher:
-                launcher.interrupt_task(task.id)
+                try:
+                    launcher.cleanup_task(task.id)
+                except Exception:
+                    pass
             manager.record_user_control(task.id, "stop")
-            updated = manager.mark_waiting_user(task.id, summary="Stopped from Telegram private chat")
+            updated = manager.cancel_task(task.id, summary=f"{FAILURE_USER_CANCELLED}: Stopped from Telegram private chat")
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,

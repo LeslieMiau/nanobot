@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 
@@ -38,6 +39,16 @@ HARNESS_RESOLUTION_VALUES = (
 WAITING_REASON_KIND_WORKER_INPUT = "worker_input"
 WAITING_REASON_KIND_WORKER_EXIT_REVIEW = "worker_exit_review"
 
+FAILURE_SESSION_DISAPPEARED = "session_disappeared"
+FAILURE_TIMEOUT = "task_timeout"
+FAILURE_STALE = "task_stale"
+FAILURE_LAUNCH_ERROR = "launch_error"
+FAILURE_USER_CANCELLED = "user_cancelled"
+FAILURE_CODEX_CRASH = "codex_crash"
+
+TASK_METADATA_WORKTREE_PATH = "worktree_path"
+TASK_METADATA_WORKTREE_BRANCH = "worktree_branch"
+
 
 @dataclass(slots=True)
 class CodingTask:
@@ -71,3 +82,23 @@ class CodingRunEvent:
     message: str = ""
     payload: dict[str, Any] = field(default_factory=dict)
     run_at_ms: int = field(default_factory=now_ms)
+
+
+def task_worktree_path(task: CodingTask) -> str:
+    """Return the persisted per-task worktree path when present."""
+    value = task.metadata.get(TASK_METADATA_WORKTREE_PATH)
+    return str(value).strip() if value else ""
+
+
+def task_workspace_path(task: CodingTask) -> str:
+    """Return the active filesystem path for one task."""
+    worktree = task_worktree_path(task)
+    if worktree and Path(worktree).exists():
+        return worktree
+    return task.repo_path
+
+
+def task_worktree_branch(task: CodingTask) -> str:
+    """Return the persisted per-task worktree branch when present."""
+    value = task.metadata.get(TASK_METADATA_WORKTREE_BRANCH)
+    return str(value).strip() if value else ""

@@ -10,8 +10,13 @@ from pathlib import Path
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.reporting import detect_waiting_reason, inspect_repo_snapshot
 from nanobot.coding_tasks.types import (
+    FAILURE_SESSION_DISAPPEARED,
+    FAILURE_STALE,
+    FAILURE_TIMEOUT,
     WAITING_REASON_KIND_WORKER_EXIT_REVIEW,
     WAITING_REASON_KIND_WORKER_INPUT,
+    now_ms,
+    task_workspace_path,
 )
 from nanobot.coding_tasks.worker import CodexWorkerLauncher
 
@@ -44,6 +49,8 @@ _STRONG_VERIFICATION_PHRASES = (
     "ready",
     "收口",
 )
+_TASK_TIMEOUT_MS = 4 * 60 * 60 * 1000
+_TASK_STALE_MS = 60 * 60 * 1000
 
 
 @dataclass(slots=True)
@@ -173,6 +180,11 @@ class CodexProgressMonitor:
     async def poll_task(self, task_id: str) -> TaskProgressReport:
         """Capture recent pane output and update the task progress summary."""
         task = self.manager.require_task(task_id)
+        stale_reason = self._check_staleness(task)
+        if stale_reason:
+            self._fail_stale_task(task, stale_reason)
+            failed = self.manager.require_task(task_id)
+            return build_task_progress_report(task_workspace_path(failed), failed.last_progress_summary)
         if self._should_close_missing_session(task):
             return self.refresh_task(task_id, pane_output="", session_missing=True)
         pane_output = ""
@@ -189,7 +201,7 @@ class CodexProgressMonitor:
                 pane_output = self.launcher.capture_pane(task.tmux_session)
             except Exception:
                 pane_output = ""
-        return build_task_progress_report(task.repo_path, pane_output)
+        return build_task_progress_report(task_workspace_path(task), pane_output)
 
     def refresh_task(
         self,
@@ -208,7 +220,7 @@ class CodexProgressMonitor:
                 current_output = ""
         if session_missing:
             current_output = self._read_recent_log_output(task.id)
-        report = build_task_progress_report(task.repo_path, current_output or "")
+        report = build_task_progress_report(task_workspace_path(task), current_output or "")
         self.manager.update_repo_metadata(
             task_id,
             branch_name=report.branch_name or None,
@@ -245,6 +257,30 @@ class CodexProgressMonitor:
         if not callable(has_session):
             return False
         return not has_session(task.tmux_session)
+
+    def _check_staleness(self, task) -> str:
+        if task.status not in {"starting", "running"}:
+            return ""
+        current_ms = now_ms()
+        if current_ms - task.created_at_ms > _TASK_TIMEOUT_MS:
+            return FAILURE_TIMEOUT
+        last_progress_at_ms = task.last_progress_at_ms or task.created_at_ms
+        if current_ms - last_progress_at_ms > _TASK_STALE_MS:
+            return FAILURE_STALE
+        return ""
+
+    def _fail_stale_task(self, task, reason: str) -> None:
+        if hasattr(self.launcher, "cleanup_task"):
+            try:
+                self.launcher.cleanup_task(task)
+            except Exception:
+                pass
+
+        if reason == FAILURE_TIMEOUT:
+            summary = "task_timeout: 任务运行超过 4 小时，已停止 worker 并清理 worktree。"
+        else:
+            summary = "task_stale: 最近 1 小时没有新的进展，已停止 worker 并清理 worktree。"
+        self.manager.mark_failed(task.id, summary=summary)
 
     def _read_recent_log_output(self, task_id: str, *, limit: int = 200) -> str:
         path = self.manager.workspace / "automation" / "coding" / "artifacts" / f"{task_id}.codex.log"
@@ -347,10 +383,10 @@ class CodexProgressMonitor:
 
     def _build_missing_session_failure_summary(self, report: TaskProgressReport, recent: str) -> str:
         if recent:
-            return f"Worker session disappeared after launch; last known progress: {recent}"
+            return f"{FAILURE_SESSION_DISAPPEARED}: Worker session disappeared after launch; last known progress: {recent}"
         if report.latest_note:
-            return f"Worker session disappeared after launch; latest repo note: {report.latest_note}"
-        return "Worker session disappeared after launch; send `继续` or `/coding resume` to relaunch."
+            return f"{FAILURE_SESSION_DISAPPEARED}: Worker session disappeared after launch; latest repo note: {report.latest_note}"
+        return f"{FAILURE_SESSION_DISAPPEARED}: Worker session disappeared after launch; send `继续` or `/coding resume` to relaunch."
 
 
 def _extract_live_output(pane_output: str) -> str:

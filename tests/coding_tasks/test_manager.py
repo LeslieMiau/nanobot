@@ -134,3 +134,24 @@ def test_latest_active_task_ignores_failed_and_cancelled(tmp_path) -> None:
 
     assert active is not None
     assert active.id == first.id
+
+
+def test_terminal_transitions_invoke_runtime_cleanup_callback(tmp_path) -> None:
+    store = CodingTaskStore(tmp_path / "automation" / "coding" / "tasks.json")
+    cleaned: list[tuple[str, str]] = []
+
+    def _cleanup(task) -> dict[str, str]:
+        cleaned.append((task.id, task.status))
+        return {"task_status": task.status}
+
+    manager = CodexWorkerManager(tmp_path, store, cleanup_task_callback=_cleanup)
+    task = manager.create_task(repo_path="/tmp/repo", goal="Do work")
+    manager.mark_starting(task.id, summary="Boot")
+
+    failed = manager.mark_failed(task.id, summary="task_timeout: too long")
+
+    assert failed.status == "failed"
+    assert cleaned == [(task.id, "failed")]
+    cleanup_events = [event for event in store.read_run_events(task.id) if event.event == "task_cleanup"]
+    assert len(cleanup_events) == 1
+    assert cleanup_events[0].payload["task_status"] == "failed"

@@ -23,6 +23,14 @@ class _FakeRunner:
         return subprocess.CompletedProcess(cmd, 0, "", "")
 
 
+def _init_git_repo(repo: Path) -> None:
+    subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "--allow-empty", "-m", "seed repo"], cwd=repo, check=True, capture_output=True)
+
+
 def _make_launcher(tmp_path: Path, *, has_session: bool, capture_output: str = ""):
     store = CodingTaskStore(tmp_path / "automation" / "coding" / "tasks.json")
     manager = CodexWorkerManager(tmp_path, store)
@@ -31,6 +39,7 @@ def _make_launcher(tmp_path: Path, *, has_session: bool, capture_output: str = "
     (repo / "PLAN.json").write_text('[{"id": 1, "passes": false}]', encoding="utf-8")
     (repo / "PROGRESS.md").write_text("## Session update\n- Continue old task\n", encoding="utf-8")
     (repo / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    _init_git_repo(repo)
     task = manager.create_task(repo_path=str(repo), goal="Implement worker launch")
     fake_runner = _FakeRunner(has_session=has_session, capture_output=capture_output)
     launcher = CodexWorkerLauncher(tmp_path, manager, runner=fake_runner)
@@ -50,6 +59,8 @@ def test_launch_task_creates_tmux_session_and_marks_task_starting(tmp_path: Path
     assert result.task.harness_state == "active"
     assert result.session_reused is False
     assert result.session_hint == "sess-123"
+    assert result.task.metadata["worktree_path"].endswith(f".codex-tasks/{task.id}")
+    assert Path(result.task.metadata["worktree_path"]).exists()
     assert Path(result.prompt_path).exists()
     assert Path(result.launch_script_path).exists()
     assert any("new-session" in cmd for cmd in fake_runner.commands)
@@ -88,6 +99,7 @@ def test_build_launch_script_wraps_codex_with_isolated_shell_and_log_capture(tmp
     launcher, task, _fake_runner = _make_launcher(tmp_path, has_session=False)
     prompt_path = Path(tmp_path / "prompt.txt")
     log_path = Path(tmp_path / "task.log")
+    task = launcher.launch_task(task.id).task
 
     script = launcher.build_launch_script(task, prompt_path, log_path)
 
@@ -99,7 +111,7 @@ def test_build_launch_script_wraps_codex_with_isolated_shell_and_log_capture(tmp
     assert 'model_reasoning_summary="detailed"' in script
     assert str(prompt_path) in script
     assert str(log_path) in script
-    assert str(Path(task.repo_path)) in script
+    assert str(Path(task.metadata["worktree_path"])) in script
     assert "2>&1 | tee -a" in script
 
 
@@ -114,6 +126,7 @@ def test_launch_task_writes_missing_harness_bootstrap_prompt(tmp_path: Path) -> 
     manager = CodexWorkerManager(tmp_path, store)
     repo = tmp_path / "repo-missing"
     repo.mkdir()
+    _init_git_repo(repo)
     task = manager.create_task(repo_path=str(repo), goal="Initialize harness first")
     fake_runner = _FakeRunner(has_session=False)
     launcher = CodexWorkerLauncher(tmp_path, manager, runner=fake_runner)
@@ -163,6 +176,7 @@ def test_launch_task_writes_completed_harness_prompt_for_conflict_resolution(tmp
     )
     (repo / "PROGRESS.md").write_text("## Session update\n- Finish the prior plan\n", encoding="utf-8")
     (repo / "init.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    _init_git_repo(repo)
     task = manager.create_task(repo_path=str(repo), goal="Replace icon")
     manager.update_metadata(
         task.id,
@@ -196,6 +210,8 @@ def test_worker_artifacts_are_namespaced_by_task_id(tmp_path: Path) -> None:
     repo_b = tmp_path / "repo-b"
     repo_a.mkdir()
     repo_b.mkdir()
+    _init_git_repo(repo_a)
+    _init_git_repo(repo_b)
     task_a = manager.create_task(repo_path=str(repo_a), goal="Task A")
     task_b = manager.create_task(repo_path=str(repo_b), goal="Task B")
 
@@ -206,3 +222,39 @@ def test_worker_artifacts_are_namespaced_by_task_id(tmp_path: Path) -> None:
     assert result_a.prompt_path != result_b.prompt_path
     assert Path(result_a.prompt_path).name.startswith(task_a.id)
     assert Path(result_b.prompt_path).name.startswith(task_b.id)
+
+
+def test_cleanup_task_removes_worktree_and_branch_for_cancelled_tasks(tmp_path: Path) -> None:
+    launcher, task, _fake_runner = _make_launcher(tmp_path, has_session=False)
+
+    launched = launcher.launch_task(task.id)
+    cancelled = launcher.manager.cancel_task(task.id, summary="user_cancelled: stop")
+    worktree_path = Path(cancelled.metadata["worktree_path"])
+
+    assert worktree_path.exists() is False
+    branch_check = subprocess.run(
+        ["git", "branch", "--list", cancelled.metadata["worktree_branch"]],
+        cwd=task.repo_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert branch_check.stdout.strip() == ""
+
+
+def test_cleanup_task_keeps_branch_for_completed_tasks(tmp_path: Path) -> None:
+    launcher, task, _fake_runner = _make_launcher(tmp_path, has_session=False)
+
+    launched = launcher.launch_task(task.id)
+    completed = launcher.manager.mark_completed(task.id, summary="done")
+    worktree_path = Path(completed.metadata["worktree_path"])
+
+    assert worktree_path.exists() is False
+    branch_check = subprocess.run(
+        ["git", "branch", "--list", completed.metadata["worktree_branch"]],
+        cwd=task.repo_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.metadata["worktree_branch"] in branch_check.stdout

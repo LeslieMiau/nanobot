@@ -724,3 +724,20 @@
 - Harness decision:
   - The previous `PLAN.json` was fully complete but had not been cleaned up, so the harness is being re-anchored to this new `/coding` task instead of continuing the older AICodeWith follow-up.
   - The existing `tests/test_coding_mode.py` import error is treated as an unrelated repository caveat during this coding-task-focused implementation.
+
+## Session update - 2026-04-07 (`/coding` Phase 1: worktree isolation + cleanup + stale triage)
+- Completed changes:
+  - Added per-task worktree tracking in the coding-task state layer with explicit `worktree_path` and `worktree_branch` metadata so Telegram-facing `repo_path` remains the original repository while task execution moves into `.codex-tasks/{task_id}`.
+  - Updated `nanobot/coding_tasks/worker.py` so `launch_task()` now creates or reuses `codex/task-{task_id}` worktrees, points the Codex bootstrap prompt and `codex exec -C` target at the worktree, and registers a terminal cleanup callback with the manager.
+  - Added runtime cleanup support:
+    - `kill_session()` terminates task tmux sessions.
+    - `cleanup_task()` removes worktrees and, for failed/cancelled tasks, deletes the task branch as well.
+    - manager terminal transitions now trigger runtime cleanup and still preserve artifact-cleanup audit history.
+  - Updated `nanobot/coding_tasks/progress.py` to read harness files and repo metadata from the active worktree when it exists, and to fail tasks that either run longer than 4 hours or make no progress for 1 hour.
+  - Updated Telegram cancel/stop routing so user-driven termination runs task cleanup and records `user_cancelled` summaries instead of leaving orphaned sessions/worktrees behind.
+- Verification:
+  - `.venv/bin/pytest tests/coding_tasks/test_worker.py tests/coding_tasks/test_manager.py tests/coding_tasks/test_progress.py -q` -> passed (`49 passed`)
+  - `.venv/bin/pytest tests/coding_tasks/test_harness.py tests/coding_tasks/test_runtime.py tests/coding_tasks/test_e2e.py -q` -> passed (`10 passed`)
+- Notes:
+  - The coding-task E2E test was updated to write completion evidence into the launched worktree, matching the new isolation model.
+  - Repository-wide pytest is still expected to stop early on the unrelated `tests/test_coding_mode.py` `CodingConfig` import drift until that separate baseline issue is repaired.

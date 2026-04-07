@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from nanobot.coding_tasks.store import CodingTaskStore
 from nanobot.coding_tasks.types import (
@@ -27,6 +29,7 @@ _ALLOWED_TRANSITIONS = {
 }
 _ACTIVE_TASK_STATUSES = {"starting", "running", "waiting_user"}
 _ARTIFACT_SUFFIXES = (".prompt.txt", ".launch.sh", ".codex.log")
+_TERMINAL_TASK_STATUSES = {"completed", "failed", "cancelled"}
 
 
 class CodexWorkerManager:
@@ -37,10 +40,19 @@ class CodexWorkerManager:
         workspace: Path,
         store: CodingTaskStore,
         session_prefix: str = "codex-task",
+        cleanup_task_callback: Callable[[CodingTask], dict[str, Any] | None] | None = None,
     ):
         self.workspace = workspace
         self.store = store
         self.session_prefix = session_prefix
+        self.cleanup_task_callback = cleanup_task_callback
+
+    def set_cleanup_task_callback(
+        self,
+        callback: Callable[[CodingTask], dict[str, Any] | None] | None,
+    ) -> None:
+        """Register a best-effort runtime cleanup callback for terminal states."""
+        self.cleanup_task_callback = callback
 
     def create_task(
         self,
@@ -303,7 +315,8 @@ class CodexWorkerManager:
                 },
             )
         )
-        if new_status == "completed":
+        if new_status in _TERMINAL_TASK_STATUSES:
+            self._cleanup_task_runtime(updated)
             self._cleanup_task_artifacts(updated)
         return updated
 
@@ -346,6 +359,30 @@ class CodexWorkerManager:
                     "removed_files": removed,
                     "failed_files": failed,
                 },
+            )
+        )
+
+    def _cleanup_task_runtime(self, task: CodingTask) -> None:
+        if self.cleanup_task_callback is None:
+            return
+
+        payload: dict[str, Any] = {}
+        message = "Best-effort task runtime cleanup completed."
+        try:
+            result = self.cleanup_task_callback(task)
+            if result:
+                payload.update(result)
+        except Exception as exc:
+            payload["error"] = f"{type(exc).__name__}: {exc}"
+            message = "Best-effort task runtime cleanup failed."
+
+        self.store.append_run_event(
+            CodingRunEvent(
+                task_id=task.id,
+                event="task_cleanup",
+                status=task.status,
+                message=message,
+                payload=payload,
             )
         )
 

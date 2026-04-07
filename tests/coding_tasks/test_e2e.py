@@ -108,6 +108,9 @@ async def test_cli_coding_task_e2e_completes_harness_and_hides_archived_task(mon
 
     run_result = cli.invoke(app, ["coding-task", "run", task.id, "--config", str(config_file)])
     assert run_result.exit_code == 0
+    task = store.get_task(task.id)
+    assert task is not None
+    worktree = Path(task.metadata["worktree_path"])
 
     prompt_path = workspace / "automation" / "coding" / "artifacts" / f"{task.id}.prompt.txt"
     launch_path = workspace / "automation" / "coding" / "artifacts" / f"{task.id}.launch.sh"
@@ -120,12 +123,12 @@ async def test_cli_coding_task_e2e_completes_harness_and_hides_archived_task(mon
     assert launch_path.exists() is True
     assert log_path.exists() is True
 
-    (repo / "PLAN.json").write_text(
+    (worktree / "PLAN.json").write_text(
         '[{"id": 1, "description": "seed", "steps": ["done"], "passes": true}, '
         '{"id": 2, "description": "finish harness smoke", "steps": ["mark done"], "passes": true}]',
         encoding="utf-8",
     )
-    (repo / "PROGRESS.md").write_text(
+    (worktree / "PROGRESS.md").write_text(
         "## Session update\n- wrapped everything up\n",
         encoding="utf-8",
     )
