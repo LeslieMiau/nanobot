@@ -1258,6 +1258,7 @@ def coding_task_status(
 ):
     """Show detailed status for one coding task."""
     from nanobot.coding_tasks import build_completion_report, build_failure_report, build_waiting_user_report
+    from nanobot.coding_tasks.progress import build_status_refresh_kwargs
 
     config_obj = _load_runtime_config(config, workspace)
     runtime = _load_coding_task_runtime(config_obj)
@@ -1268,14 +1269,8 @@ def coding_task_status(
         console.print(f"[red]Unknown coding task: {task_id}[/red]")
         raise typer.Exit(1)
 
-    session_missing = False
-    if task.status in {"starting", "running", "waiting_user"} and task.metadata.get("worktree_path"):
-        has_session = getattr(runtime.launcher, "has_session", None)
-        if callable(has_session) and task.tmux_session:
-            session_missing = not has_session(task.tmux_session)
-
     if task.status in {"starting", "running", "waiting_user"}:
-        report = runtime.monitor.refresh_task(task.id, session_missing=session_missing)
+        report = runtime.monitor.refresh_task(task.id, **build_status_refresh_kwargs(task, runtime.launcher))
     else:
         report = runtime.monitor.build_task_report(task.id)
     current = store.get_task(task.id) or task

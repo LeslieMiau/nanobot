@@ -63,6 +63,8 @@ class CodexPostflightRunner:
         if result == "passed":
             summary = str(current.metadata.get(TASK_METADATA_POSTFLIGHT_SUMMARY) or current.last_progress_summary)
             return PostflightResult(ok=True, summary=summary, stage="done")
+        if result == "running":
+            return PostflightResult(ok=False, summary="Postflight already running", stage="running")
 
         step_results: list[dict] = []
         self.manager.update_metadata(

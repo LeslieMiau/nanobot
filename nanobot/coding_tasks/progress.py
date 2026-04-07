@@ -11,9 +11,14 @@ from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.postflight import CodexPostflightRunner
 from nanobot.coding_tasks.reporting import detect_waiting_reason, inspect_repo_snapshot
 from nanobot.coding_tasks.types import (
+    FAILURE_POSTFLIGHT,
     FAILURE_SESSION_DISAPPEARED,
     FAILURE_STALE,
     FAILURE_TIMEOUT,
+    TASK_METADATA_POSTFLIGHT_RESULT,
+    TASK_METADATA_POSTFLIGHT_SUMMARY,
+    TASK_METADATA_PRESERVE_FAILURE_WORKTREE,
+    CodingTask,
     WAITING_REASON_KIND_WORKER_EXIT_REVIEW,
     WAITING_REASON_KIND_WORKER_INPUT,
     now_ms,
@@ -171,6 +176,16 @@ def build_task_progress_report(repo_path: str | Path, pane_output: str) -> TaskP
     )
 
 
+def build_status_refresh_kwargs(task: CodingTask, launcher: CodexWorkerLauncher | None) -> dict[str, bool]:
+    """Build kwargs for refresh_task() based on tmux session liveness."""
+    if not task.tmux_session or launcher is None:
+        return {}
+    has_session = getattr(launcher, "has_session", None)
+    if not callable(has_session):
+        return {}
+    return {"session_missing": not has_session(task.tmux_session)}
+
+
 class CodexProgressMonitor:
     """Poll tmux-backed Codex sessions and refresh persisted task summaries."""
 
@@ -319,7 +334,20 @@ class CodexProgressMonitor:
         self.manager.mark_failed(task.id, summary=failure_summary)
 
     def _complete_via_postflight(self, task, report: TaskProgressReport) -> None:
-        result = self.postflight.run(task)
+        try:
+            result = self.postflight.run(task)
+        except Exception as exc:
+            summary = f"{FAILURE_POSTFLIGHT}: unexpected error: {type(exc).__name__}: {exc}"
+            self.manager.update_metadata(
+                task.id,
+                updates={
+                    TASK_METADATA_POSTFLIGHT_RESULT: "failed",
+                    TASK_METADATA_POSTFLIGHT_SUMMARY: summary,
+                    TASK_METADATA_PRESERVE_FAILURE_WORKTREE: True,
+                },
+            )
+            self.manager.mark_failed(task.id, summary=summary)
+            return
         if result.ok:
             completion_summary = result.summary or report.latest_note or report.summary or "Repo harness completed"
             self.manager.mark_completed(task.id, summary=completion_summary)

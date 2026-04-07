@@ -11,7 +11,7 @@ from nanobot.command.router import CommandContext, CommandRouter
 from nanobot.coding_tasks.harness import detect_repo_harness
 from nanobot.coding_tasks.manager import CodexWorkerManager
 from nanobot.coding_tasks.policy import CodingTaskPolicy
-from nanobot.coding_tasks.progress import CodexProgressMonitor, summarize_plan_progress
+from nanobot.coding_tasks.progress import CodexProgressMonitor, build_status_refresh_kwargs, summarize_plan_progress
 from nanobot.coding_tasks.repo_resolver import RepoRefResolver
 from nanobot.coding_tasks.reporting import (
     build_completion_report,
@@ -466,7 +466,7 @@ def _make_control_handler(
         if is_status_request:
             current_task = task
             if monitor and task.status in {"starting", "running", "waiting_user"}:
-                report = monitor.refresh_task(task.id, **_status_refresh_kwargs(task, launcher))
+                report = monitor.refresh_task(task.id, **build_status_refresh_kwargs(task, launcher))
                 current_task = manager.require_task(task.id)
             else:
                 report = monitor.build_task_report(task.id) if monitor else None
@@ -703,15 +703,16 @@ def _format_task_list(
     return "\n".join(lines)
 
 
-def _status_refresh_kwargs(task, launcher: CodexWorkerLauncher | None) -> dict[str, bool]:
-    if not task.metadata.get("worktree_path"):
-        return {}
-    if not task.tmux_session or launcher is None:
-        return {}
-    has_session = getattr(launcher, "has_session", None)
-    if not callable(has_session):
-        return {}
-    return {"session_missing": not has_session(task.tmux_session)}
+
+_STATUS_EMOJI = {
+    "running": "🟢",
+    "starting": "⏳",
+    "waiting_user": "⏸",
+    "completed": "✅",
+    "failed": "❌",
+    "cancelled": "⛔",
+    "queued": "⏳",
+}
 
 
 def _format_task_status(
@@ -723,37 +724,29 @@ def _format_task_status(
     plan_features: list[dict] | None = None,
 ) -> str:
     repo_name = repo_display_name(task)
+    emoji = _STATUS_EMOJI.get(task.status, "")
     lines = [
         f"**{note}** · `{repo_name}`",
-        f"**状态**: {task.status}",
+        f"**状态**: {task.status} {emoji}",
         f"**目标**: {task.goal}",
     ]
-    if task.branch_name:
-        lines.append(f"**分支**: {task.branch_name}")
-    elif worktree_branch := task_worktree_branch(task):
-        lines.append(f"**worktree 分支**: {worktree_branch}")
-    if recent_commit := task.metadata.get("recent_commit_summary"):
-        lines.append(f"**最近提交**: {recent_commit}")
-    if latest_note := task.metadata.get("latest_note"):
-        lines.append(f"**最近记录**: {latest_note}")
-    progress = _truncate_line(task.last_progress_summary or report_summary, limit=300)
-    if progress:
-        lines.append(f"**最近进展**: {progress}")
+    branch = task_worktree_branch(task) or task.branch_name
+    if branch:
+        lines.append(f"**分支**: `{branch}`")
     if plan_features:
         completed = sum(1 for f in plan_features if f.get("passes"))
         total = len(plan_features)
         bar = _progress_bar(completed, total)
-        lines.append(f"**PLAN 进度**: {bar} {completed}/{total} 项")
-        max_display = 10 if total > 15 else total
-        for i, feat in enumerate(plan_features[:max_display]):
-            icon = "✅" if feat.get("passes") else "⬜"
-            label = feat.get("description") or f"Feature {feat.get('id', i + 1)}"
-            label = _truncate_line(label, limit=60)
-            lines.append(f"{icon} {i + 1}. {label}")
-        if total > max_display:
-            lines.append(f"... 及其他 {total - max_display} 项")
-    if recoverable:
-        lines.append("**可恢复**: 是")
+        lines.append(f"**进度**: {bar} {completed}/{total} 项")
+    latest = task.metadata.get("latest_note") or task.metadata.get("recent_commit_summary") or ""
+    if latest:
+        lines.append(f"**最近**: {_truncate_line(latest, limit=80)}")
+    if task.status in {"starting", "running"}:
+        lines.append("**操作**: `状态` 刷新 · `/coding pause` · `/coding stop`")
+    elif task.status == "waiting_user":
+        lines.append("**操作**: `继续` · `取消` · `/coding stop`")
+    elif task.status == "failed":
+        lines.append("**操作**: `继续` 重试 · `/coding stop` 终止")
     return "\n".join(lines)
 
 
