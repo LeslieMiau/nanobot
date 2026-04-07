@@ -32,3 +32,11 @@
   - restarted `nanobot` gateway in tmux pane `nanobot:1.0`; logs show `Telegram bot @kimmydoomyBot connected` again at `2026-04-07 09:24:33`
 - Remaining harness bookkeeping:
   - a subset of stretch-plan items remains intentionally `passes: false` because this session focused on the user-requested postflight flow and the `list/status` inconsistency, not on every optional reporting/audit enhancement from the expanded micro-plan.
+
+## Session update - 2026-04-07 (`/coding` review handoff doc)
+- Added `docs/CODING_TASK_POSTFLIGHT_REVIEW.md` for Opus 4.6 review.
+- The handoff document summarizes:
+  - the exact scope of the `/coding` postflight and status-sync patch
+  - the new code paths and files worth reviewing
+  - real smoke evidence and targeted pytest evidence
+  - known non-goals and the highest-risk review questions
