@@ -1,0 +1,14 @@
+## Harness initialized - 2026-04-07 (`/coding` postflight + status sync)
+- Task summary:
+  - Started a new harness for the `/coding` follow-up after the previous harness cleanup removed `PLAN.json` and `PROGRESS.md`.
+  - The approved scope is twofold:
+    - implement a real `/coding` completion postflight that runs repository validation, then merges to `main`, then pushes to `origin`
+    - fix the inconsistency where Telegram `/coding list` can show a task as completed while `/coding status` still shows it as running
+- Baseline validation before edits:
+  - `bash ~/.codex/scripts/global-init.sh` -> completed with the same known repository-wide failure in `tests/test_coding_mode.py` (`CodingConfig` import drift).
+  - `PROGRESS.md` / `PLAN.json` were absent at session start because the previous harness had already cleaned them up.
+- Current findings:
+  - Telegram `/coding list` refreshes active tasks before rendering, but Telegram `/coding status` uses a stale pre-refresh task object and only builds a read-only report. This can produce `list=completed` while `status=running`.
+  - The current coding-task system has no explicit postflight gate that enforces `test -> merge main -> push origin` before marking a Telegram coding task completed.
+- Known caveat carried into this harness:
+  - Repository-wide pytest still stops early on `tests/test_coding_mode.py` because `nanobot.config.schema.CodingConfig` cannot be imported. This is treated as unrelated baseline drift unless it directly blocks the `/coding` changes.
