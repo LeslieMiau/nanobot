@@ -1,35 +1,37 @@
 # 构建报告 — 第 1 轮
 
 ## 完成的变更
-- 建立了新的 Voice Bridge harness 状态：`PLAN.json`、`PROGRESS.md`、`.harness/spec.md`、`.harness/contract.md`、`.harness/status.json`
-- 在 `ios/VoiceBridge/` 下建立了自含子树，包括 `README.md`、`Docs/`、`AppShell/`、`Package.swift`、`Sources/BridgeCore/`、`Tests/BridgeCoreTests/`
-- 新增了可在当前机器验证的 `BridgeCore` Swift Package，实现统一文本回合协议、nanobot `/chat` backend、错误映射、回复截断、配置存储和本地历史存储
-- 将 AppShell scaffold 改为依赖 `BridgeCore`，不再在 Siri/UI 层复制桥接协议和 backend 实现
-- 修正了 `AskBridgeIntent.swift` 和 `VoiceBridgeShortcuts.swift`，让 `AppShell/*.swift` 可以在当前 macOS SDK + `BridgeCore` 模块上完成静态 typecheck
-- 让仓库根 `init.sh` 在新增 iOS 子树后继续保持通过
+
+- 在 Telegram 轮询请求层记录 `getUpdates` 的开始/完成状态，使“轮询是否真实推进”变成运行态可观测信号。
+- 为 watchdog 增加 `poll-stalled` 判定，覆盖“polling task 仍存活但请求长时间不返回”的假死场景。
+- 扩展 Telegram 运行态状态输出，增加轮询状态、最近开始/完成时间和 in-flight 标记。
+- 补充针对性回归测试，覆盖轮询推进、卡死恢复和误判控制。
 
 ## 与上轮的差异
+
 - N/A（首轮）
 
 ## Git 提交
-- `d11359c` harness: initialize voice bridge v1 plan
-- `ed44073` feat(voice-bridge): scaffold app shell and docs
-- 当前工作树还包含一个待提交 checkpoint：BridgeCore Swift Package、focused tests、以及 AppShell 对 BridgeCore 的对齐修正
+
+- 待本轮 checkpoint 提交
 
 ## 自评
-- 当前最有价值的结果是：在没有完整 Xcode 的环境下，核心桥接协议和 `/chat` transport 已经进入可测试状态，不再只是文档或概念图
-- AppShell 现在至少具备静态编译证据，不再只是“看起来像 SwiftUI / AppIntents 源码”
-- 当前最大的未完成项是：真实 iPhone Siri / App Intent 运行时还无法在这台机器上验收，不能把 scaffold 误报成已交付产品
+
+- 当前修复刻意保持在 Telegram channel 局部，没有把问题扩散到全局代理管理或跨通道架构层。
+- 运行态 smoke 已验证真实 gateway 进程能够反复完成空返回的 `getUpdates` 调用，这证明“空闲但仍推进”的健康形态仍然成立。
+- `/status` 的新轮询状态输出通过测试覆盖，但未能在真实 Telegram 会话中手工触发一次用户入站，因此“恢复后重新收到真实用户消息”仍需后续独立 QA 补证。
 
 ## 已知限制
-- 本机缺少完整 Xcode / iOS SDK，`xcodebuild` 和 `simctl` 不可用
-- AppShell/SwiftUI/AppIntents 代码目前仍处于“源码已落地、运行时待验证”阶段
-- 还没有生成 QA 轮次报告；下一步需要 evaluator 对本轮产出给出 pass/fail 判断
+
+- 本轮没有做跨机器或跨代理实现差异分析，只处理当前本机固定代理链路下的假死盲区。
+- 真实 smoke 证明了轮询持续推进和 gateway 正常重启，但没有在本轮里人为构造一次真实代理卡死。
 
 ## 运行方式
-- Repo baseline: `bash init.sh`
-- BridgeCore tests: `cd ios/VoiceBridge && swift test`
-- 环境 gate probe:
-  - `xcode-select -p`
-  - `xcodebuild -showsdks`
-  - `xcrun simctl list devices available`
+
+- 启动：`tmux` 现有 pane 内执行 `.venv/bin/python -m nanobot.cli.commands gateway -v`
+- 测试：
+  - `.venv/bin/pytest tests/channels/test_telegram_channel.py -q`
+  - `.venv/bin/pytest tests/cli/test_restart_command.py -q`
+- 运行态验证：
+  - 在现有 `nanobot:1.0` pane 原地重启 gateway
+  - 观察 `getUpdates` 日志是否能持续出现 “finished with return value []” 并随即发起下一轮请求

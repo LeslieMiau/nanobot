@@ -12,7 +12,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from loguru import logger
 from pydantic import Field
@@ -166,6 +166,7 @@ _WATCHDOG_ERROR_THRESHOLD = 3
 _WATCHDOG_PROBE_TIMEOUT_S = 15.0
 _WATCHDOG_RESTART_BACKOFF_S = 5.0
 _WATCHDOG_MAX_CHANNEL_RESTARTS = 3
+_WATCHDOG_POLL_STALL_S = 90.0
 
 
 @dataclass
@@ -196,6 +197,7 @@ class TelegramConfig(Base):
     watchdog_error_threshold: int = Field(default=_WATCHDOG_ERROR_THRESHOLD, ge=1)
     watchdog_restart_backoff_s: float = Field(default=_WATCHDOG_RESTART_BACKOFF_S, ge=0.0)
     watchdog_max_channel_restarts: int = Field(default=_WATCHDOG_MAX_CHANNEL_RESTARTS, ge=1)
+    watchdog_poll_stall_s: float = Field(default=_WATCHDOG_POLL_STALL_S, ge=1.0)
     watchdog_notify_admin: bool = True
 
 
@@ -248,6 +250,8 @@ class TelegramChannel(BaseChannel):
         self._restart_lock = asyncio.Lock()
         self._probe_failures = 0
         self._watchdog_restart_failures = 0
+        self._poll_inflight_started_monotonic: float | None = None
+        self._last_poll_completed_monotonic: float | None = None
         self._runtime_status = self._new_runtime_status()
         self._runtime_status["effective_proxy"] = self._resolve_proxy_settings()[2]
         self._runtime_status["runtime_source"] = str(Path(__file__).resolve().parents[2])
@@ -266,13 +270,18 @@ class TelegramChannel(BaseChannel):
             "last_probe_ok_at": None,
             "last_channel_restart_at": None,
             "last_poll_error_at": None,
+            "last_poll_started_at": None,
+            "last_poll_completed_at": None,
+            "last_poll_duration_ms": None,
             "last_send_error_at": None,
             "consecutive_poll_errors": 0,
             "consecutive_send_errors": 0,
             "polling_task_alive": False,
+            "poll_request_inflight": False,
             "channel_restart_count": 0,
             "watchdog_restart_failures": 0,
             "last_error_summary": None,
+            "last_poll_state": "idle",
             "runtime_source": "unknown",
             "running": False,
         }
@@ -313,6 +322,30 @@ class TelegramChannel(BaseChannel):
         self._runtime_status["consecutive_send_errors"] += 1
         self._set_last_error_summary("send", exc)
 
+    def _record_poll_request_started(self) -> None:
+        self._poll_inflight_started_monotonic = time.monotonic()
+        self._runtime_status["last_poll_started_at"] = self._now_iso()
+        self._runtime_status["poll_request_inflight"] = True
+        self._runtime_status["last_poll_state"] = "running"
+
+    def _record_poll_request_finished(self, exc: Exception | None = None) -> None:
+        finished_at = self._now_iso()
+        finished_monotonic = time.monotonic()
+        started_monotonic = self._poll_inflight_started_monotonic or finished_monotonic
+        self._poll_inflight_started_monotonic = None
+        self._last_poll_completed_monotonic = finished_monotonic
+        self._runtime_status["last_poll_completed_at"] = finished_at
+        self._runtime_status["last_poll_duration_ms"] = max(
+            int((finished_monotonic - started_monotonic) * 1000),
+            0,
+        )
+        self._runtime_status["poll_request_inflight"] = False
+        if exc is None:
+            self._runtime_status["last_poll_state"] = "ok"
+            self._clear_poll_errors()
+        else:
+            self._runtime_status["last_poll_state"] = "error"
+
     def _record_inbound_success(self) -> None:
         self._runtime_status["last_inbound_at"] = self._now_iso()
 
@@ -325,6 +358,15 @@ class TelegramChannel(BaseChannel):
 
     def _clear_send_errors(self) -> None:
         self._runtime_status["consecutive_send_errors"] = 0
+
+    def _get_poll_stall_reason(self) -> str | None:
+        started_monotonic = self._poll_inflight_started_monotonic
+        if started_monotonic is None:
+            return None
+        stalled_for = time.monotonic() - started_monotonic
+        if stalled_for <= self.config.watchdog_poll_stall_s:
+            return None
+        return f"getUpdates stalled for {int(stalled_for)}s"
 
     def get_runtime_status(self) -> dict[str, Any]:
         status = dict(self._runtime_status)
@@ -351,6 +393,61 @@ class TelegramChannel(BaseChannel):
         self._runtime_status["polling_task_alive"] = alive
         return alive
 
+    def _make_poll_request(
+        self,
+        *,
+        connection_pool_size: int,
+        pool_timeout: float,
+        connect_timeout: float,
+        read_timeout: float,
+        proxy: str | None,
+        trust_env: bool,
+    ):
+        request_cls = HTTPXRequest
+        request_kwargs = {
+            "connection_pool_size": connection_pool_size,
+            "pool_timeout": pool_timeout,
+            "connect_timeout": connect_timeout,
+            "read_timeout": read_timeout,
+            "proxy": proxy,
+            "httpx_kwargs": {"trust_env": trust_env},
+        }
+        if not hasattr(request_cls, "do_request"):
+            return request_cls(**request_kwargs)
+
+        on_request_start: Callable[[], None] = self._record_poll_request_started
+        on_request_finish: Callable[[Exception | None], None] = self._record_poll_request_finished
+
+        class _TrackedPollRequest(request_cls):
+            __slots__ = ("_on_request_start", "_on_request_finish")
+
+            def __init__(
+                self,
+                *,
+                on_request_start: Callable[[], None],
+                on_request_finish: Callable[[Exception | None], None],
+                **kwargs,
+            ) -> None:
+                super().__init__(**kwargs)
+                self._on_request_start = on_request_start
+                self._on_request_finish = on_request_finish
+
+            async def do_request(self, *args, **kwargs):
+                self._on_request_start()
+                try:
+                    result = await super().do_request(*args, **kwargs)
+                except Exception as exc:
+                    self._on_request_finish(exc)
+                    raise
+                self._on_request_finish(None)
+                return result
+
+        return _TrackedPollRequest(
+            on_request_start=on_request_start,
+            on_request_finish=on_request_finish,
+            **request_kwargs,
+        )
+
     def _build_application(self) -> Application:
         proxy, trust_env, effective_proxy = self._resolve_proxy_settings()
         self._runtime_status["effective_proxy"] = effective_proxy
@@ -364,13 +461,13 @@ class TelegramChannel(BaseChannel):
             proxy=proxy,
             httpx_kwargs={"trust_env": trust_env},
         )
-        poll_request = HTTPXRequest(
+        poll_request = self._make_poll_request(
             connection_pool_size=4,
             pool_timeout=self.config.pool_timeout,
             connect_timeout=30.0,
             read_timeout=30.0,
             proxy=proxy,
-            httpx_kwargs={"trust_env": trust_env},
+            trust_env=trust_env,
         )
         app = (
             Application.builder()
@@ -428,6 +525,7 @@ class TelegramChannel(BaseChannel):
             drop_pending_updates=True,
             error_callback=self._on_polling_error,
         )
+        self._record_poll_request_started()
         self._clear_poll_errors()
         self._clear_send_errors()
         self._probe_failures = 0
@@ -453,7 +551,10 @@ class TelegramChannel(BaseChannel):
         self._app = None
         self._bot_user_id = None
         self._bot_username = None
+        self._poll_inflight_started_monotonic = None
         self._runtime_status["polling_task_alive"] = False
+        self._runtime_status["poll_request_inflight"] = False
+        self._runtime_status["last_poll_state"] = "stopped"
         self._runtime_status["running"] = False
 
     async def _probe_connectivity(self) -> bool:
@@ -549,6 +650,7 @@ class TelegramChannel(BaseChannel):
                 "app-not-running": "app-not-running",
                 "updater-not-running": "updater-not-running",
                 "polling-task-dead": "polling-task-dead",
+                "poll-stalled": "poll-stalled",
             }.get(reason, reason)
             try:
                 await self._restart_application(restart_reason)
@@ -575,6 +677,11 @@ class TelegramChannel(BaseChannel):
                     continue
                 if not self._is_polling_task_alive():
                     await self._recover_if_needed("polling-task-dead", probe_before_restart=False)
+                    continue
+                if stall_reason := self._get_poll_stall_reason():
+                    self._set_last_error_summary("poll", stall_reason)
+                    self._runtime_status["last_poll_state"] = "stalled"
+                    await self._recover_if_needed("poll-stalled", probe_before_restart=False)
                     continue
                 if self._runtime_status["consecutive_poll_errors"] >= self.config.watchdog_error_threshold:
                     await self._recover_if_needed("poll")

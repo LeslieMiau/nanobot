@@ -474,6 +474,10 @@ def build_channel_status_lines(channel_status: dict[str, Any] | None) -> list[st
     runtime_source = runtime.get("runtime_source") or "unknown"
     last_probe_ok = _short_status_time(runtime.get("last_probe_ok_at"))
     poller = "alive" if runtime.get("polling_task_alive") else "down"
+    poll_state = runtime.get("last_poll_state") or "unknown"
+    poll_inflight = "yes" if runtime.get("poll_request_inflight") else "no"
+    last_poll_started = _short_status_time(runtime.get("last_poll_started_at"))
+    last_poll_completed = _short_status_time(runtime.get("last_poll_completed_at"))
     channel_restarts = runtime.get("channel_restart_count", 0)
     last_restart = _short_status_time(runtime.get("last_channel_restart_at"))
     wd_failures = runtime.get("watchdog_restart_failures", 0)
@@ -489,6 +493,10 @@ def build_channel_status_lines(channel_status: dict[str, Any] | None) -> list[st
                 f"\U0001f550 TG I/O: in={_short_status_time(runtime.get('last_inbound_at'))} "
                 f"/ out={_short_status_time(runtime.get('last_outbound_at'))} "
                 f"/ probe={last_probe_ok} / reconnects={reconnects}"
+            ),
+            (
+                f"\U0001f4e5 TG Poll: state={poll_state} / inflight={poll_inflight} "
+                f"/ start={last_poll_started} / done={last_poll_completed}"
             ),
             (
                 f"\U0001f504 TG Liveness: poller={poller} / restarts={channel_restarts} "

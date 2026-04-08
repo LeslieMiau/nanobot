@@ -1,5 +1,6 @@
 import asyncio
 from pathlib import Path
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -546,6 +547,25 @@ async def test_watchdog_records_probe_success_timestamp(monkeypatch) -> None:
     assert channel.get_runtime_status()["last_probe_ok_at"] is not None
 
 
+def test_poll_progress_success_updates_runtime_status() -> None:
+    channel = TelegramChannel(
+        TelegramConfig(enabled=True, token="123:abc", allow_from=["*"]),
+        MessageBus(),
+    )
+    channel._runtime_status["consecutive_poll_errors"] = 2
+
+    channel._record_poll_request_started()
+    channel._record_poll_request_finished()
+
+    status = channel.get_runtime_status()
+    assert status["last_poll_started_at"] is not None
+    assert status["last_poll_completed_at"] is not None
+    assert status["last_poll_duration_ms"] is not None
+    assert status["poll_request_inflight"] is False
+    assert status["last_poll_state"] == "ok"
+    assert status["consecutive_poll_errors"] == 0
+
+
 @pytest.mark.asyncio
 async def test_watchdog_loop_restarts_when_updater_not_running(monkeypatch) -> None:
     channel = TelegramChannel(
@@ -593,6 +613,74 @@ async def test_watchdog_loop_restarts_when_polling_task_is_done(monkeypatch) -> 
     await channel._watchdog_loop()
 
     recover.assert_awaited_once_with("polling-task-dead", probe_before_restart=False)
+
+
+@pytest.mark.asyncio
+async def test_watchdog_loop_restarts_when_poll_request_stalls(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            watchdog_interval_s=0,
+            watchdog_poll_stall_s=1,
+        ),
+        MessageBus(),
+    )
+    channel._running = True
+    channel._app = _FakeApp(lambda: None)
+    channel._app.running = True
+    channel._app.updater.running = True
+    channel._app.updater._Updater__polling_task = asyncio.get_running_loop().create_future()
+    channel._poll_inflight_started_monotonic = time.monotonic() - 5
+    channel._runtime_status["poll_request_inflight"] = True
+    channel._runtime_status["last_poll_state"] = "running"
+
+    async def _recover(*args, **kwargs):
+        channel._running = False
+
+    recover = AsyncMock(side_effect=_recover)
+    monkeypatch.setattr(channel, "_recover_if_needed", recover)
+    monkeypatch.setattr("nanobot.channels.telegram.asyncio.sleep", AsyncMock(return_value=None))
+
+    await channel._watchdog_loop()
+
+    recover.assert_awaited_once_with("poll-stalled", probe_before_restart=False)
+    assert "stalled" in (channel.get_runtime_status()["last_error_summary"] or "")
+
+
+@pytest.mark.asyncio
+async def test_watchdog_loop_does_not_restart_recent_poll_request(monkeypatch) -> None:
+    channel = TelegramChannel(
+        TelegramConfig(
+            enabled=True,
+            token="123:abc",
+            allow_from=["*"],
+            watchdog_interval_s=0,
+            watchdog_poll_stall_s=30,
+        ),
+        MessageBus(),
+    )
+    channel._running = True
+    channel._app = _FakeApp(lambda: None)
+    channel._app.running = True
+    channel._app.updater.running = True
+    channel._app.updater._Updater__polling_task = asyncio.get_running_loop().create_future()
+    channel._poll_inflight_started_monotonic = time.monotonic()
+    channel._runtime_status["poll_request_inflight"] = True
+
+    async def _probe() -> bool:
+        channel._running = False
+        return True
+
+    recover = AsyncMock()
+    monkeypatch.setattr(channel, "_recover_if_needed", recover)
+    monkeypatch.setattr(channel, "_probe_connectivity", AsyncMock(side_effect=_probe))
+    monkeypatch.setattr("nanobot.channels.telegram.asyncio.sleep", AsyncMock(return_value=None))
+
+    await channel._watchdog_loop()
+
+    recover.assert_not_awaited()
 
 
 @pytest.mark.asyncio

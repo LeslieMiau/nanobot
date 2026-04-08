@@ -210,12 +210,17 @@ class TestRestartCommand:
                     "last_probe_ok_at": "2026-04-03T08:10:04+08:00",
                     "last_channel_restart_at": "2026-04-03T08:00:00+08:00",
                     "last_poll_error_at": None,
+                    "last_poll_started_at": "2026-04-03T08:10:01+08:00",
+                    "last_poll_completed_at": "2026-04-03T08:10:02+08:00",
+                    "last_poll_duration_ms": 11873,
                     "last_send_error_at": None,
                     "consecutive_poll_errors": 0,
                     "consecutive_send_errors": 0,
                     "polling_task_alive": True,
+                    "poll_request_inflight": False,
                     "channel_restart_count": 1,
                     "last_error_summary": None,
+                    "last_poll_state": "ok",
                     "runtime_source": "/Users/miau/Documents/nanobot",
                     "running": True,
                 },
@@ -228,6 +233,7 @@ class TestRestartCommand:
 
         assert response is not None
         assert "Telegram: running" in response.content
+        assert "TG Poll: state=ok" in response.content
         assert "proxy=explicit:http://127.0.0.1:1082" in response.content
         assert "source=/Users/miau/Documents/nanobot" in response.content
 
@@ -282,12 +288,17 @@ def test_channels_status_shows_runtime_details(monkeypatch):
                         "last_probe_ok_at": "2026-04-03T08:10:05+08:00",
                         "last_channel_restart_at": "2026-04-03T08:00:00+08:00",
                         "last_poll_error_at": None,
+                        "last_poll_started_at": "2026-04-03T08:10:01+08:00",
+                        "last_poll_completed_at": "2026-04-03T08:10:02+08:00",
+                        "last_poll_duration_ms": 11873,
                         "last_send_error_at": None,
                         "consecutive_poll_errors": 0,
                         "consecutive_send_errors": 0,
                         "polling_task_alive": True,
+                        "poll_request_inflight": False,
                         "channel_restart_count": 1,
                         "last_error_summary": None,
+                        "last_poll_state": "ok",
                         "runtime_source": "/Users/miau/Documents/nanobot",
                         "running": True,
                     },
@@ -305,6 +316,7 @@ def test_channels_status_shows_runtime_details(monkeypatch):
 
     assert result.exit_code == 0
     assert "Telegram" in result.stdout
+    assert "state=ok" in result.stdout
     assert "explicit:http://127.0.0.1:1082" in result.stdout
     assert "/Users/miau/Documents/nanobot" in result.stdout
 
