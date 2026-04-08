@@ -1,17 +1,27 @@
 {
-  "phase": "building",
+  "phase": "complete",
   "round": 1,
   "max_rounds": 3,
   "scores": {
-  "latest_round": 0,
-    "criteria": {},
-    "weighted_average": 0.0,
-    "passed": false
+    "latest_round": 1,
+    "criteria": {
+      "故障检测准确性": 7,
+      "恢复可靠性": 7,
+      "误重启控制": 7,
+      "日志与状态可观测性": 8,
+      "当前环境可验证性": 7
+    },
+    "weighted_average": 7.1,
+    "passed": true
   },
   "started_at": "2026-04-09T07:15:38+08:00",
-  "last_updated": "2026-04-09T07:21:54+08:00",
+  "last_updated": "2026-04-09T07:41:12+08:00",
   "planner_done": true,
   "user_confirmed": true,
   "task": "telegram-long-poll-watchdog-hardening",
-  "archived_harness": ".harness.backup-20260409-071538"
+  "archived_harness": ".harness.backup-20260409-071538",
+  "residual_risks": [
+    "真实代理链路下的 poll-stalled 恢复分支尚未做受控故障注入 smoke。",
+    "当前修复主要覆盖 in-flight getUpdates 假死，未额外扩展到 completed-after-silence 的长期静默门槛。"
+  ]
 }

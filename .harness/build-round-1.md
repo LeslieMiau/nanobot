@@ -13,7 +13,7 @@
 
 ## Git 提交
 
-- 待本轮 checkpoint 提交
+- `b75c7b3` fix(telegram): harden polling stall watchdog
 
 ## 自评
 
@@ -35,3 +35,4 @@
 - 运行态验证：
   - 在现有 `nanobot:1.0` pane 原地重启 gateway
   - 观察 `getUpdates` 日志是否能持续出现 “finished with return value []” 并随即发起下一轮请求
+  - 本轮实际重启后，真实进程已连续完成至少两轮空返回 `getUpdates`，证明“空闲但仍推进”的健康形态没有被误判为故障
